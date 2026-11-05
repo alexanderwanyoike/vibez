@@ -8,6 +8,9 @@ pub const PANE_GAP: f32 = 8.0;
 /// Height of the status bar along the bottom of the window.
 pub const STATUS_HEIGHT: f32 = 26.0;
 
+/// The shortest the detail card gets in any workspace.
+pub const DETAIL_PANEL_MIN_HEIGHT: f32 = 180.0;
+
 /// A region's left edge and width, in window pixels.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Span {
@@ -38,6 +41,22 @@ pub fn detail_height_at(cursor_y: f32, window_height: f32) -> f32 {
     detail_bottom - (cursor_y + PANE_GAP / 2.0)
 }
 
+/// The shortest a dragged divider leaves the Mix card: room for the send
+/// bank switch, the strip headers and the top of their EQ.
+pub const MIX_CARD_MIN_HEIGHT: f32 = 120.0;
+
+/// The detail card's height in Mix, in a work column `column` tall over a
+/// desk `desk` tall: where the divider was `dragged`, or until then whatever
+/// the whole desk leaves below it. The detail card's minimum outranks the
+/// Mix card's on a window too short for both.
+pub fn mix_detail_height(column: f32, desk: f32, dragged: Option<f32>) -> f32 {
+    let below_divider = column - PANE_GAP;
+    let tallest = (below_divider - MIX_CARD_MIN_HEIGHT).max(DETAIL_PANEL_MIN_HEIGHT);
+    dragged
+        .unwrap_or(below_divider - desk)
+        .clamp(DETAIL_PANEL_MIN_HEIGHT, tallest)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -65,5 +84,14 @@ mod tests {
         assert_eq!(browser_width_at(442.0), 430.0);
         // A detail card from 566 down to the gap above the 26 px status bar.
         assert_eq!(detail_height_at(562.0, 900.0), 300.0);
+    }
+
+    #[test]
+    fn mix_shows_its_whole_desk_until_the_detail_card_is_at_its_minimum() {
+        assert_eq!(mix_detail_height(900.0, 480.0, None), 412.0);
+        assert_eq!(
+            mix_detail_height(600.0, 480.0, None),
+            DETAIL_PANEL_MIN_HEIGHT
+        );
     }
 }

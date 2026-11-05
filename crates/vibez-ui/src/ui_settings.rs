@@ -26,6 +26,9 @@ pub struct UiSettings {
     pub perform_surface_width: f32,
     #[serde(default = "default_detail_panel_height")]
     pub detail_panel_height: f32,
+    /// None until Mix's divider is first dragged.
+    #[serde(default)]
+    pub mix_detail_panel_height: Option<f32>,
     #[serde(default)]
     pub arrange_grid: crate::state::GridConfig,
     #[serde(default)]
@@ -144,6 +147,7 @@ impl Default for UiSettings {
             sample_browser_width: default_sample_browser_width(),
             perform_surface_width: default_perform_surface_width(),
             detail_panel_height: default_detail_panel_height(),
+            mix_detail_panel_height: None,
             arrange_grid: crate::state::GridConfig::default(),
             clip_grid: crate::state::GridConfig::default(),
             audition_enabled: default_audition_enabled(),
@@ -502,6 +506,16 @@ mod tests {
 
         assert_eq!(loaded.arrange_grid.adaptive_bias, 7);
         assert_eq!(loaded.clip_grid.adaptive_bias, -7);
+    }
+
+    #[test]
+    fn the_mix_split_is_unset_in_an_old_file_and_roundtrips() {
+        let mix_split = |json: &str| {
+            let settings: UiSettings = serde_json::from_str(json).unwrap();
+            serde_json::to_value(settings).unwrap()["mix_detail_panel_height"].clone()
+        };
+        assert_eq!(mix_split("{}"), serde_json::Value::Null);
+        assert_eq!(mix_split(r#"{"mix_detail_panel_height": 312.0}"#), 312.0);
     }
 
     #[test]

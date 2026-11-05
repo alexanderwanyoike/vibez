@@ -260,7 +260,14 @@ impl App {
     }
 
     pub(super) fn persist_ui_settings(&mut self) {
-        let settings = UiSettings {
+        if let Err(err) = self.ui_settings().save() {
+            self.state.status_text = format!("UI settings save error: {err}");
+        }
+    }
+
+    /// The preferences as ui.json saves them.
+    fn ui_settings(&self) -> UiSettings {
+        UiSettings {
             recent_project_paths: self.state.project.recent_project_paths.clone(),
             perform_input_mapping: self.state.perform.input_mapping.clone(),
             fixed_computer_velocity: self.state.perform.fixed_computer_velocity(),
@@ -270,6 +277,7 @@ impl App {
             sample_browser_width: self.state.browser.dock_width,
             perform_surface_width: self.state.view.perform_surface_width,
             detail_panel_height: self.state.view.detail_panel_height,
+            mix_detail_panel_height: self.state.view.mix_detail_panel_height,
             arrange_grid: self.state.view.arrange_grid,
             clip_grid: self.state.view.clip_grid,
             audition_enabled: self.state.browser.audition_enabled,
@@ -294,9 +302,6 @@ impl App {
             colour_strength: crate::theme::colour_strength(),
             check_for_updates: self.state.update_check.enabled,
             last_update_check_unix: self.state.update_check.last_check_unix,
-        };
-        if let Err(err) = settings.save() {
-            self.state.status_text = format!("UI settings save error: {err}");
         }
     }
 
@@ -986,5 +991,19 @@ mod tests {
         app.clear_project_runtime();
 
         assert!(app.state.view.zoom_before_selection.is_none());
+    }
+
+    #[test]
+    fn ui_json_saves_the_mix_split_beside_the_arrange_one() {
+        let mut app = super::super::test_support::app();
+        app.state.view.mix_detail_panel_height = Some(312.0);
+
+        let saved = serde_json::to_value(app.ui_settings()).unwrap();
+
+        assert_eq!(saved["mix_detail_panel_height"], 312.0);
+        assert_eq!(
+            saved["detail_panel_height"],
+            f64::from(crate::state::DETAIL_PANEL_DEFAULT_HEIGHT)
+        );
     }
 }

@@ -66,20 +66,49 @@ impl App {
         bank_bar + DESK_PADDING + strip_height(buses)
     }
 
-    /// The Mix workspace is as tall as its desk, leaving the detail panel
-    /// the rest, but never squeezes the detail panel below its minimum.
-    pub(super) fn mix_workspace_height(&self) -> f32 {
+    /// Every strip's height on the desk, stretched to fill a Mix card
+    /// taller than the desk.
+    pub(super) fn mix_strip_height(&self) -> f32 {
+        let spare = self.mix_workspace_height() - self.mix_desk_height();
+        strip_height(self.state.project_tracks.buses.len()) + spare.max(0.0)
+    }
+
+    /// The work column under the chrome row, down to the gap above the
+    /// status bar, which the Mix card, its divider and the detail card share.
+    fn mix_column_height(&self) -> f32 {
         let chrome = match super::views_control_bar::control_bar_rows(self.state.view.window_width)
         {
             super::views_control_bar::ControlBarRows::One => 1.0,
             super::views_control_bar::ControlBarRows::Two => 2.0,
         } * super::views_control_bar_style::BAR_HEIGHT;
-        let room = self.state.view.window_height
+        self.state.view.window_height
             - chrome
             - crate::shell_layout::STATUS_HEIGHT
-            - 3.0 * crate::shell_layout::PANE_GAP
-            - super::views_detail::DETAIL_PANEL_MIN_HEIGHT;
-        self.mix_desk_height().min(room).max(0.0)
+            - crate::shell_layout::PANE_GAP
+    }
+
+    /// The Mix card's height above the divider.
+    pub(super) fn mix_workspace_height(&self) -> f32 {
+        let column = self.mix_column_height();
+        let detail = crate::shell_layout::mix_detail_height(
+            column,
+            self.mix_desk_height(),
+            self.state.view.mix_detail_panel_height,
+        );
+        (column - crate::shell_layout::PANE_GAP - detail).max(0.0)
+    }
+
+    /// The Mix detail card height a drag on the divider asks for with the
+    /// pointer at `cursor_y`.
+    pub(super) fn mix_detail_drag_height(&self, cursor_y: f32) -> f32 {
+        crate::shell_layout::mix_detail_height(
+            self.mix_column_height(),
+            self.mix_desk_height(),
+            Some(crate::shell_layout::detail_height_at(
+                cursor_y,
+                self.state.view.window_height,
+            )),
+        )
     }
 
     /// The switch between banks of buses on the send rows; none while every
@@ -162,7 +191,7 @@ impl App {
     /// the master pinned on the right.
     fn view_desk(&self) -> Element<'_, Message> {
         let buses = &self.state.project_tracks.buses;
-        let height = strip_height(buses.len());
+        let height = self.mix_strip_height();
         let strip = |track, role, number| self.view_desk_strip(track, role, number, height);
         let mut channels = row![].spacing(STRIP_GAP);
         for (index, track) in self.state.project_tracks.tracks.iter().enumerate() {
@@ -328,12 +357,15 @@ mod desk_fit_tests {
         assert_eq!(app.mix_workspace_height(), app.mix_desk_height());
 
         app.state.view.window_height = 600.0;
-        let room = 600.0
+        // Below the chrome row, the Mix card, the gap above the detail card,
+        // the detail card, and the gap above the status bar.
+        let detail = 600.0
             - super::super::views_control_bar_style::BAR_HEIGHT
-            - STATUS_HEIGHT
-            - 3.0 * PANE_GAP
-            - super::super::views_detail::DETAIL_PANEL_MIN_HEIGHT;
-        assert_eq!(app.mix_workspace_height(), room);
+            - app.mix_workspace_height()
+            - PANE_GAP
+            - PANE_GAP
+            - STATUS_HEIGHT;
+        assert_eq!(detail, crate::shell_layout::DETAIL_PANEL_MIN_HEIGHT);
     }
 
     #[test]
@@ -343,7 +375,95 @@ mod desk_fit_tests {
             - super::super::views_control_bar_style::BAR_HEIGHT
             - STATUS_HEIGHT
             - 3.0 * PANE_GAP
-            - super::super::views_detail::DETAIL_PANEL_MIN_HEIGHT;
+            - crate::shell_layout::DETAIL_PANEL_MIN_HEIGHT;
         assert!(DESK_PADDING + strip_height(2) <= room);
+    }
+}
+
+#[cfg(test)]
+mod divider_tests {
+    use crate::domains::view::ViewMsg;
+    use crate::message::Message;
+    use crate::shell_layout::DETAIL_PANEL_MIN_HEIGHT;
+    use crate::state::{Workspace, DETAIL_PANEL_DEFAULT_HEIGHT};
+
+    /// Mix in a 1440 x 900 window, with the divider held: its work column
+    /// runs 814 px from the 52 px chrome row down to the gap above the
+    /// status bar.
+    fn dragging_in_mix() -> super::App {
+        let mut app = super::super::test_support::app();
+        app.state.view.window_width = 1440.0;
+        app.state.view.window_height = 900.0;
+        app.state.view.workspace = Workspace::Mix;
+        let _ = app.update(Message::View(ViewMsg::BeginDetailPanelResize));
+        app
+    }
+
+    fn drag_to(app: &mut super::App, y: f32) {
+        let _ = app.update(Message::View(ViewMsg::CursorMoved(700.0, y)));
+    }
+
+    #[test]
+    fn the_mix_card_follows_the_divider_and_arrange_keeps_its_split() {
+        let mut app = dragging_in_mix();
+        drag_to(&mut app, 600.0);
+        assert_eq!(app.mix_workspace_height(), 544.0, "card from 52 to 596");
+        assert_eq!(
+            app.state.view.detail_panel_height,
+            DETAIL_PANEL_DEFAULT_HEIGHT
+        );
+    }
+
+    #[test]
+    fn the_divider_stops_where_the_mixer_still_shows_its_strip_headers() {
+        let mut app = dragging_in_mix();
+        drag_to(&mut app, 60.0);
+        assert_eq!(app.mix_workspace_height(), 120.0);
+    }
+
+    #[test]
+    fn the_divider_stops_where_the_detail_card_is_at_its_minimum() {
+        let mut app = dragging_in_mix();
+        drag_to(&mut app, 890.0);
+        assert_eq!(
+            app.mix_workspace_height(),
+            814.0 - 8.0 - DETAIL_PANEL_MIN_HEIGHT
+        );
+    }
+
+    #[test]
+    fn both_limits_hold_when_the_window_shrinks_after_a_drag() {
+        let mut app = dragging_in_mix();
+        drag_to(&mut app, 600.0);
+        app.state.view.window_height = 450.0;
+        assert_eq!(
+            app.mix_workspace_height(),
+            120.0,
+            "the detail card gives way"
+        );
+        app.state.view.window_height = 300.0;
+        assert_eq!(
+            app.mix_workspace_height(),
+            300.0 - 86.0 - 8.0 - DETAIL_PANEL_MIN_HEIGHT,
+            "the detail card's minimum outranks the mixer's"
+        );
+    }
+
+    #[test]
+    fn a_mix_card_taller_than_its_desk_stretches_every_strip_to_fill_it() {
+        let mut app = dragging_in_mix();
+        let natural = app.mix_strip_height();
+        drag_to(&mut app, 800.0);
+        assert_eq!(
+            app.mix_strip_height(),
+            natural + app.mix_workspace_height() - app.mix_desk_height()
+        );
+
+        drag_to(&mut app, 200.0);
+        assert_eq!(
+            app.mix_strip_height(),
+            natural,
+            "a shorter card scrolls the desk instead"
+        );
     }
 }

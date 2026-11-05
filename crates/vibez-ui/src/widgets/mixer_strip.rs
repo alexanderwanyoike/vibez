@@ -159,15 +159,16 @@ pub fn view_mixer_strip<'a>(
         }
         StripRole::Track | StripRole::Bus | StripRole::Master => {}
     }
+    let mut foot = column![].spacing(GAP);
     if is_master {
         // The sum has no pan or channel buttons; their room keeps its
         // strip level with the channels'.
-        left = left
+        foot = foot
             .push(Space::with_height(PAN_H))
             .push(Space::with_height(BUTTONS_H));
     } else {
         let pan = KnobWidget::new(track.id, track.pan, track_color);
-        left = left.push(
+        foot = foot.push(
             row![
                 canvas(pan).width(PAN_H).height(PAN_H),
                 text(format!("PAN {}", format_pan(track.pan)))
@@ -203,8 +204,13 @@ pub fn view_mixer_strip<'a>(
                 track.mute.then(th::mute_active),
                 Message::set_track_mute(track.id),
             ));
-        left = left.push(buttons);
+        foot = foot.push(buttons);
     }
+    let left = left.push(
+        container(foot)
+            .height(Length::Fill)
+            .align_y(iced::alignment::Vertical::Bottom),
+    );
 
     let fader = FaderWidget::new(track.id, track.gain, track_color);
     let meter = console::LedMeter {

@@ -244,7 +244,11 @@ impl ViewState {
             }
             ViewMsg::ResizeDetailPanel(height) => {
                 if self.detail_panel_resize_active {
-                    self.detail_panel_height = height;
+                    if self.workspace == Workspace::Mix {
+                        self.mix_detail_panel_height = Some(height);
+                    } else {
+                        self.detail_panel_height = height;
+                    }
                 }
             }
             ViewMsg::EndDetailPanelResize => {
@@ -1065,6 +1069,29 @@ mod tests {
 
         assert_eq!(view.detail_panel_height, 420.0);
         assert!(!view.detail_panel_resize_active);
+        assert!(action.persist_settings);
+    }
+
+    #[test]
+    fn dragging_the_divider_in_mix_leaves_the_arrange_split_alone() {
+        let mut view = ViewState {
+            workspace: Workspace::Mix,
+            ..ViewState::default()
+        };
+        let timeline = TimelineEditorState::default();
+
+        for msg in [
+            ViewMsg::BeginDetailPanelResize,
+            ViewMsg::ResizeDetailPanel(420.0),
+        ] {
+            view.update(msg, &timeline, ViewCtx::default());
+        }
+        let action = view.update(ViewMsg::EndDetailPanelResize, &timeline, ViewCtx::default());
+
+        assert_eq!(
+            view.detail_panel_height,
+            crate::state::DETAIL_PANEL_DEFAULT_HEIGHT
+        );
         assert!(action.persist_settings);
     }
 }

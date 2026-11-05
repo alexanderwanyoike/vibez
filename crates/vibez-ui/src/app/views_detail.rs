@@ -11,6 +11,7 @@ use vibez_core::id::{ClipId, SectionId, TrackId};
 
 use crate::icons;
 use crate::message::Message;
+use crate::shell_layout::DETAIL_PANEL_MIN_HEIGHT;
 use crate::state::{ArrangementSelection, DetailPanelTab, GridCommand, TimelineEditorState};
 use crate::theme as th;
 use crate::widgets::audio_clip_detail::audio_clip_editor_view;
@@ -19,7 +20,6 @@ use crate::widgets::piano_roll::{PianoRollWidget, VelocityLaneWidget};
 
 use super::*;
 
-pub(super) const DETAIL_PANEL_MIN_HEIGHT: f32 = 180.0;
 const DETAIL_CARD_PADDING: f32 = 10.0;
 const AUDIO_DETAIL_PANEL_PREFERRED_HEIGHT: f32 = 260.0;
 const MIDI_DETAIL_PANEL_PREFERRED_HEIGHT: f32 = 360.0;
