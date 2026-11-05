@@ -261,14 +261,25 @@ impl TransportState {
         engine.send(EngineCommand::Seek(self.position_samples));
     }
 
+    /// The engine's playhead is a sample position, so while stopped it is
+    /// moved to keep its beat and Play starts from the same place in the song.
+    pub fn retempo(&mut self, bpm: f64, engine: &mut impl EngineHandle) {
+        let beat = self.position_beats();
+        self.bpm = bpm;
+        self.bpm_text = format!("{bpm:.0}");
+        engine.send(EngineCommand::SetBpm(bpm));
+        if !self.will_play() {
+            self.position_samples = self.nearest_sample(beat);
+            engine.send(EngineCommand::Seek(self.position_samples));
+        }
+    }
+
     /// Apply a new tempo: clamp, notify the engine, remap the loop
     /// region, and report the change so warped clips can follow.
     fn set_bpm(&mut self, bpm: f64, engine: &mut impl EngineHandle) -> TransportAction {
         let bpm = bpm.clamp(20.0, 999.0);
         let old_bpm = self.bpm;
-        self.bpm = bpm;
-        self.bpm_text = format!("{bpm:.0}");
-        engine.send(EngineCommand::SetBpm(bpm));
+        self.retempo(bpm, engine);
         if self.loop_enabled {
             self.send_loop_region(engine);
         }
