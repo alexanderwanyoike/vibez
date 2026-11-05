@@ -93,14 +93,15 @@ fn note_clip(position_beats: f64) -> crate::state::UiNoteClip {
 }
 
 #[test]
-fn zoomed_out_note_clips_skip_individual_note_geometry() {
+fn note_clips_keep_their_notes_at_one_pixel_per_beat() {
     let mut content = TrackTimelineContent::default();
     content.note_clips.push(note_clip(0.0));
 
-    let canvas = track_canvas(&content, 0.01);
+    let canvas = track_canvas(&content, 0.05);
 
+    assert_eq!(canvas.geometry().pixels_per_beat(), 1.0);
     assert_eq!(canvas.note_clips.len(), 1);
-    assert!(canvas.note_clips[0].notes.is_empty());
+    assert_eq!(canvas.note_clips[0].notes.len(), 64);
 }
 
 #[test]

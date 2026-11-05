@@ -236,6 +236,7 @@ mod clips_tests;
 mod fade_drag;
 pub mod marquee;
 mod minimap;
+mod note_marks;
 mod ruler;
 
 pub use clip_drag::ClipDragAction;
