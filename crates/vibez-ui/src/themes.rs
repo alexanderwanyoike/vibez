@@ -73,31 +73,29 @@ const EQ_CONSOLE: [Color; 4] = [
     },
 ];
 
-/// The default track palette (Charcoal's): eight hues at moderate
-/// saturation and mid lightness, so clips stay tellable apart without the
-/// colour shouting over the music they hold.
+/// The default track rainbow (Charcoal's).
 pub(crate) const TRACKS_CLASSIC: [Color; 8] = [
-    rgb8(196, 116, 110),
-    rgb8(196, 151, 110),
-    rgb8(188, 166, 92),
-    rgb8(110, 196, 131),
-    rgb8(110, 184, 196),
-    rgb8(110, 145, 196),
-    rgb8(148, 110, 196),
-    rgb8(196, 110, 158),
+    rgb8(224, 96, 96),
+    rgb8(224, 144, 64),
+    rgb8(208, 192, 64),
+    rgb8(80, 176, 96),
+    rgb8(64, 160, 176),
+    rgb8(96, 128, 208),
+    rgb8(144, 96, 192),
+    rgb8(192, 96, 160),
 ];
 
-/// The default palette's hues, a little more saturated and darker so
-/// they hold up against light lanes.
+/// The default rainbow, darker and more saturated so it holds up
+/// against light lanes.
 const TRACKS_CLASSIC_LIGHT: [Color; 8] = [
-    rgb8(203, 96, 88),
-    rgb8(203, 141, 88),
-    rgb8(196, 167, 69),
-    rgb8(88, 203, 117),
-    rgb8(88, 187, 203),
-    rgb8(88, 134, 203),
-    rgb8(138, 88, 203),
-    rgb8(203, 88, 152),
+    rgb8(216, 55, 49),
+    rgb8(230, 121, 25),
+    rgb8(204, 167, 20),
+    rgb8(45, 159, 79),
+    rgb8(29, 156, 175),
+    rgb8(54, 106, 211),
+    rgb8(128, 69, 196),
+    rgb8(199, 56, 147),
 ];
 
 const TRACKS_NEON: [Color; 8] = [
