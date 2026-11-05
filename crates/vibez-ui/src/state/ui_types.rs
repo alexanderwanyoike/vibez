@@ -167,9 +167,15 @@ impl UiClip {
         )
     }
 
+    /// Only a loop lets the start marker sit past the clip end, so the
+    /// marker returns to the clip start with the region it was bounded by.
     pub(crate) fn reset_loop_region_to_clip(&mut self) {
+        let end = self.source_offset.saturating_add(self.duration);
+        if self.start_marker >= end {
+            self.start_marker = self.source_offset;
+        }
         self.loop_start = self.start_marker;
-        self.loop_end = self.source_offset.saturating_add(self.duration);
+        self.loop_end = end;
     }
 
     /// The loop region outlives its loop being off, as Ableton keeps a clip's
@@ -544,7 +550,11 @@ impl UiNoteClip {
         )
     }
 
+    /// See `UiClip::reset_loop_region_to_clip`.
     pub(crate) fn reset_loop_region_to_clip(&mut self) {
+        if self.start_marker_beats >= self.duration_beats {
+            self.start_marker_beats = 0.0;
+        }
         self.loop_start_beats = self.start_marker_beats;
         self.loop_end_beats = self.duration_beats;
     }
