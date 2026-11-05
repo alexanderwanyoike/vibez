@@ -236,3 +236,28 @@ fn double_clicking_the_loop_strip_does_not_fit() {
 
     assert!(press(&ruler, &mut state, at).is_none());
 }
+
+#[test]
+fn the_pointer_over_the_ruler_numbers_shows_it_zooms() {
+    let ruler = ruler();
+    let interaction = |state: &RulerInteractionState, at: Point| {
+        <RulerWidget as canvas::Program<Message>>::mouse_interaction(
+            &ruler,
+            state,
+            Rectangle::new(Point::ORIGIN, Size::new(800.0, 36.0)),
+            Cursor::Available(at),
+        )
+    };
+    let mut state = RulerInteractionState::default();
+    let numbers = Point::new(100.0, NUMBERS_Y);
+
+    assert_eq!(
+        interaction(&state, numbers),
+        iced::mouse::Interaction::ZoomIn
+    );
+    press(&ruler, &mut state, numbers);
+    assert_eq!(
+        interaction(&state, numbers),
+        iced::mouse::Interaction::ZoomIn
+    );
+}
