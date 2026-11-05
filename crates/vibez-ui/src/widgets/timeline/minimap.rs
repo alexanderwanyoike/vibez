@@ -168,7 +168,7 @@ impl canvas::Program<Message> for ArrangementMinimap {
             let outline = canvas::Path::rounded_rectangle(
                 iced::Point::new(left, 1.5),
                 iced::Size::new((right - left).max(1.0), h - 3.0),
-                3.0.into(),
+                super::CORNER_RADIUS.into(),
             );
             frame.stroke(
                 &outline,
