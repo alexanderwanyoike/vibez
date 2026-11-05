@@ -724,6 +724,13 @@ mod tests {
     }
 
     #[test]
+    fn the_slim_shell_gives_a_small_window_s_detail_card_the_room_its_chrome_freed() {
+        // 52 px chrome row, 26 px status bar and two 8 px gaps leave 440 px
+        // for the workspace of a 760 px window above a 226 px detail card.
+        assert_eq!(effective_detail_panel_height(360.0, 760.0, 360.0), 226.0);
+    }
+
+    #[test]
     fn audio_inspector_gets_enough_height_for_its_compact_controls() {
         assert_eq!(effective_detail_panel_height(180.0, 900.0, 260.0), 260.0);
         assert_eq!(effective_detail_panel_height(320.0, 900.0, 260.0), 315.0);
