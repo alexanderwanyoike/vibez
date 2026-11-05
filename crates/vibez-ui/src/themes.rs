@@ -707,6 +707,7 @@ pub fn save_user_theme(palette: &ThemePalette) -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::theme::Oklch;
 
     #[test]
     fn twenty_builtins_with_unique_names() {
@@ -837,16 +838,102 @@ mod tests {
         }
     }
 
-    #[test]
-    fn porcelain_lanes_sit_below_its_headers_and_charcoal_lanes_on_its_background() {
-        fn luma(c: Color) -> f32 {
-            0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
-        }
-        let porcelain = builtin_by_name("Porcelain").unwrap();
-        let charcoal = builtin_by_name("Charcoal").unwrap();
+    /// The approved mockup steps dark surfaces about 0.035 OKLCH lightness
+    /// apart; light themes step their raised shade 0.025 to stay under white.
+    const SURFACE_STEP: f32 = 0.02;
+    /// How far a control fill stands off the raised cards it sits on.
+    const CONTROL_STEP: f32 = 0.03;
+    /// Below this chroma a surface is grey and its hue is noise.
+    const TINTED: f32 = 0.01;
 
-        assert!(luma(porcelain.lane()) < luma(porcelain.bg_surface) - 0.05);
-        assert_eq!(charcoal.lane(), charcoal.bg_dark);
+    fn hue_gap(a: f32, b: f32) -> f32 {
+        ((a - b).rem_euclid(360.0)).min((b - a).rem_euclid(360.0))
+    }
+
+    #[test]
+    fn every_builtin_theme_steps_its_surfaces_in_lightness_keeping_one_hue() {
+        let mut failures = Vec::new();
+        for theme in builtins() {
+            let ramp = [
+                ("display_bg", theme.display_bg),
+                ("lane", theme.lane()),
+                ("bg_surface", theme.bg_surface),
+                ("bg_elevated", theme.bg_elevated),
+            ]
+            .map(|(role, colour)| (role, Oklch::of(colour)));
+            for pair in ramp.windows(2) {
+                let [(low, below), (high, above)] = [pair[0], pair[1]];
+                if above.lightness - below.lightness < SURFACE_STEP {
+                    failures.push(format!("{}: {high} not a step above {low}", theme.name));
+                }
+            }
+            let raised = ramp[3].1;
+            let control = Oklch::of(theme.control());
+            if (control.lightness - raised.lightness).abs() < CONTROL_STEP {
+                failures.push(format!("{}: control too close to bg_elevated", theme.name));
+            }
+            let lane = ramp[1].1;
+            if lane.chroma < TINTED {
+                continue;
+            }
+            for (role, surface) in ramp.into_iter().chain([("control", control)]) {
+                if surface.chroma < lane.chroma * 0.6 || hue_gap(surface.hue, lane.hue) > 15.0 {
+                    failures.push(format!("{}: {role} loses the lane's tint", theme.name));
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    /// Tracks this close to their palette's median lightness read as one
+    /// family. Yellow sits highest, as it must to look yellow at all.
+    const TRACK_LIGHTNESS_SPREAD: f32 = 0.13;
+    const TRACK_CHROMA: f32 = 0.095;
+
+    #[test]
+    fn every_builtin_theme_has_track_colours_of_one_lightness_and_strong_colour() {
+        let mut failures = Vec::new();
+        for theme in builtins() {
+            let tracks = theme.track_colors.map(Oklch::of);
+            let mut lightness = tracks.map(|track| track.lightness);
+            lightness.sort_by(f32::total_cmp);
+            let median = (lightness[3] + lightness[4]) / 2.0;
+            for (index, track) in tracks.iter().enumerate() {
+                if (track.lightness - median).abs() > TRACK_LIGHTNESS_SPREAD {
+                    failures.push(format!(
+                        "{}: track {index} {track:?} off {median}",
+                        theme.name
+                    ));
+                }
+                if track.chroma < TRACK_CHROMA {
+                    failures.push(format!("{}: track {index} {track:?} too grey", theme.name));
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    #[test]
+    fn every_builtin_theme_draws_its_eq_bands_from_its_own_track_colours() {
+        let mut failures = Vec::new();
+        for theme in builtins() {
+            let tracks = theme.track_colors.map(Oklch::of);
+            for (band, colour) in [
+                ("eq_lf", theme.eq_lf),
+                ("eq_lmf", theme.eq_lmf),
+                ("eq_hmf", theme.eq_hmf),
+                ("eq_hf", theme.eq_hf),
+            ] {
+                let eq = Oklch::of(colour);
+                let near_a_track = tracks
+                    .iter()
+                    .any(|track| hue_gap(track.hue, eq.hue) <= 15.0);
+                if !near_a_track || eq.chroma < TRACK_CHROMA {
+                    failures.push(format!("{}: {band} {eq:?}", theme.name));
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
 
     #[test]
