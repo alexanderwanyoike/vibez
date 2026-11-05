@@ -780,6 +780,54 @@ mod tests {
     }
 
     #[test]
+    fn a_looped_clip_a_capture_cuts_through_keeps_looping_either_side() {
+        let track_id = TrackId::new();
+        let mut arrange = Arc::new(ArrangementTimeline::default());
+        Arc::make_mut(&mut arrange)
+            .ensure(track_id)
+            .note_clips
+            .push(UiNoteClip {
+                id: ClipId::new(),
+                name: "Loop".into(),
+                position_beats: 0.0,
+                duration_beats: 16.0,
+                notes: vec![MidiNote {
+                    pitch: 36,
+                    velocity: 100,
+                    start_beat: 1.0,
+                    duration_beats: 0.5,
+                }],
+                selected_notes: Default::default(),
+                start_marker_beats: 0.0,
+                loop_enabled: true,
+                loop_start_beats: 0.0,
+                loop_end_beats: 4.0,
+                groove_grid: GrooveGrid::Off,
+            });
+        let captured = MaterializedCapture {
+            arrange_start_samples: 6,
+            arrange_end_samples: 9,
+            by_track: HashMap::new(),
+            controlled_track_ids: vec![track_id],
+            pre_capture_mutes: HashMap::new(),
+            samples_per_beat: 1.0,
+        };
+
+        apply_capture_to_arrangement(&mut arrange, captured, &mut DiscardingEngine);
+
+        let pieces = &arrange.get(track_id).unwrap().note_clips;
+        assert_eq!(
+            pieces
+                .iter()
+                .map(|clip| (clip.position_beats, clip.duration_beats, clip.loop_enabled))
+                .collect::<Vec<_>>(),
+            [(0.0, 6.0, true), (9.0, 7.0, true)]
+        );
+        // Nine beats into a four beat loop, the tail picks up one beat in.
+        assert_eq!(pieces[1].start_marker_beats, 1.0);
+    }
+
+    #[test]
     fn a_song_sized_capture_sends_commands_per_clip_not_per_note() {
         let track_id = TrackId::new();
         let pattern = |position_beats: f64| UiNoteClip {
