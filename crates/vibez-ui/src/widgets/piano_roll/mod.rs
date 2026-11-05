@@ -1058,18 +1058,6 @@ impl canvas::Program<Message> for PianoRollWidget {
                 state.shift_held = modifiers.shift();
                 state.alt_held = modifiers.alt();
             }
-            canvas::Event::Keyboard(iced::keyboard::Event::KeyPressed {
-                key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Shift),
-                ..
-            }) => {
-                state.shift_held = true;
-            }
-            canvas::Event::Keyboard(iced::keyboard::Event::KeyReleased {
-                key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Shift),
-                ..
-            }) => {
-                state.shift_held = false;
-            }
 
             // Delete/Backspace are handled centrally by the global
             // DeleteKeyPressed shortcut (context-aware, respects text
