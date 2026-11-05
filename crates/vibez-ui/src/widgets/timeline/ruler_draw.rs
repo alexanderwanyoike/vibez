@@ -81,7 +81,11 @@ impl RulerWidget {
             frame.fill_rectangle(
                 Point::new(start, 0.0),
                 Size::new(end - start, size.height),
-                theme::with_alpha(theme::accent(), 0.15),
+                theme::blend(
+                    theme::ruler_bg(),
+                    theme::accent(),
+                    theme::lane_style().loop_tint,
+                ),
             );
         }
     }
