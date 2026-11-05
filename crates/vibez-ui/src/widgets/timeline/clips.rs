@@ -896,6 +896,31 @@ impl canvas::Program<Message> for TrackClipCanvas {
             // bound here raced the piano roll's and deleted the clip while a
             // note was selected.
 
+            // Escape cancels a drag: the lane lets go of the pointer, and a
+            // fade drag, which only this lane knows of, hands its gesture
+            // back to be taken back. The app cancels a clip drag itself.
+            canvas::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+                key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
+                ..
+            }) => {
+                let cancelled = match state.drag.take() {
+                    Some(ClipDragAction::FadeClip(drag)) => Some(drag.undo_gesture),
+                    Some(ClipDragAction::FadeCurve(drag)) => Some(drag.undo_gesture),
+                    Some(ClipDragAction::CrossfadeCurve(drag)) => Some(drag.undo_gesture),
+                    Some(ClipDragAction::MoveClip { .. } | ClipDragAction::ResizeClip { .. }) => {
+                        None
+                    }
+                    other => {
+                        state.drag = other;
+                        None
+                    }
+                };
+                return (
+                    canvas::event::Status::Ignored,
+                    cancelled.map(Message::CancelUndoGesture),
+                );
+            }
+
             // -- Track shift key state for multi-select --
             canvas::Event::Keyboard(iced::keyboard::Event::ModifiersChanged(modifiers)) => {
                 state.shift_held = modifiers.shift();

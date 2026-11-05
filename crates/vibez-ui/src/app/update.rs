@@ -298,6 +298,7 @@ impl App {
             Message::UndoGesture { .. } => {
                 unreachable!("undo gesture wrappers are removed before routing")
             }
+            Message::CancelUndoGesture(gesture) => self.revert_gesture(gesture),
             Message::KeyboardInput { event, occurred_at } => {
                 return self.handle_keyboard_input(event, occurred_at);
             }

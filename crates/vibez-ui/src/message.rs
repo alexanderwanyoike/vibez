@@ -76,6 +76,9 @@ pub enum Message {
         id: UndoGestureId,
         edit: Box<Message>,
     },
+    /// A widget's gesture cancelled mid-drag: its edits are taken back and
+    /// leave no undo step.
+    CancelUndoGesture(UndoGestureId),
     /// Transport domain (playback, tempo, arrangement loop).
     Transport(crate::domains::transport::TransportMsg),
     /// Devices domain (effect chain, instruments, drum pads, menu).
