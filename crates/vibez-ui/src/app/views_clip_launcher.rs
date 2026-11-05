@@ -13,6 +13,7 @@ use crate::icons;
 use crate::message::Message;
 use crate::theme as th;
 use crate::typography::{PERFORM_DISPLAY, PERFORM_LABEL, PERFORM_TECH};
+use crate::widgets::control_style;
 
 use super::App;
 
@@ -88,6 +89,7 @@ where
     })
     .text_size(10)
     .padding([3, 6])
+    .style(control_style::list(th::accent()))
     .into()
 }
 
@@ -103,6 +105,7 @@ where
     pick_list(all, Some(selected), on_select)
         .text_size(9)
         .padding([1, 4])
+        .style(control_style::list(th::accent()))
         .into()
 }
 
@@ -388,7 +391,7 @@ impl App {
                     rows,
                 })))
                 .padding([6, 10])
-                .style(|_theme, status| choice_style(false, status))
+                .style(control_style::style(None))
         };
         let heading = row![
             text(if width < 780.0 { "" } else { "CLIPS" })
@@ -412,15 +415,15 @@ impl App {
         let actions = row![
             button(text("+ Audio").size(11))
                 .padding([6, 10])
-                .style(|_theme, status| choice_style(false, status))
+                .style(control_style::style(None))
                 .on_press(Message::Arrangement(ArrangementMsg::AddTrack)),
             button(text("+ MIDI").size(11))
                 .padding([6, 10])
-                .style(|_theme, status| choice_style(false, status))
+                .style(control_style::style(None))
                 .on_press(Message::Arrangement(ArrangementMsg::AddMidiTrack)),
             button(text(if width < 780.0 { "■" } else { "Stop clips" }).size(11))
                 .padding([6, 10])
-                .style(|_theme, status| choice_style(false, status))
+                .style(control_style::style(None))
                 .on_press(Message::Perform(PerformMsg::Clips(ClipMsg::StopAll))),
             move_window("←", -4, 0),
             move_window("→", 4, 0),
@@ -479,7 +482,10 @@ impl App {
                             .size(10)
                             .color(th::text_dim()),
                     )
-                    .padding([if compact { 3 } else { 8 }, 0])
+                    .padding(iced::Padding {
+                        top: crate::widgets::clip_slot::BUTTON_INSET,
+                        ..Default::default()
+                    })
                     .height(slot_height),
                 );
             }
@@ -554,9 +560,11 @@ impl App {
                     ]
                     .spacing(3)
                 };
-                let mut lane = column![container(header).padding([3, 8]).height(header_height)]
-                    .spacing(0)
-                    .width(Length::Fixed(lane_width));
+                let mut lane = column![container(header)
+                    .padding([3.0, crate::widgets::clip_slot::TILE_GAP / 2.0])
+                    .height(header_height)]
+                .spacing(0)
+                .width(Length::Fixed(lane_width));
                 for offset in 0..6u32 {
                     let slot_row = first_row + offset;
                     let recording =
@@ -749,7 +757,7 @@ impl App {
                             .width(Length::Fill)
                         )
                         .align_bottom(Length::Fill)
-                        .padding(crate::widgets::clip_slot::FILM_INSET + 1.0),
+                        .padding(crate::widgets::clip_slot::BUTTON_INSET),
                     ]
                     .into();
                     let cell: Element<'_, Message> = if let Some(clip) = slot {
@@ -763,7 +771,7 @@ impl App {
                                 false,
                             ))
                             .align_right(Length::Fill)
-                            .padding(crate::widgets::clip_slot::FILM_INSET + 1.0)
+                            .padding(crate::widgets::clip_slot::BUTTON_INSET)
                         ]
                         .into()
                     } else {
@@ -789,24 +797,7 @@ impl App {
             }
             workspace = workspace.push(
                 crate::widgets::quiet_scroll::vertical(
-                    container(container(grid).padding(2).width(Length::Fill).style(|_| {
-                        container::Style {
-                            background: Some(
-                                iced::gradient::Linear::new(std::f32::consts::PI)
-                                    .add_stop(0.0, th::blend(th::bg_dark(), th::text(), 0.012))
-                                    .add_stop(1.0, th::darken(th::bg_dark(), 0.82))
-                                    .into(),
-                            ),
-                            border: iced::Border {
-                                color: th::with_alpha(th::text(), 0.05),
-                                width: 1.0,
-                                radius: 4.0.into(),
-                            },
-                            ..Default::default()
-                        }
-                    }))
-                    .padding([0, 12])
-                    .width(Length::Fill),
+                    container(grid).padding([0, 12]).width(Length::Fill),
                 )
                 .width(Length::Fill)
                 .height(Length::Fill),
@@ -897,7 +888,7 @@ impl App {
             .align_y(iced::Alignment::Center),
         )
         .padding([6, 10])
-        .style(move |_, status| choice_style(active, status))
+        .style(control_style::style(active.then(th::accent)))
         .on_press(Message::Perform(PerformMsg::Capture(
             crate::domains::perform::CaptureMsg::Toggle,
         )))
