@@ -2,7 +2,9 @@
 //!
 //! The audio engine owns effective timestamps. This module snapshots the
 //! canonical Section source at those boundaries, then creates independent
-//! linear Arrange clips only after the engine confirms Capture stop.
+//! Arrange clips only after the engine confirms Capture stop. Like Ableton
+//! recording Session into the Arrangement, each launch of a looping source
+//! becomes one looping clip per track for as long as it played.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -10,12 +12,15 @@ use std::sync::Arc;
 use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::MidiNote;
+use vibez_core::time::TICKS_PER_BEAT;
 
 use crate::state::{ArrangementTimeline, TrackTimelineContent, UiClip, UiNoteClip, UndoGestureId};
 
 use super::{PerformAction, Section};
 
+mod looped_launch;
 mod performance_log;
+use looped_launch::{looped_audio_clip, looped_note_clip, LoopedLaunch};
 use performance_log::{CompletedPerformanceLog, PerformanceLog};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -144,6 +149,16 @@ pub struct MaterializedCapture {
 }
 
 impl MaterializedCapture {
+    /// Where the take begins, on the same ticks as its MIDI clips.
+    pub fn start_beat(&self) -> f64 {
+        on_tick(self.arrange_start_samples as f64 / self.samples_per_beat)
+    }
+
+    /// Where the take ends, on the same ticks as its MIDI clips.
+    pub fn end_beat(&self) -> f64 {
+        on_tick(self.arrange_end_samples as f64 / self.samples_per_beat)
+    }
+
     pub fn is_empty(&self) -> bool {
         self.by_track.values().all(|content| {
             content.clips.is_empty()
@@ -208,16 +223,40 @@ impl CompletedCapture {
                     .clock
                     .arrange_start_samples
                     .saturating_add((kept_start - i128::from(self.engine_start_samples)) as u64);
+                let looped_launch = span.source.looping.then_some(LoopedLaunch {
+                    played: CaptureWindow {
+                        source_start_samples: source_cursor,
+                        source_end_samples: source_cursor + remaining,
+                        destination_start_samples: destination_cursor,
+                        samples_per_beat,
+                    },
+                    pass_samples: section_length,
+                });
+                let looped_notes = looped_launch
+                    .and_then(|launch| looped_note_clip(content, &span.source, launch));
+                let looped_audio = looped_launch
+                    .and_then(|launch| looped_audio_clip(content, &span.source, launch));
                 while remaining > 0 && source_cursor < section_length {
                     let segment_length = remaining.min(section_length - source_cursor);
-                    append_track_window(
-                        result.by_track.entry(*track_id).or_default(),
-                        content,
-                        &span.source,
-                        source_cursor,
-                        source_cursor + segment_length,
-                        destination_cursor,
+                    let destination = result.by_track.entry(*track_id).or_default();
+                    let window = CaptureWindow {
+                        source_start_samples: source_cursor,
+                        source_end_samples: source_cursor + segment_length,
+                        destination_start_samples: destination_cursor,
                         samples_per_beat,
+                    };
+                    if looped_audio.is_none() {
+                        append_audio_window(destination, content, &span.source, window);
+                    }
+                    if looped_notes.is_none() {
+                        append_note_window(destination, content, &span.source, window);
+                    }
+                    performance_log::append_automation_window(
+                        destination,
+                        content,
+                        window.source_start_beats(),
+                        window.source_end_beats(),
+                        window.destination_start_beats(),
                     );
                     remaining -= segment_length;
                     destination_cursor = destination_cursor.saturating_add(segment_length);
@@ -225,6 +264,11 @@ impl CompletedCapture {
                         break;
                     }
                     source_cursor = 0;
+                }
+                if looped_notes.is_some() || looped_audio.is_some() {
+                    let destination = result.by_track.entry(*track_id).or_default();
+                    destination.note_clips.extend(looped_notes);
+                    destination.clips.extend(looped_audio);
                 }
             }
         }
@@ -239,7 +283,7 @@ impl CompletedCapture {
                 continue;
             }
             let mut lane = AutomationLane::new(AutomationTarget::TrackMute);
-            let start_beat = result.arrange_start_samples as f64 / samples_per_beat;
+            let start_beat = result.start_beat();
             lane.insert_point(AutomationPoint {
                 beat: start_beat,
                 value: if *pre_capture_muted { 1.0 } else { 0.0 },
@@ -263,7 +307,7 @@ impl CompletedCapture {
                 });
             }
             lane.insert_point(AutomationPoint {
-                beat: result.arrange_end_samples as f64 / samples_per_beat,
+                beat: result.end_beat(),
                 value: if *pre_capture_muted { 1.0 } else { 0.0 },
                 curve: 0.0,
             });
@@ -668,19 +712,61 @@ fn samples_per_beat(sample_rate: u32, bpm: f64) -> f64 {
     }
 }
 
-fn append_track_window(
+/// Engine boundaries land on whole samples, which rarely fall exactly on a
+/// beat, so captured MIDI clip edges snap to whole ticks.
+fn on_tick(beats: f64) -> f64 {
+    (beats * TICKS_PER_BEAT).round() / TICKS_PER_BEAT
+}
+
+/// A stretch of a source, copied from source-local samples to Arrange
+/// samples.
+#[derive(Debug, Clone, Copy)]
+struct CaptureWindow {
+    source_start_samples: u64,
+    source_end_samples: u64,
+    destination_start_samples: u64,
+    samples_per_beat: f64,
+}
+
+impl CaptureWindow {
+    fn source_start_beats(self) -> f64 {
+        self.source_start_samples as f64 / self.samples_per_beat
+    }
+
+    fn source_end_beats(self) -> f64 {
+        self.source_end_samples as f64 / self.samples_per_beat
+    }
+
+    fn destination_start_beats(self) -> f64 {
+        self.destination_start_samples as f64 / self.samples_per_beat
+    }
+
+    fn length_samples(self) -> u64 {
+        self.source_end_samples - self.source_start_samples
+    }
+
+    fn destination_end_beats(self) -> f64 {
+        (self.destination_start_samples + self.length_samples()) as f64 / self.samples_per_beat
+    }
+}
+
+fn captured_clip_name(source: &CapturedTimelineSource, clip_name: &str) -> String {
+    if source.name == clip_name {
+        format!("Capture · {clip_name}")
+    } else {
+        format!("Capture · {} · {clip_name}", source.name)
+    }
+}
+
+fn append_audio_window(
     destination: &mut TrackTimelineContent,
     content: &TrackTimelineContent,
     source: &CapturedTimelineSource,
-    window_start_samples: u64,
-    window_end_samples: u64,
-    destination_start_samples: u64,
-    samples_per_beat: f64,
+    window: CaptureWindow,
 ) {
-    let window_start_beats = window_start_samples as f64 / samples_per_beat;
-    let window_end_beats = window_end_samples as f64 / samples_per_beat;
-    let destination_start_beats = destination_start_samples as f64 / samples_per_beat;
-
+    let window_start_samples = window.source_start_samples;
+    let window_end_samples = window.source_end_samples;
+    let destination_start_samples = window.destination_start_samples;
     for clip in &content.clips {
         let overlap_start = clip.position.max(window_start_samples);
         let overlap_end = clip
@@ -696,11 +782,7 @@ fn append_track_window(
             clip.warp_geometry_for_fragment(delta, fragment_duration);
         let mut fragment = UiClip {
             id: ClipId::new(),
-            name: if source.name == clip.name {
-                format!("Capture · {}", clip.name)
-            } else {
-                format!("Capture · {} · {}", source.name, clip.name)
-            },
+            name: captured_clip_name(source, &clip.name),
             audio: Arc::clone(&clip.audio),
             source: clip.source.clone(),
             position: destination_start_samples + (overlap_start - window_start_samples),
@@ -732,7 +814,17 @@ fn append_track_window(
         }
         destination.clips.push(fragment);
     }
+}
 
+fn append_note_window(
+    destination: &mut TrackTimelineContent,
+    content: &TrackTimelineContent,
+    source: &CapturedTimelineSource,
+    window: CaptureWindow,
+) {
+    let window_start_beats = on_tick(window.source_start_beats());
+    let window_end_beats = on_tick(window.source_end_beats());
+    let destination_start_beats = on_tick(window.destination_start_beats());
     for clip in &content.note_clips {
         let clip_end = clip.position_beats + clip.duration_beats;
         let overlap_start = clip.position_beats.max(window_start_beats);
@@ -743,15 +835,13 @@ fn append_track_window(
         let local_start = overlap_start - clip.position_beats;
         let local_end = overlap_end - clip.position_beats;
         let notes = captured_visible_notes(clip, local_start, local_end);
+        let position_beats = on_tick(destination_start_beats + overlap_start - window_start_beats);
+        let end_beats = on_tick(destination_start_beats + overlap_end - window_start_beats);
         let fragment = UiNoteClip {
             id: ClipId::new(),
-            name: if source.name == clip.name {
-                format!("Capture · {}", clip.name)
-            } else {
-                format!("Capture · {} · {}", source.name, clip.name)
-            },
-            position_beats: destination_start_beats + (overlap_start - window_start_beats),
-            duration_beats: overlap_end - overlap_start,
+            name: captured_clip_name(source, &clip.name),
+            position_beats,
+            duration_beats: end_beats - position_beats,
             notes,
             selected_notes: Default::default(),
             start_marker_beats: 0.0,
@@ -762,13 +852,6 @@ fn append_track_window(
         };
         destination.note_clips.push(fragment);
     }
-    performance_log::append_automation_window(
-        destination,
-        content,
-        window_start_beats,
-        window_end_beats,
-        destination_start_beats,
-    );
 }
 
 pub(crate) fn captured_audio_offset(clip: &UiClip, timeline_delta: u64) -> u64 {
@@ -809,6 +892,9 @@ mod clip_capture_tests;
 #[cfg(test)]
 #[path = "capture_compensation_tests.rs"]
 mod compensation_tests;
+#[cfg(test)]
+#[path = "capture_launch_tests.rs"]
+mod launch_tests;
 #[cfg(test)]
 #[path = "capture_tests.rs"]
 mod tests;

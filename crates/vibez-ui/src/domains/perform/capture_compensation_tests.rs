@@ -56,23 +56,11 @@ fn heard_window_trims_early_prefix_and_retains_its_tail_at_capture_stop() {
     capture.start(0, Some((section("First", early, full, 4), 0)));
     let result = capture.finish(12).unwrap().materialize();
     let early_clip = &result.by_track[&early].clips[0];
-    assert_eq!(
-        (
-            early_clip.position,
-            early_clip.source_offset,
-            early_clip.duration
-        ),
-        (0, 4, 12)
-    );
+    assert_eq!((early_clip.position, early_clip.duration), (0, 12));
+    assert_eq!(early_clip.source_frame_at(0), 4);
     let full_clip = &result.by_track[&full].clips[0];
-    assert_eq!(
-        (
-            full_clip.position,
-            full_clip.source_offset,
-            full_clip.duration
-        ),
-        (0, 0, 12)
-    );
+    assert_eq!((full_clip.position, full_clip.duration), (0, 12));
+    assert_eq!(full_clip.source_frame_at(0), 0);
 }
 
 #[test]
@@ -153,7 +141,10 @@ fn midi_offsets_preserve_note_duration_velocity_and_groove() {
     for (track, expected_start) in [(early, 1.0), (full, 2.0)] {
         let clip = &result.by_track[&track].note_clips[0];
         let note = &clip.notes[0];
-        assert_eq!(clip.position_beats + note.start_beat, expected_start);
+        assert_eq!(
+            clip.position_beats + clip.note_occurrences(note.start_beat)[0],
+            expected_start
+        );
         assert_eq!(note.duration_beats, 1.0);
         assert_eq!(note.velocity, 98);
         assert_eq!(clip.groove_grid, GrooveGrid::Sixteenth);

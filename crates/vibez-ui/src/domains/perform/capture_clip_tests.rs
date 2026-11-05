@@ -95,7 +95,7 @@ fn independent_combinations_capture_mid_loop_replacements_and_silence() {
 }
 
 #[test]
-fn independent_loops_flatten_without_moving_other_tracks_boundaries() {
+fn independent_loops_write_one_clip_per_launch_without_moving_other_tracks_boundaries() {
     let a = TrackId::new();
     let b = TrackId::new();
     let mut capture = CaptureState::default();
@@ -121,7 +121,7 @@ fn independent_loops_flatten_without_moving_other_tracks_boundaries() {
             .iter()
             .map(|clip| (clip.position_beats, clip.duration_beats))
             .collect::<Vec<_>>(),
-        [(0.0, 1.0), (1.0, 1.0), (2.0, 1.0), (3.0, 0.5)]
+        [(0.0, 3.5)]
     );
     assert_eq!(take.by_track[&b].note_clips.len(), 1);
     assert_eq!(take.by_track[&b].note_clips[0].position_beats, 0.5);

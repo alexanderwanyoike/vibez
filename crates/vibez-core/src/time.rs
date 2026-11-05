@@ -17,6 +17,9 @@ impl SampleTime {
 /// Every bar is 4/4 until the Project gains a time signature.
 pub const BEATS_PER_BAR: f64 = 4.0;
 
+/// The finest musical resolution recorded and captured MIDI lands on.
+pub const TICKS_PER_BEAT: f64 = 960.0;
+
 /// Musical position in beats (quarter notes).
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default, Serialize, Deserialize)]
 pub struct MusicalTime(pub f64);
