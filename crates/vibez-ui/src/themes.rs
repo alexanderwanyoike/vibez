@@ -272,7 +272,7 @@ fn light(seed: Seed) -> ThemePalette {
         knob_body: darken(bg, 0.05),
         knob_body_engaged: darken(bg, 0.10),
         knob_track: darken(bg, 0.22),
-        fader_handle: darken(bg, 0.45),
+        fader_handle: darken(bg, 0.52),
         track_colors: seed.tracks,
         eq_lf: darken(seed.eq[0], 0.12),
         eq_lmf: darken(seed.eq[1], 0.12),
