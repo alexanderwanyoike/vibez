@@ -47,3 +47,19 @@ pub(crate) fn fit(text: &str, width: f32, size: f32, _font: Font) -> String {
         format!("{}..", text.chars().take(limit - 2).collect::<String>())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::widgets::device_controls::text_width;
+
+    #[test]
+    fn a_fitted_name_stays_inside_its_measured_width() {
+        let width = 60.0;
+
+        let fitted = fit("WWWWWWWWWWWWWWWW", width, 13.0, Font::DEFAULT);
+
+        assert!(!fitted.is_empty());
+        assert!(text_width(&fitted, 13.0, Font::DEFAULT) <= width);
+    }
+}
