@@ -3,7 +3,7 @@
 use super::*;
 use crate::domains::arrangement::ArrangementMsg;
 use crate::domains::project::ProjectMsg;
-use crate::state::{ArrangementSelection, ProjectTrack, UiNoteClip, UndoGestureId};
+use crate::state::{ArrangementSelection, ProjectTrack, UiClip, UiNoteClip, UndoGestureId};
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::{NoteClipInfo, TrackKind};
 use vibez_core::track::{ClipInfo, TrackInfo};
@@ -162,6 +162,62 @@ fn undo_and_redo_of_a_shrink_keep_the_loop() {
     assert_eq!(shrunk, (12.0, 0.0, 16.0));
     assert_eq!(undone, (16.0, 0.0, 16.0));
     assert_eq!(redone, (12.0, 0.0, 16.0));
+}
+
+#[test]
+fn undo_and_redo_of_an_audio_shrink_keep_the_loop() {
+    let mut app = super::test_support::app();
+    let track = ProjectTrack::new(TrackId::new(), "Percs".into(), 0);
+    let track_id = track.id;
+    let clip_id = ClipId::new();
+    Arc::make_mut(&mut app.state.arrangement.timeline)
+        .ensure(track_id)
+        .clips
+        .push(UiClip {
+            id: clip_id,
+            name: "Percs".into(),
+            audio: Arc::new(vibez_core::audio_buffer::DecodedAudio {
+                channels: vec![vec![0.0; 400_000]],
+                sample_rate: 44_100,
+            }),
+            source: None,
+            position: 0,
+            source_offset: 0,
+            start_marker: 0,
+            duration: 200_000,
+            loop_enabled: true,
+            loop_start: 0,
+            loop_end: 300_000,
+            gain_db: Default::default(),
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            transient_markers: Default::default(),
+            warp_markers: Default::default(),
+            transpose: Default::default(),
+            original_bpm: None,
+            warped: false,
+            warped_to_bpm: None,
+            original_audio: None,
+        });
+    Arc::make_mut(&mut app.state.project_tracks)
+        .tracks
+        .push(track);
+    let clip = |app: &App| {
+        let clip = &app.state.arrange_content(track_id).unwrap().clips[0];
+        (clip.duration, clip.loop_start, clip.loop_end)
+    };
+
+    let [shrunk, undone, redone] = shrink_undo_and_redo(
+        &mut app,
+        ArrangementSelection::AudioClip { track_id, clip_id },
+        1.0,
+        clip,
+    );
+
+    assert!(shrunk.0 < 200_000);
+    assert_eq!((shrunk.1, shrunk.2), (0, 300_000));
+    assert_eq!(undone, (200_000, 0, 300_000));
+    assert_eq!(redone, shrunk);
 }
 
 /// Shrink the selected clip to `beats` as one gesture, then undo and redo
