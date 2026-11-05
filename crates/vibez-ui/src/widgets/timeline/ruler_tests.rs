@@ -276,3 +276,42 @@ fn the_pointer_over_the_ruler_numbers_shows_it_zooms() {
         iced::mouse::Interaction::ZoomIn
     );
 }
+
+/// Clicks the numbers of `ruler` at `beat` with `modifiers` held, returning
+/// the beat the release seeks to.
+fn seek_beat_after_click(
+    ruler: &RulerWidget,
+    beat: f64,
+    modifiers: iced::keyboard::Modifiers,
+) -> Option<f64> {
+    let at = Point::new(ruler.geometry().beat_to_x(beat), NUMBERS_Y);
+    let mut state = RulerInteractionState::default();
+    <RulerWidget as canvas::Program<Message>>::update(
+        ruler,
+        &mut state,
+        canvas::Event::Keyboard(iced::keyboard::Event::ModifiersChanged(modifiers)),
+        Rectangle::new(Point::ORIGIN, Size::new(800.0, 36.0)),
+        Cursor::Available(at),
+    );
+    press(ruler, &mut state, at);
+    match release(ruler, &mut state, at) {
+        Some(Message::Transport(TransportMsg::SeekToBeat(beat))) => Some(beat),
+        _ => None,
+    }
+}
+
+#[test]
+fn a_ruler_click_seeks_to_the_nearest_grid_line() {
+    assert_eq!(
+        seek_beat_after_click(&ruler(), 9.2, iced::keyboard::Modifiers::empty()),
+        Some(9.0)
+    );
+}
+
+#[test]
+fn an_alt_click_on_the_ruler_seeks_exactly_where_clicked() {
+    let beat =
+        seek_beat_after_click(&ruler(), 9.2, iced::keyboard::Modifiers::ALT).expect("a seek");
+
+    assert!((beat - 9.2).abs() < 1e-3, "seeked to {beat}");
+}

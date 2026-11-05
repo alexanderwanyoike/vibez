@@ -11,6 +11,7 @@ use iced::widget::canvas;
 use iced::{mouse, Color, Point, Rectangle, Size};
 
 use crate::domains::arrangement::ArrangementMsg;
+use crate::domains::transport::TransportMsg;
 use crate::domains::view::ViewMsg;
 use crate::message::Message;
 use crate::state::{ContextMenuTarget, GridConfig, ProjectTrack, TrackTimelineContent};
@@ -1110,4 +1111,67 @@ fn one_clip_edit_key_press_emits_one_message_whatever_the_lane_count() {
             "Command+{letter} must reach the timeline exactly once"
         );
     }
+}
+
+/// Clicks `canvas` at `beat` and `y` with `modifiers` held, returning the
+/// beat the release seeks to.
+fn seek_beat_after_click(
+    canvas: &TrackClipCanvas,
+    beat: f64,
+    y: f32,
+    modifiers: Modifiers,
+) -> Option<f64> {
+    let position = Point::new(canvas.beat_to_x(beat), y);
+    let mut state = ClipInteractionState::default();
+    <TrackClipCanvas as canvas::Program<Message>>::update(
+        canvas,
+        &mut state,
+        canvas::Event::Keyboard(Event::ModifiersChanged(modifiers)),
+        Rectangle::new(Point::ORIGIN, Size::new(800.0, 80.0)),
+        mouse::Cursor::Available(position),
+    );
+    left_event(
+        canvas,
+        &mut state,
+        iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left),
+        position,
+    );
+    match left_event(
+        canvas,
+        &mut state,
+        iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left),
+        position,
+    ) {
+        Some(Message::Transport(TransportMsg::SeekToBeat(beat))) => Some(beat),
+        _ => None,
+    }
+}
+
+const CLIP_BODY_Y: f32 = CLIP_Y + CLIP_TITLE_HEIGHT + 10.0;
+
+#[test]
+fn clicking_a_clip_body_seeks_to_the_nearest_grid_line() {
+    let (canvas, _) = canvas_with_selected_audio_clip();
+
+    let beat = seek_beat_after_click(&canvas, 1.3, CLIP_BODY_Y, Modifiers::empty());
+
+    assert_eq!(beat, Some(1.5));
+}
+
+#[test]
+fn clicking_an_empty_lane_seeks_to_the_nearest_grid_line() {
+    let canvas = empty_track_canvas();
+
+    let beat = seek_beat_after_click(&canvas, 6.8, CLIP_BODY_Y, Modifiers::empty());
+
+    assert_eq!(beat, Some(7.0));
+}
+
+#[test]
+fn an_alt_click_on_a_clip_body_seeks_exactly_where_clicked() {
+    let (canvas, _) = canvas_with_selected_audio_clip();
+
+    let beat = seek_beat_after_click(&canvas, 1.3, CLIP_BODY_Y, Modifiers::ALT).expect("a seek");
+
+    assert!((beat - 1.3).abs() < 1e-3, "seeked to {beat}");
 }
