@@ -1,7 +1,7 @@
 //! Magnetic snap: the grid line, clip edge or marker a timeline drag or
 //! click locks onto.
 
-use crate::state::{ArrangementSelection, GridConfig, TimelineEditorState};
+use crate::state::{ArrangementSelection, GridConfig, TimelineEditorState, TransportState};
 
 /// How close, in screen pixels, a clip edge or marker must be to pull an
 /// edge onto it. Fixed on screen so the pull feels the same at every zoom.
@@ -98,6 +98,31 @@ impl SnapTargets {
             }
         }
         targets
+    }
+
+    /// Arrange's targets: its Clips and time selection, the playhead,
+    /// where play started, and the loop while it is on.
+    pub fn for_arrangement(editor: &TimelineEditorState, transport: &TransportState) -> Self {
+        let targets = Self::for_editor(editor, transport.samples_per_beat())
+            .with_marker(transport.position_beats(), SnapTargetKind::Playhead)
+            .with_marker(transport.play_start_beats, SnapTargetKind::PlayStart);
+        if !transport.loop_enabled {
+            return targets;
+        }
+        targets
+            .with_marker(transport.loop_start_beats, SnapTargetKind::LoopStart)
+            .with_marker(transport.loop_end_beats, SnapTargetKind::LoopEnd)
+    }
+
+    /// A Section editor's targets: its Clips and time selection, and its
+    /// edit cursor.
+    pub fn for_section(
+        editor: &TimelineEditorState,
+        samples_per_beat: f64,
+        edit_cursor_beats: f64,
+    ) -> Self {
+        Self::for_editor(editor, samples_per_beat)
+            .with_marker(edit_cursor_beats, SnapTargetKind::Playhead)
     }
 
     pub fn with_marker(mut self, beat: f64, kind: SnapTargetKind) -> Self {

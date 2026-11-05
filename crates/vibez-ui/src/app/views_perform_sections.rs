@@ -149,16 +149,11 @@ impl App {
             } else {
                 None
             };
-            let snap_targets = std::sync::Arc::new(
-                crate::timeline_snap::SnapTargets::for_editor(
-                    editor,
-                    self.state.transport.samples_per_beat(),
-                )
-                .with_marker(
-                    self.state.perform.section_editor.edit_cursor_beats(),
-                    crate::timeline_snap::SnapTargetKind::Playhead,
-                ),
-            );
+            let snap_targets = std::sync::Arc::new(crate::timeline_snap::SnapTargets::for_section(
+                editor,
+                self.state.transport.samples_per_beat(),
+                self.state.perform.section_editor.edit_cursor_beats(),
+            ));
             let ruler = RulerWidget {
                 playhead_beats: playback_playhead_beats.unwrap_or(-1.0),
                 play_start_beats: None,

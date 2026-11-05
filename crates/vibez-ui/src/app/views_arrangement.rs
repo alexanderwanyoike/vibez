@@ -19,7 +19,7 @@ use crate::message::Message;
 use crate::state::{ArrangementSelection, ContextMenuTarget, TrackTimelineContent};
 use crate::theme as th;
 use crate::timeline_geometry::TimelineGeometry;
-use crate::timeline_snap::{SnapTargetKind, SnapTargets};
+use crate::timeline_snap::SnapTargets;
 use crate::widgets::arrange_corner::{arrange_corner, arrangement_size_labels, song_length_label};
 use crate::widgets::timeline::{
     build_row_spans, ArrangementMinimap, MinimapTrack, RulerWidget, TimeRulerWidget, TimelineClip,
@@ -105,19 +105,10 @@ impl App {
         let total_beats = self.state.total_beats();
 
         let play_start_beats = self.state.transport.play_start_beats;
-        let mut snap_targets =
-            SnapTargets::for_editor(timeline, self.state.transport.samples_per_beat())
-                .with_marker(playhead_beats, SnapTargetKind::Playhead)
-                .with_marker(play_start_beats, SnapTargetKind::PlayStart);
-        if self.state.transport.loop_enabled {
-            snap_targets = snap_targets
-                .with_marker(
-                    self.state.transport.loop_start_beats,
-                    SnapTargetKind::LoopStart,
-                )
-                .with_marker(self.state.transport.loop_end_beats, SnapTargetKind::LoopEnd);
-        }
-        let snap_targets = std::sync::Arc::new(snap_targets);
+        let snap_targets = std::sync::Arc::new(SnapTargets::for_arrangement(
+            timeline,
+            &self.state.transport,
+        ));
 
         // Beat-based ruler, offset by track header width
         let ruler = RulerWidget {
