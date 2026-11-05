@@ -270,6 +270,8 @@ pub enum Message {
     /// Settings: resize the whole interface. Distinct from timeline
     /// zoom, which changes visible musical time instead.
     SetInterfaceScale(f32),
+    /// Settings: how strongly track colours show over the active theme.
+    SetColourStrength(crate::theme::ColourStrength),
     /// Settings: opt in or out of the startup release check. Takes
     /// effect at the next launch; it never triggers a check itself.
     ToggleCheckForUpdates,

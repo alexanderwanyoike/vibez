@@ -1033,6 +1033,10 @@ impl App {
                 self.interface_scale = crate::ui_settings::clamp_interface_scale(scale);
                 self.persist_ui_settings();
             }
+            Message::SetColourStrength(strength) => {
+                crate::theme::set_colour_strength(strength);
+                self.persist_ui_settings();
+            }
             Message::ToggleProjectTrackDeleteConfirmation => {
                 self.state.confirm_project_track_deletion =
                     !self.state.confirm_project_track_deletion;
