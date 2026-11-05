@@ -5,8 +5,12 @@ use iced::widget::canvas::Program;
 
 /// At 120 BPM and 1 kHz a beat is 500 frames, so zoom 25 draws one frame
 /// per pixel, from the clip's source offset 0.2 beats into the sample.
-fn one_frame_per_pixel() -> Option<TimelineViewport> {
-    Some(TimelineViewport::new(25.0, 0.2))
+fn one_frame_per_pixel() -> Option<StoredClipView> {
+    stored(TimelineViewport::new(25.0, 0.2))
+}
+
+fn stored(viewport: TimelineViewport) -> Option<StoredClipView> {
+    Some(StoredClipView::Viewport(viewport))
 }
 
 /// A warped clip's editor starts at its window, which its Warp Markers
@@ -224,7 +228,7 @@ fn wheel(
     modifiers: Modifiers,
     pointer: Point,
     bounds: Rectangle,
-) -> Option<TimelineViewport> {
+) -> Option<StoredClipView> {
     let mut state = AudioClipDetailState::default();
     widget.update(
         &mut state,
@@ -246,7 +250,7 @@ fn wheel(
         Some(Message::View(ViewMsg::SetClipEditorView { clip_id, viewport }))
             if clip_id == widget.clip_id =>
         {
-            Some(viewport)
+            stored(viewport)
         }
         _ => None,
     }
@@ -256,14 +260,14 @@ fn wheel(
 fn shift_wheel_zooms_the_audio_editor_around_the_pointer() {
     let mut widget = widget();
     widget.bpm = 1_200.0;
-    widget.view = Some(TimelineViewport::new(2.0, 0.0));
+    widget.view = stored(TimelineViewport::new(2.0, 0.0));
     let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(800.0, 200.0));
     let pointer = Point::new(100.0, 100.0);
     let frame_under_pointer = widget.x_to_timeline_frame(pointer.x, &bounds);
 
     widget.view = wheel(&widget, Modifiers::SHIFT, pointer, bounds);
 
-    assert!(widget.view.is_some_and(|view| view.zoom_level > 2.0));
+    assert!(matches!(widget.view, Some(StoredClipView::Viewport(view)) if view.zoom_level > 2.0));
     assert!((widget.x_to_timeline_frame(pointer.x, &bounds) - frame_under_pointer).abs() < 1e-3);
 }
 
@@ -271,7 +275,7 @@ fn shift_wheel_zooms_the_audio_editor_around_the_pointer() {
 fn a_plain_wheel_scrolls_the_audio_editor_in_time() {
     let mut widget = widget();
     widget.bpm = 1_200.0;
-    widget.view = Some(TimelineViewport::new(2.0, 0.0));
+    widget.view = stored(TimelineViewport::new(2.0, 0.0));
     let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(400.0, 200.0));
     let first_frame = widget.x_to_timeline_frame(0.0, &bounds);
 
@@ -711,7 +715,7 @@ fn moving_the_whole_audio_loop_stops_at_the_source_end() {
 fn dragging_down_the_audio_ruler_zooms_in_around_the_press() {
     let mut widget = widget();
     widget.bpm = 1_200.0;
-    widget.view = Some(TimelineViewport::new(2.0, 0.0));
+    widget.view = stored(TimelineViewport::new(2.0, 0.0));
     let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(800.0, 200.0));
     let press = Point::new(100.0, 25.0);
     let frame_under_press = widget.x_to_timeline_frame(press.x, &bounds);
@@ -736,7 +740,7 @@ fn dragging_down_the_audio_ruler_zooms_in_around_the_press() {
     let Some(Message::View(ViewMsg::SetClipEditorView { viewport, .. })) = message else {
         panic!("expected a clip editor view, got {message:?}");
     };
-    widget.view = Some(viewport);
+    widget.view = stored(viewport);
 
     assert!(viewport.zoom_level > 2.0);
     assert!((widget.x_to_timeline_frame(press.x, &bounds) - frame_under_press).abs() < 1e-3);
@@ -759,7 +763,7 @@ fn pressing_an_audio_loop_handle_pins_the_framing_so_the_drag_does_not_reframe()
     let Some(Message::View(ViewMsg::SetClipEditorView { viewport, .. })) = pressed.1 else {
         panic!("expected the framing to be pinned, got {:?}", pressed.1);
     };
-    widget.view = Some(viewport);
+    widget.view = stored(viewport);
     widget.loop_end = 900;
 
     assert!((widget.timeline_to_x(500, &bounds) - end_x).abs() < 1e-3);

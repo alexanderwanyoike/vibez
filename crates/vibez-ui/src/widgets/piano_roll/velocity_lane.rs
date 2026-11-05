@@ -26,7 +26,7 @@ pub struct VelocityLaneWidget {
     track_color: Color,
     grid: GridConfig,
     /// See `PianoRollWidget::view`; both must share one view to line up.
-    pub view: Option<TimelineViewport>,
+    pub view: Option<StoredClipView>,
 }
 
 impl VelocityLaneWidget {

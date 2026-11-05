@@ -109,7 +109,7 @@ fn shift_wheel_zooms_in_around_the_pointer() {
         ),
         &clip,
     );
-    widget.view = Some(viewport);
+    widget.view = Some(StoredClipView::Viewport(viewport));
 
     assert!(widget.pixels_per_beat(&bounds()) > pixels_per_beat);
     assert!((widget.x_to_beat(pointer.x, &bounds()) - beat_under_pointer).abs() < 1e-6);
@@ -133,7 +133,7 @@ fn a_sideways_swipe_scrolls_time_and_a_plain_wheel_scrolls_pitch() {
         ),
         &clip,
     );
-    widget.view = Some(viewport);
+    widget.view = Some(StoredClipView::Viewport(viewport));
     assert!(widget.x_to_beat(KEY_WIDTH, &bounds()) > first_beat);
 
     let plain = wheel(
@@ -154,7 +154,7 @@ fn a_loop_end_drags_past_the_clip_end_in_a_zoomed_out_view() {
     let mut clip = long_clip(true);
     clip.duration_beats = 12.0;
     let mut widget = editor(&clip);
-    widget.view = Some(TimelineViewport::new(1.0, 0.0));
+    widget.view = Some(StoredClipView::Viewport(TimelineViewport::new(1.0, 0.0)));
     let end = Point::new(widget.beat_to_x(16.0, &bounds()), 5.0);
     let target = Point::new(widget.beat_to_x(24.0, &bounds()), 5.0);
     let mut state = PianoRollState::default();
@@ -260,13 +260,17 @@ fn dragging_down_the_ruler_zooms_in_and_sideways_scrolls() {
     assert_eq!(pressed.0, canvas::event::Status::Captured);
 
     let below = Point::new(press.x, press.y + 60.0);
-    widget.view = Some(ruler_drag_to(&widget, &mut state, &clip, below));
+    widget.view = Some(StoredClipView::Viewport(ruler_drag_to(
+        &widget, &mut state, &clip, below,
+    )));
     assert!(widget.pixels_per_beat(&bounds()) > pixels_per_beat);
     assert!((widget.x_to_beat(press.x, &bounds()) - beat_under_press).abs() < 1e-6);
 
     let first_beat = widget.x_to_beat(KEY_WIDTH, &bounds());
     let left = Point::new(press.x - 80.0, below.y);
-    widget.view = Some(ruler_drag_to(&widget, &mut state, &clip, left));
+    widget.view = Some(StoredClipView::Viewport(ruler_drag_to(
+        &widget, &mut state, &clip, left,
+    )));
     assert!(widget.x_to_beat(KEY_WIDTH, &bounds()) > first_beat);
 }
 
@@ -282,7 +286,7 @@ fn pressing_a_loop_handle_pins_the_framing_so_the_drag_does_not_reframe() {
         bounds(),
         mouse::Cursor::Available(Point::new(end_x, 5.0)),
     );
-    widget.view = Some(requested_view(pressed.1, &clip));
+    widget.view = Some(StoredClipView::Viewport(requested_view(pressed.1, &clip)));
     if let Some(data) = widget.clip.as_mut() {
         data.loop_end_beats = 24.0;
     }
@@ -302,7 +306,7 @@ fn zoomed_in_a_resized_note_ends_on_the_finer_grid_the_zoom_shows() {
     let mut widget = editor(&clip);
     widget.grid = GridConfig::new(SnapGrid::SIXTEENTH, true, true, 0);
     let fitted_step = widget.effective_grid(&bounds()).beat_size();
-    widget.view = Some(TimelineViewport::new(8.0, 0.0));
+    widget.view = Some(StoredClipView::Viewport(TimelineViewport::new(8.0, 0.0)));
     let step = widget.effective_grid(&bounds()).beat_size();
     assert!(step < fitted_step, "{step} vs {fitted_step}");
 

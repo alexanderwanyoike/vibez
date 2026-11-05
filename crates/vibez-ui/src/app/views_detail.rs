@@ -218,6 +218,7 @@ impl App {
             self.state.view.clip_editor_view(clip.id),
             self.state.transport.samples_per_beat(),
             clip.editor_frames(),
+            clip.timeline(),
         ))
     }
 

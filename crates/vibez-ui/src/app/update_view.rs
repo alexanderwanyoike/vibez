@@ -30,6 +30,25 @@ impl App {
         self.update(Message::View(ViewMsg::Grid(target, command)))
     }
 
+    /// Z and X reach an open clip editor before the Arrange view, as the
+    /// grid shortcuts do.
+    fn clip_editor_zoom(&self, msg: &ViewMsg) -> Option<ViewMsg> {
+        let frame_loop = match msg {
+            ViewMsg::ZoomToSelection => true,
+            ViewMsg::ZoomBack => false,
+            _ => return None,
+        };
+        if !self.editor_shortcuts_have_focus() {
+            return None;
+        }
+        let clip_id = self.focused_clip_editor()?;
+        Some(if frame_loop {
+            ViewMsg::FrameClipEditorLoop(clip_id)
+        } else {
+            ViewMsg::ClipEditorZoomBack(clip_id)
+        })
+    }
+
     fn route_section_timeline_navigation(&mut self, msg: &ViewMsg) -> bool {
         if self.state.view.workspace != Workspace::Perform
             || self.state.perform.editor_focus != PerformEditorFocus::TimelineEditor
@@ -135,6 +154,7 @@ impl App {
                 self.state.status_text = status;
             }
         }
+        let msg = self.clip_editor_zoom(&msg).unwrap_or(msg);
         if self.route_section_timeline_navigation(&msg) {
             return Task::none();
         }

@@ -9,6 +9,7 @@ use crate::state::{
     ContextMenuTarget, DetailPanelTab, GridCommand, TimelineEditorState, ViewState, Workspace,
 };
 use crate::timeline_geometry::TimelineViewport;
+use crate::widgets::clip_editor_view::StoredClipView;
 
 /// Messages the view domain handles.
 #[derive(Debug, Clone)]
@@ -26,10 +27,12 @@ pub enum ViewMsg {
     },
     ZoomToFit,
     /// Frame the time selection, or the selected clips, in the lanes
-    /// (Ableton's Z).
+    /// (Ableton's Z). The router sends an open clip editor
+    /// [`ViewMsg::FrameClipEditorLoop`] instead.
     ZoomToSelection,
     /// Return to the view from before the last zoom to selection
-    /// (Ableton's X).
+    /// (Ableton's X), or [`ViewMsg::ClipEditorZoomBack`] for an open clip
+    /// editor.
     ZoomBack,
     ScrollArrangement(f64),
     /// Jump straight to a zoom and scroll, as a ruler drag does.
@@ -39,6 +42,10 @@ pub enum ViewMsg {
         clip_id: ClipId,
         viewport: TimelineViewport,
     },
+    /// Frame the loop in the clip editor showing this clip.
+    FrameClipEditorLoop(ClipId),
+    /// Return that clip editor to its view from before it framed the loop.
+    ClipEditorZoomBack(ClipId),
     Grid(GridTarget, GridCommand),
     BeginDetailPanelResize,
     ResizeDetailPanel(f32),
@@ -210,7 +217,19 @@ impl ViewState {
                 }
             }
             ViewMsg::SetClipEditorView { clip_id, viewport } => {
-                self.stored_clip_editor_view = Some((clip_id, viewport));
+                self.stored_clip_editor_view = Some((clip_id, StoredClipView::Viewport(viewport)));
+            }
+            ViewMsg::FrameClipEditorLoop(clip_id) => {
+                self.clip_view_before_loop = Some((clip_id, self.clip_editor_view(clip_id)));
+                self.stored_clip_editor_view = Some((clip_id, StoredClipView::Loop));
+            }
+            ViewMsg::ClipEditorZoomBack(clip_id) => {
+                if let Some((_, before)) = self
+                    .clip_view_before_loop
+                    .take_if(|(framed, _)| *framed == clip_id)
+                {
+                    self.stored_clip_editor_view = before.map(|view| (clip_id, view));
+                }
             }
             ViewMsg::Grid(target, command) => {
                 match target {
@@ -356,7 +375,10 @@ mod tests {
             ViewCtx::default(),
         );
 
-        assert_eq!(view.clip_editor_view(zoomed), Some(viewport));
+        assert_eq!(
+            view.clip_editor_view(zoomed),
+            Some(StoredClipView::Viewport(viewport))
+        );
         assert_eq!(view.clip_editor_view(ClipId::new()), None);
     }
 

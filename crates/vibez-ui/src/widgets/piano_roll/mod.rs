@@ -12,9 +12,11 @@ use crate::message::Message;
 use crate::state::{
     GridConfig, PianoRollEditMode, SnapGrid, UiNoteClip, UndoGestureId, SHORTEST_LENGTH_BEATS,
 };
-use crate::timeline_geometry::{TimelineGeometry, TimelineViewport};
+use crate::timeline_geometry::TimelineGeometry;
 use crate::timeline_snap::SnapTargets;
-use crate::widgets::clip_editor_view::{wheel_intent, ClipEditorView, RulerZoom, WheelIntent};
+use crate::widgets::clip_editor_view::{
+    wheel_intent, ClipEditorView, RulerZoom, StoredClipView, WheelIntent,
+};
 use crate::widgets::clip_loop_markers::{self, LoopDrag};
 use crate::widgets::double_click::DoubleClick;
 use crate::widgets::drag_phase::{past_click_slop, DragPhase};
@@ -57,7 +59,7 @@ pub struct PianoRollWidget {
     pub edit_mode: PianoRollEditMode,
     pub reserve_arrow_keys: bool,
     /// The producer's zoom and scroll for this clip; `None` frames its loop.
-    pub view: Option<TimelineViewport>,
+    pub view: Option<StoredClipView>,
 }
 
 /// Owned data for drawing a note clip in the piano roll.
@@ -237,7 +239,7 @@ struct MarqueeRegion {
 fn clip_editor_view(
     clip: Option<&PianoRollClipData>,
     total_beats: f64,
-    stored: Option<TimelineViewport>,
+    stored: Option<StoredClipView>,
 ) -> ClipEditorView {
     let loop_span = clip
         .filter(|clip| clip.loop_enabled)
@@ -248,7 +250,7 @@ fn clip_editor_view(
 /// The view of a piano roll showing `total_beats` of content that loops
 /// over `loop_span`, unless the producer stored one.
 pub(crate) fn framed_view(
-    stored: Option<TimelineViewport>,
+    stored: Option<StoredClipView>,
     loop_span: Option<(f64, f64)>,
     total_beats: f64,
 ) -> ClipEditorView {

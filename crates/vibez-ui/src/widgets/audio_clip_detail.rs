@@ -18,7 +18,9 @@ use crate::message::Message;
 use crate::state::{ContextMenuTarget, GridConfig, UndoGestureId};
 use crate::theme;
 use crate::timeline_geometry::{TimelineGeometry, TimelineViewport};
-use crate::widgets::clip_editor_view::{wheel_intent, ClipEditorView, RulerZoom, WheelIntent};
+use crate::widgets::clip_editor_view::{
+    wheel_intent, ClipEditorView, RulerZoom, StoredClipView, WheelIntent,
+};
 use crate::widgets::clip_loop_markers::{self, LoopDrag, LoopMarker};
 use crate::widgets::double_click::DoubleClick;
 use crate::widgets::local_drag::LocalDrag;
@@ -56,7 +58,7 @@ pub struct AudioClipDetailWidget {
     pub selected_warp_marker: Option<u64>,
     /// The producer's zoom and scroll for this clip; `None` frames the whole
     /// source.
-    pub view: Option<TimelineViewport>,
+    pub view: Option<StoredClipView>,
 }
 
 #[derive(Debug, Default)]
@@ -98,23 +100,40 @@ const WARP_HIT_RADIUS: f32 = 7.0;
 const DOUBLE_CLICK_WINDOW: Duration = Duration::from_millis(300);
 
 /// The audio editor's view of `editor_frames`, measured in beats from its
-/// first frame. The first frame moves when a clip gains or loses Warp
-/// Markers, so `stored` scrolls from source frame zero to stay on the
-/// frames it showed.
+/// first frame. It opens on all of them; the loop it frames is the clip's
+/// loop, or the clip's own span when it does not loop. The first frame
+/// moves when a clip gains or loses Warp Markers, so a stored viewport
+/// scrolls from source frame zero to stay on the frames it showed.
 pub(crate) fn audio_clip_editor_view(
-    stored: Option<TimelineViewport>,
+    stored: Option<StoredClipView>,
     samples_per_beat: f64,
     (first, end): (u64, u64),
+    timeline: FrameClipTimeline,
 ) -> ClipEditorView {
+    let beats_from_first = |frame: u64| frame.saturating_sub(first) as f64 / samples_per_beat;
     let beats = end.saturating_sub(first).max(1) as f64 / samples_per_beat;
     let first_beat = first as f64 / samples_per_beat;
-    let stored = stored.map(|viewport| {
-        TimelineViewport::new(
+    let stored = stored.map(|view| match view {
+        StoredClipView::Viewport(viewport) => StoredClipView::Viewport(TimelineViewport::new(
             viewport.zoom_level,
             (viewport.scroll_offset_beats - first_beat).max(0.0),
-        )
+        )),
+        StoredClipView::Loop => StoredClipView::Loop,
     });
-    ClipEditorView::new(stored, 0.0, beats, beats)
+    let (loop_start, loop_end) = if timeline.is_looping() {
+        (timeline.loop_start, timeline.loop_end)
+    } else {
+        (
+            timeline.start,
+            timeline.start.saturating_add(timeline.duration),
+        )
+    };
+    ClipEditorView::new(
+        stored,
+        (0.0, beats),
+        (beats_from_first(loop_start), beats_from_first(loop_end)),
+        beats,
+    )
 }
 
 impl AudioClipDetailWidget {
@@ -138,7 +157,12 @@ impl AudioClipDetailWidget {
     }
 
     fn clip_view(&self) -> ClipEditorView {
-        audio_clip_editor_view(self.view, self.samples_per_beat(), self.editor_frames)
+        audio_clip_editor_view(
+            self.view,
+            self.samples_per_beat(),
+            self.editor_frames,
+            self.timeline(),
+        )
     }
 
     /// Stores `viewport`, measured from the editor's first frame, the way

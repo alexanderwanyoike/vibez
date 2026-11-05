@@ -1,5 +1,5 @@
-//! The stretch of time a clip editor shows, framed on the loop until the
-//! producer zooms or scrolls it.
+//! The stretch of time a clip editor shows, framed on its opening span
+//! until the producer zooms, scrolls or frames the loop.
 
 use iced::mouse::ScrollDelta;
 use iced::Point;
@@ -9,12 +9,21 @@ use crate::timeline_geometry::{
     FRAME_MARGIN_PIXELS,
 };
 
+/// What the producer last asked one clip editor to show.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum StoredClipView {
+    /// A zoom and scroll of their own.
+    Viewport(TimelineViewport),
+    /// The loop, framed at whatever width the editor has (Ableton's Z).
+    Loop,
+}
+
 /// One clip editor's horizontal view, resolved against the editor's width.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct ClipEditorView {
-    stored: Option<TimelineViewport>,
-    framed_start: f64,
-    framed_end: f64,
+    stored: Option<StoredClipView>,
+    opening: (f64, f64),
+    loop_span: (f64, f64),
     content_beats: f64,
 }
 
@@ -43,50 +52,56 @@ pub(crate) fn wheel_intent(delta: ScrollDelta, shift: bool) -> WheelIntent {
 
 impl ClipEditorView {
     /// `stored` is the producer's view of this clip, if any; until then the
-    /// editor frames `framed_start..framed_end`. Scrolling reaches the later
-    /// of `content_beats` and the framed span.
+    /// editor frames `opening`, and [`StoredClipView::Loop`] frames
+    /// `loop_span`. Scrolling reaches the later of `content_beats` and
+    /// either span.
     pub(crate) fn new(
-        stored: Option<TimelineViewport>,
-        framed_start: f64,
-        framed_end: f64,
+        stored: Option<StoredClipView>,
+        opening: (f64, f64),
+        loop_span: (f64, f64),
         content_beats: f64,
     ) -> Self {
         Self {
             stored,
-            framed_start,
-            framed_end,
-            content_beats: content_beats.max(framed_end),
+            opening,
+            loop_span,
+            content_beats: content_beats.max(opening.1).max(loop_span.1),
         }
     }
 
-    /// Frames `loop_span` while the clip loops, otherwise the clip from its
-    /// start.
+    /// Opens on `loop_span` while the clip loops, otherwise on the clip
+    /// from its start, and frames the same span for the loop.
     pub(crate) fn framing(
-        stored: Option<TimelineViewport>,
+        stored: Option<StoredClipView>,
         loop_span: Option<(f64, f64)>,
         clip_beats: f64,
         content_beats: f64,
     ) -> Self {
-        match loop_span.filter(|(start, end)| end > start) {
-            Some((start, end)) => Self::new(stored, start, end, content_beats),
-            None => Self::new(stored, 0.0, clip_beats, content_beats),
-        }
+        let shown = loop_span
+            .filter(|(start, end)| end > start)
+            .unwrap_or((0.0, clip_beats));
+        Self::new(stored, shown, shown, content_beats)
     }
 
     /// `width` is the time area's width, excluding any fixed header.
     pub(crate) fn viewport(self, width: f32) -> TimelineViewport {
-        self.stored.unwrap_or_else(|| {
+        let framed = |(start, end): (f64, f64)| {
             let mut viewport = TimelineViewport::default();
-            viewport.frame(self.framed_start, self.framed_end, width);
+            viewport.frame(start, end, width);
             viewport
-        })
+        };
+        match self.stored {
+            Some(StoredClipView::Viewport(viewport)) => viewport,
+            Some(StoredClipView::Loop) => framed(self.loop_span),
+            None => framed(self.opening),
+        }
     }
 
     /// The framing to store when a marker drag begins: the frame follows
     /// the loop, so dragging the loop would otherwise move the editor
     /// under the pointer.
     pub(crate) fn pin(self, width: f32) -> Option<TimelineViewport> {
-        self.stored.is_none().then(|| self.viewport(width))
+        (!matches!(self.stored, Some(StoredClipView::Viewport(_)))).then(|| self.viewport(width))
     }
 
     pub(crate) fn geometry(self, width: f32, origin_x: f32) -> TimelineGeometry {
@@ -151,7 +166,7 @@ mod tests {
 
     #[test]
     fn a_clip_editor_ruler_drag_zooms_and_pans_as_the_arrange_ruler_does() {
-        let view = ClipEditorView::new(None, 0.0, 16.0, 64.0);
+        let view = ClipEditorView::new(None, (0.0, 16.0), (0.0, 16.0), 64.0);
         let width = 600.0;
         let start = view.viewport(width);
         let pressed = Point::new(300.0, 10.0);
