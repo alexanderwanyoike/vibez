@@ -35,17 +35,14 @@ pub struct TrackHeaderFlags {
     pub hovered: bool,
 }
 
-impl TrackHeaderFlags {
-    /// An audio track's input controls show while its header is hovered,
-    /// and stay while the track is armed, resampling or monitoring.
-    fn shows_audio_input(self, track: &ProjectTrack, armed: bool) -> bool {
-        track.kind == TrackKind::Audio
-            && (self.hovered
-                || armed
-                || track.audio_input_route.resample_source().is_some()
-                || track.input_monitoring != InputMonitoring::Off)
-    }
+/// An open pick list menu hides the pointer from the header beneath it, so
+/// input controls shown only on hover would vanish, menu and all, before a
+/// choice could be made.
+fn shows_audio_input(track: &ProjectTrack) -> bool {
+    track.kind == TrackKind::Audio
+}
 
+impl TrackHeaderFlags {
     /// Whether the quiet add action is shown and clickable.
     fn shows_actions(self) -> bool {
         self.hovered
@@ -100,8 +97,10 @@ where
             pick_list::Style {
                 text_color: if highlighted {
                     th::accent()
-                } else {
+                } else if engaged {
                     th::text()
+                } else {
+                    th::text_dim()
                 },
                 placeholder_color: th::text_muted(),
                 handle_color: if engaged || highlighted {
@@ -319,7 +318,7 @@ pub fn view_track_header<'a>(
         }
     };
 
-    let track_controls: Element<'_, Message> = if flags.shows_audio_input(track, armed) {
+    let track_controls: Element<'_, Message> = if shows_audio_input(track) {
         let arm_color = if armed { th::danger() } else { th::text_dim() };
         let arm_icon = if armed {
             icons::CIRCLE_DOT
@@ -520,7 +519,7 @@ mod tests {
 
     #[test]
     fn an_audio_header_shows_its_input_without_hover() {
-        assert!(TrackHeaderFlags::default().shows_audio_input(&audio_track(), false));
+        assert!(shows_audio_input(&audio_track()));
     }
 
     #[test]
@@ -547,11 +546,7 @@ mod tests {
     fn a_midi_header_never_shows_audio_input() {
         let mut midi = audio_track();
         midi.kind = TrackKind::Midi;
-        let hovered = TrackHeaderFlags {
-            hovered: true,
-            ..TrackHeaderFlags::default()
-        };
 
-        assert!(!hovered.shows_audio_input(&midi, true));
+        assert!(!shows_audio_input(&midi));
     }
 }
