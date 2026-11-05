@@ -1,6 +1,6 @@
-//! Compact Section Record and Capture strip shared by every Perform mode.
+//! Section Record and Capture controls and status for Perform's header.
 
-use iced::widget::{button, column, container, horizontal_space, pick_list, row, text};
+use iced::widget::{button, container, horizontal_space, pick_list, row, text};
 use iced::{Element, Length, Theme};
 
 use crate::domains::perform::{
@@ -13,15 +13,17 @@ use crate::theme as th;
 use crate::typography::{PERFORM_LABEL, PERFORM_TECH, PERFORM_TECH_STRONG};
 use crate::widgets::{control_style, segment_group};
 
-use super::views_perform_header::{header_rows, HeaderRows};
+use super::views_perform_header::RecordGroup;
 use super::*;
 
 /// Room around a record control's label, so buttons and lists stand the
 /// same height.
-pub(super) const RECORD_CONTROL_PADDING: [f32; 2] = [6.0, 9.0];
+pub(super) const RECORD_CONTROL_PADDING: [f32; 2] = [6.0, 10.0];
 
 impl App {
-    pub(super) fn view_section_record_bar(&self) -> Element<'_, Message> {
+    /// Section Record's and Capture's controls and status, for Perform's
+    /// header.
+    pub(super) fn section_record_group(&self) -> RecordGroup<'_> {
         let record = &self.state.perform.section_record;
         let capture = &self.state.perform.capture;
         let active = record.is_active();
@@ -105,70 +107,33 @@ impl App {
             th::text_dim()
         };
 
-        let status = |narrow: bool| -> Element<'_, Message> {
-            let target = text(target.clone())
-                .font(PERFORM_TECH)
+        let line = |content: String, font| {
+            text(content)
+                .font(font)
                 .size(9)
-                .color(th::text_dim());
-            let phase = text(phase.clone())
-                .font(PERFORM_LABEL)
-                .size(9)
-                .color(state_color);
-            let destination = text(capture_phase.clone())
-                .font(PERFORM_LABEL)
-                .size(9)
-                .color(if capturing {
-                    th::danger()
-                } else {
-                    th::accent()
-                });
-            if narrow {
-                column![target, row![phase, destination].spacing(12)]
-                    .spacing(3)
-                    .into()
+                .wrapping(text::Wrapping::None)
+        };
+        let status = row![
+            line(target, PERFORM_TECH).color(th::text_dim()),
+            line(phase, PERFORM_LABEL).color(state_color),
+            line(capture_phase, PERFORM_LABEL).color(if capturing {
+                th::danger()
             } else {
-                row![target, phase, destination]
-                    .spacing(12)
-                    .align_y(iced::Alignment::Center)
-                    .into()
-            }
-        };
-        let layout = header_rows(self.browser_workspace_width());
-        let content: Element<'_, Message> = match layout {
-            HeaderRows::One | HeaderRows::StatusBelow => {
-                let controls = row![record_button, count_in, mode, quantization, capture_button]
-                    .spacing(7)
-                    .align_y(iced::Alignment::Center);
-                if layout == HeaderRows::One {
-                    row![
-                        controls,
-                        container(horizontal_space()).width(Length::Fill),
-                        status(false),
-                    ]
-                    .align_y(iced::Alignment::Center)
-                    .into()
-                } else {
-                    column![controls, status(false)].spacing(6).into()
-                }
-            }
-            HeaderRows::Stacked => column![
-                row![record_button, count_in, mode]
-                    .spacing(7)
-                    .align_y(iced::Alignment::Center),
-                row![quantization, capture_button]
-                    .spacing(7)
-                    .align_y(iced::Alignment::Center),
-                status(true),
-            ]
-            .spacing(6)
-            .into(),
-        };
-
-        container(content)
-            .width(Length::Fill)
-            .height(Length::Shrink)
-            .padding([5, 12])
-            .into()
+                th::accent()
+            }),
+        ]
+        .spacing(12)
+        .align_y(iced::Alignment::Center);
+        RecordGroup {
+            status: status.into(),
+            controls: vec![
+                record_button.into(),
+                count_in,
+                mode,
+                quantization,
+                capture_button.into(),
+            ],
+        }
     }
 }
 

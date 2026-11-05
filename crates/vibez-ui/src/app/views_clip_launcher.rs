@@ -239,16 +239,10 @@ impl App {
             .height(Length::Fill)
             .into()
         };
-        super::views_perform::perform_cards(
-            column![
-                self.view_perform_mode_selector(width),
-                self.view_clip_record_controls()
-            ],
-            content,
-        )
+        self.perform_cards(self.clip_record_group(), content)
     }
 
-    fn view_clip_record_controls(&self) -> Element<'_, Message> {
+    fn clip_record_group(&self) -> super::views_perform_header::RecordGroup<'_> {
         use crate::domains::perform::clip_record::{ClipRecordMsg, RecordLength};
         use crate::domains::perform::loop_record::{
             LoopRecordCountIn, LoopRecordMode, LoopRecordQuantization,
@@ -274,55 +268,63 @@ impl App {
                 )
             })
             .unwrap_or_else(|| "Record inside a cell".into());
-        let controls = row![
+        let controls: Vec<Element<'_, Message>> = vec![
             text("NEW CLIP")
                 .font(PERFORM_TECH)
                 .size(9)
-                .color(th::text_dim()),
-            pick_list(RecordLength::ALL, Some(record.length), move |v| msg(
-                ClipRecordMsg::SetLength(v)
-            ))
+                .color(th::text_dim())
+                .into(),
+            pick_list(RecordLength::ALL, Some(record.length), move |v| {
+                msg(ClipRecordMsg::SetLength(v))
+            })
             .text_size(9)
             .padding(super::views_perform_record::RECORD_CONTROL_PADDING)
-            .style(control_style::list(th::accent())),
+            .style(control_style::list(th::accent()))
+            .into(),
             pick_list(
                 LoopRecordCountIn::ALL,
                 Some(record.notes.count_in),
-                move |v| msg(ClipRecordMsg::SetCountIn(v))
+                move |v| msg(ClipRecordMsg::SetCountIn(v)),
             )
             .text_size(9)
             .padding(super::views_perform_record::RECORD_CONTROL_PADDING)
-            .style(control_style::list(th::accent())),
+            .style(control_style::list(th::accent()))
+            .into(),
             text("MIDI")
                 .font(PERFORM_TECH)
                 .size(9)
-                .color(th::text_dim()),
-            pick_list(LoopRecordMode::ALL, Some(record.notes.mode), move |v| msg(
-                ClipRecordMsg::SetMode(v)
-            ))
+                .color(th::text_dim())
+                .into(),
+            pick_list(LoopRecordMode::ALL, Some(record.notes.mode), move |v| {
+                msg(ClipRecordMsg::SetMode(v))
+            })
             .text_size(9)
             .padding(super::views_perform_record::RECORD_CONTROL_PADDING)
-            .style(control_style::list(th::accent())),
+            .style(control_style::list(th::accent()))
+            .into(),
             pick_list(
                 LoopRecordQuantization::ALL,
                 Some(record.notes.quantization),
-                move |v| msg(ClipRecordMsg::SetQuantization(v))
+                move |v| msg(ClipRecordMsg::SetQuantization(v)),
             )
             .text_size(9)
             .padding(super::views_perform_record::RECORD_CONTROL_PADDING)
-            .style(control_style::list(th::accent())),
-            text(status)
+            .style(control_style::list(th::accent()))
+            .into(),
+        ];
+        super::views_perform_header::RecordGroup {
+            status: text(status)
                 .font(PERFORM_TECH)
                 .size(9)
+                .wrapping(iced::widget::text::Wrapping::None)
                 .color(if record.is_active() {
                     th::danger()
                 } else {
                     th::text_dim()
-                }),
-        ]
-        .spacing(8)
-        .align_y(iced::Alignment::Center);
-        container(controls).padding([5, 12]).into()
+                })
+                .into(),
+            controls,
+        }
     }
 
     fn view_selected_clip_launch_options(&self) -> Element<'_, Message> {
