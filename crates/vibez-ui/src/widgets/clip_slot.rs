@@ -132,13 +132,23 @@ fn ring_path(area: Rectangle, width: f32) -> canvas::Path {
     )
 }
 
-/// The line marking how far through `film` a playing clip is.
+/// The line marking how far through `film` a playing clip is, shortened
+/// near either side so its ends stay inside the tile's rounded corners.
 fn progress_line(film: Rectangle, progress: f32) -> Rectangle {
-    let played = (film.width - 2.0) * progress.clamp(0.0, 1.0);
+    let x = film.x + 1.0 + (film.width - 2.0) * progress.clamp(0.0, 1.0);
+    let from_side = (x - film.x).min(film.x + film.width - (x + 1.0));
+    let inset = corner_pull(from_side, TILE_RADIUS).max(1.0);
     Rectangle::new(
-        Point::new(film.x + 1.0 + played, film.y + 1.0),
-        Size::new(1.0, film.height - 2.0),
+        Point::new(x, film.y + inset),
+        Size::new(1.0, (film.height - 2.0 * inset).max(0.0)),
     )
+}
+
+/// How far a rounded corner of `radius` pulls a tile's top and bottom edges
+/// in at `distance` from its side.
+fn corner_pull(distance: f32, radius: f32) -> f32 {
+    let across = (radius - distance).max(0.0);
+    radius - (radius * radius - across * across).max(0.0).sqrt()
 }
 
 fn rounded(area: Rectangle, radius: impl Into<iced::border::Radius>) -> canvas::Path {
@@ -619,9 +629,20 @@ impl canvas::Program<Message> for ClipSlot<'_> {
             let film = film(bounds.size());
             if let Some(progress) = self.progress {
                 let line = progress_line(film, progress);
-                overlay.fill_rectangle(
+                let played = Rectangle::new(
                     Point::new(film.x + 1.0, film.y + 1.0),
                     Size::new(line.x - film.x - 1.0, film.height - 2.0),
+                );
+                let left = (TILE_RADIUS - 1.0).min(played.width).max(0.0);
+                overlay.fill(
+                    &rounded(
+                        played,
+                        iced::border::Radius {
+                            top_left: left,
+                            bottom_left: left,
+                            ..Default::default()
+                        },
+                    ),
                     th::with_alpha(self.color, 0.07),
                 );
                 overlay.fill_rectangle(
