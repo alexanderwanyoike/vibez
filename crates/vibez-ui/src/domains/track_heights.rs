@@ -1,5 +1,5 @@
-//! Arrange track heights: how tall each track's lane is drawn, and the
-//! header-edge drag that resizes one lane or, with Alt, every lane.
+//! How tall each Arrange track's lane is drawn, as header-edge drags
+//! resize one lane or, with Alt, every lane.
 
 use std::collections::HashMap;
 
@@ -16,8 +16,8 @@ pub const MAX_TRACK_HEIGHT: f32 = 420.0;
 pub enum TrackHeightMsg {
     /// Pressed on this track header's bottom edge.
     BeginResize(TrackId),
-    /// The pointer moved to this window y during a resize.
-    DragTo(f32),
+    /// The pointer moved during a resize.
+    PointerMoved,
     EndResize,
 }
 
@@ -112,9 +112,9 @@ impl TrackHeights {
                     changed: false,
                 });
             }
-            TrackHeightMsg::DragTo(cursor_y) => {
+            TrackHeightMsg::PointerMoved => {
                 if let Some(resize) = &mut self.resize {
-                    let height = clamp_height(resize.start_height + cursor_y - resize.anchor_y);
+                    let height = clamp_height(resize.start_height + ctx.cursor_y - resize.anchor_y);
                     for &track_id in &resize.targets {
                         let previous = self.heights.get(&track_id).copied();
                         if previous.unwrap_or(DEFAULT_TRACK_HEIGHT) != height {
@@ -159,7 +159,7 @@ mod tests {
             TrackHeightMsg::BeginResize(track_id),
             ctx(from_y, all_tracks, ids),
         );
-        heights.update(TrackHeightMsg::DragTo(to_y), ctx(to_y, all_tracks, ids));
+        heights.update(TrackHeightMsg::PointerMoved, ctx(to_y, all_tracks, ids));
         heights.update(TrackHeightMsg::EndResize, ctx(to_y, all_tracks, ids))
     }
 
@@ -170,7 +170,7 @@ mod tests {
 
         heights.update(TrackHeightMsg::BeginResize(ids[0]), ctx(300.0, false, &ids));
         assert_eq!(heights.resizing(), Some(ids[0]));
-        heights.update(TrackHeightMsg::DragTo(440.0), ctx(440.0, false, &ids));
+        heights.update(TrackHeightMsg::PointerMoved, ctx(440.0, false, &ids));
 
         assert_eq!(heights.height(ids[0]), DEFAULT_TRACK_HEIGHT + 140.0);
         assert_eq!(heights.height(ids[1]), DEFAULT_TRACK_HEIGHT);
@@ -222,7 +222,7 @@ mod tests {
         let ids = tracks();
         let mut heights = TrackHeights::default();
 
-        heights.update(TrackHeightMsg::DragTo(500.0), ctx(500.0, false, &ids));
+        heights.update(TrackHeightMsg::PointerMoved, ctx(500.0, false, &ids));
 
         assert_eq!(heights.height(ids[0]), DEFAULT_TRACK_HEIGHT);
     }

@@ -75,7 +75,9 @@ impl App {
         msg.navigate(viewport, total_beats, viewport_width)
     }
 
-    pub(super) fn route_track_height_message(&mut self, msg: TrackHeightMsg) {
+    /// `cursor_y` is the pointer's window y, which a pointer move reports
+    /// before the view records it.
+    pub(super) fn route_track_height_message(&mut self, msg: TrackHeightMsg, cursor_y: f32) {
         let track_ids: Vec<_> = self
             .state
             .project_tracks
@@ -84,7 +86,7 @@ impl App {
             .map(|track| track.id)
             .collect();
         let ctx = TrackHeightCtx {
-            cursor_y: self.state.view.cursor_y,
+            cursor_y,
             all_tracks: self.state.view.held_modifiers.alt(),
             track_ids: &track_ids,
         };
@@ -139,10 +141,13 @@ impl App {
         if self.state.track_heights.resizing().is_some() {
             match &msg {
                 ViewMsg::CursorMoved(_, y) => {
-                    self.route_track_height_message(TrackHeightMsg::DragTo(*y));
+                    self.route_track_height_message(TrackHeightMsg::PointerMoved, *y);
                 }
                 ViewMsg::MouseReleased => {
-                    self.route_track_height_message(TrackHeightMsg::EndResize);
+                    self.route_track_height_message(
+                        TrackHeightMsg::EndResize,
+                        self.state.view.cursor_y,
+                    );
                 }
                 _ => {}
             }
