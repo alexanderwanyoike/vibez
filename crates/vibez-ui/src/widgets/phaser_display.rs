@@ -41,7 +41,7 @@ fn label(
     frame.fill_text(canvas::Text {
         content: text,
         position: at,
-        color: th::text_muted(),
+        color: th::text_dim(),
         size: 9.0.into(),
         horizontal_alignment: horizontal,
         vertical_alignment: iced::alignment::Vertical::Center,

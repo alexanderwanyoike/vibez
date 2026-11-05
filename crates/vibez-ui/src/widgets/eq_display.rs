@@ -190,7 +190,7 @@ impl canvas::Program<Message> for EqDisplayWidget {
             frame.fill_text(canvas::Text {
                 content: label.to_string(),
                 position: Point::new(x, h - 2.0),
-                color: th::text_muted(),
+                color: th::text_dim(),
                 size: 9.0.into(),
                 horizontal_alignment: if f <= 20.0 {
                     iced::alignment::Horizontal::Left
@@ -217,7 +217,7 @@ impl canvas::Program<Message> for EqDisplayWidget {
             frame.fill_text(canvas::Text {
                 content: label.to_string(),
                 position: Point::new(4.0, self.db_to_y(db, h) - 1.0),
-                color: th::text_muted(),
+                color: th::text_dim(),
                 size: 9.0.into(),
                 vertical_alignment: iced::alignment::Vertical::Bottom,
                 ..canvas::Text::default()

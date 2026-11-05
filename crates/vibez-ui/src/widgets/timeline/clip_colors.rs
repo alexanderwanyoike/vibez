@@ -162,16 +162,7 @@ mod tests {
     /// WCAG contrast of `ink` drawn over `body` over `lane`, blended in
     /// linear light as the renderer does.
     fn ink_contrast(ink: Color, body: Color, lane: Color) -> f32 {
-        fn linear(c: f32) -> f32 {
-            if c <= 0.04045 {
-                c / 12.92
-            } else {
-                ((c + 0.055) / 1.055).powf(2.4)
-            }
-        }
-        fn luminance(c: Color) -> f32 {
-            0.2126 * linear(c.r) + 0.7152 * linear(c.g) + 0.0722 * linear(c.b)
-        }
+        use crate::theme::relative_luminance as luminance;
         let under = body.a * luminance(body) + (1.0 - body.a) * luminance(lane);
         let over = ink.a * luminance(ink) + (1.0 - ink.a) * under;
         (under.max(over) + 0.05) / (under.min(over) + 0.05)

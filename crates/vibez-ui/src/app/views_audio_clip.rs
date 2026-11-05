@@ -116,7 +116,7 @@ impl App {
             clip.warp_markers.interior().len(),
         ))
         .size(8)
-        .color(th::text_muted());
+        .color(th::text_dim());
         let header_row = row![
             label,
             marker_summary,
@@ -167,7 +167,7 @@ impl App {
             container(
                 row![
                     column![
-                        text(label_text).size(8).color(th::text_muted()),
+                        text(label_text).size(8).color(th::text_dim()),
                         row![
                             self.view_audio_clip_field_input(
                                 track_id,
@@ -298,7 +298,7 @@ impl App {
                 .size(13)
                 .color(track_color),
             column![
-                text("AUDIO CLIP").size(8).color(th::text_muted()),
+                text("AUDIO CLIP").size(8).color(th::text_dim()),
                 text(clip.name.clone())
                     .size(11)
                     .color(th::text())
@@ -311,7 +311,7 @@ impl App {
         .align_y(iced::Alignment::Center);
         let source_bounds = column![
             row![
-                text("SOURCE").size(8).color(th::text_muted()),
+                text("SOURCE").size(8).color(th::text_dim()),
                 horizontal_space(),
                 {
                     let reversed = clip.playback_direction
@@ -416,7 +416,7 @@ impl App {
         ]
         .spacing(3);
         let fade_bounds = column![
-            text("FADES").size(8).color(th::text_muted()),
+            text("FADES").size(8).color(th::text_dim()),
             range_row(
                 "FADE IN",
                 AudioClipInspectorField::FadeIn,
@@ -627,7 +627,7 @@ impl App {
             .spacing(6)
             .align_y(iced::Alignment::Center),
             row![
-                text("SOURCE BPM").size(8).color(th::text_muted()),
+                text("SOURCE BPM").size(8).color(th::text_dim()),
                 horizontal_space(),
                 bpm_input,
                 detect_btn,

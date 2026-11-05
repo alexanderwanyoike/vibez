@@ -461,7 +461,7 @@ impl PianoRollWidget {
                 frame.fill_text(canvas::Text {
                     content: format!("{}.{}", bar_index + 1, beat_in_bar),
                     position: iced::Point::new(x + 2.0, 29.0),
-                    color: theme::text_muted(),
+                    color: theme::text_dim(),
                     size: iced::Pixels(8.0),
                     ..Default::default()
                 });

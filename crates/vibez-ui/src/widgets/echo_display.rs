@@ -98,7 +98,7 @@ impl canvas::Program<Message> for TapsPlot<'_> {
             frame.fill_text(canvas::Text {
                 content: text,
                 position: at,
-                color: th::text_muted(),
+                color: th::text_dim(),
                 size: crate::widgets::device_controls::LABEL_SIZE.into(),
                 horizontal_alignment: if right {
                     iced::alignment::Horizontal::Right
@@ -251,7 +251,7 @@ impl canvas::Program<Message> for MotionPlot<'_> {
             frame.fill_text(canvas::Text {
                 content: text,
                 position: Point::new(left - 4.0, y(cent)),
-                color: th::text_muted(),
+                color: th::text_dim(),
                 size: crate::widgets::device_controls::LABEL_SIZE.into(),
                 horizontal_alignment: iced::alignment::Horizontal::Right,
                 vertical_alignment: iced::alignment::Vertical::Center,

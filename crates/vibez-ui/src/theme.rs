@@ -326,8 +326,8 @@ impl ThemePalette {
             bg_elevated: rgb(0.176, 0.176, 0.176),
             bg_hover: rgb(0.212, 0.212, 0.212),
             text: rgb(0.878, 0.878, 0.878),
-            text_dim: rgb(0.502, 0.502, 0.502),
-            text_muted: rgb(0.314, 0.314, 0.314),
+            text_dim: rgb(0.58, 0.58, 0.58),
+            text_muted: rgb(0.46, 0.46, 0.46),
             accent: rgb(1.0, 0.549, 0.0),
             accent_dim: rgb(0.600, 0.329, 0.0),
             border: rgb(0.227, 0.227, 0.227),
@@ -343,7 +343,7 @@ impl ThemePalette {
             knob_arc: rgb(0.533, 0.533, 0.533),
             knob_body: rgb(0.12, 0.12, 0.12),
             knob_body_engaged: rgb(0.16, 0.16, 0.16),
-            knob_track: rgb(0.22, 0.22, 0.22),
+            knob_track: rgb(0.30, 0.30, 0.30),
             fader_handle: rgb(0.533, 0.533, 0.533),
             track_colors: crate::themes::TRACKS_CLASSIC,
             eq_lf: rgb(0.65, 0.46, 0.28),
@@ -374,6 +374,17 @@ impl ThemePalette {
     /// Background of the timeline lanes behind clips.
     pub fn lane(&self) -> Color {
         blend(self.bg_dark, self.text, self.lane_style.recess)
+    }
+
+    /// Every background the text tiers are drawn on.
+    pub(crate) fn text_surfaces(&self) -> [(&'static str, Color); 5] {
+        [
+            ("bg_dark", self.bg_dark),
+            ("bg_surface", self.bg_surface),
+            ("bg_elevated", self.bg_elevated),
+            ("display_bg", self.display_bg),
+            ("lane", self.lane()),
+        ]
     }
 }
 
@@ -519,6 +530,24 @@ impl Hsl {
             a: alpha,
         }
     }
+}
+
+/// WCAG 2 relative luminance of an sRGB colour, ignoring alpha.
+pub(crate) fn relative_luminance(c: Color) -> f32 {
+    let linear = |v: f32| {
+        if v <= 0.04045 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * linear(c.r) + 0.7152 * linear(c.g) + 0.0722 * linear(c.b)
+}
+
+/// WCAG 2 contrast ratio between two opaque colours, from 1 to 21.
+pub(crate) fn contrast_ratio(a: Color, b: Color) -> f32 {
+    let (a, b) = (relative_luminance(a), relative_luminance(b));
+    (a.max(b) + 0.05) / (a.min(b) + 0.05)
 }
 
 static STRENGTH: RwLock<ColourStrength> = RwLock::new(ColourStrength::Vivid);

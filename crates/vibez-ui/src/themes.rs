@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use iced::Color;
 
-use crate::theme::{ClipStyle, LaneStyle, ThemePalette};
+use crate::theme::{contrast_ratio, ClipStyle, LaneStyle, ThemePalette};
 
 const fn rgb8(r: u8, g: u8, b: u8) -> Color {
     Color {
@@ -144,6 +144,13 @@ const TRACKS_MUTED: [Color; 8] = [
     rgb8(162, 106, 130),
 ];
 
+/// Contrast floors for the dimmer text tiers on every surface they are
+/// drawn on. Dim text carries 8 to 10 px captions and values, so it keeps
+/// WCAG AA's 4.5:1. Muted text only carries hints, placeholders and
+/// disabled states, so it keeps the 3:1 AA allows for large text.
+const TEXT_DIM_CONTRAST: f32 = 4.5;
+const TEXT_MUTED_CONTRAST: f32 = 3.0;
+
 struct Seed {
     name: &'static str,
     bg: Color,
@@ -153,19 +160,47 @@ struct Seed {
     eq: [Color; 4],
 }
 
+/// Fill the dim and muted text tiers by stepping `mix` away from the text
+/// as far as each nominal step, or less where the tier would fall under its
+/// contrast floor on a surface it is drawn on.
+fn with_text_tiers(
+    mut palette: ThemePalette,
+    [dim_step, muted_step]: [f32; 2],
+    mix: impl Fn(f32) -> Color,
+) -> ThemePalette {
+    let surfaces = palette.text_surfaces();
+    let holding = |floor: f32, nominal: f32| {
+        let mut step = nominal;
+        while step > 0.0 {
+            let tier = mix(step);
+            if surfaces
+                .iter()
+                .all(|&(_, surface)| contrast_ratio(tier, surface) >= floor)
+            {
+                return tier;
+            }
+            step -= 0.01;
+        }
+        mix(0.0)
+    };
+    palette.text_dim = holding(TEXT_DIM_CONTRAST, dim_step);
+    palette.text_muted = holding(TEXT_MUTED_CONTRAST, muted_step);
+    palette
+}
+
 /// Fill a complete palette from a dark seed: surfaces step up from
 /// the background, text tiers step down, grids sit between.
 fn dark(seed: Seed) -> ThemePalette {
     let bg = seed.bg;
-    ThemePalette {
+    let palette = ThemePalette {
         name: seed.name.to_string(),
         bg_dark: bg,
         bg_surface: lighten(bg, 0.045),
         bg_elevated: lighten(bg, 0.085),
         bg_hover: lighten(bg, 0.125),
         text: seed.text,
-        text_dim: darken(seed.text, 0.43),
-        text_muted: darken(seed.text, 0.64),
+        text_dim: seed.text,
+        text_muted: seed.text,
         accent: seed.accent,
         accent_dim: darken(seed.accent, 0.4),
         border: lighten(bg, 0.14),
@@ -181,7 +216,7 @@ fn dark(seed: Seed) -> ThemePalette {
         knob_arc: lighten(bg, 0.48),
         knob_body: lighten(bg, 0.02),
         knob_body_engaged: lighten(bg, 0.065),
-        knob_track: lighten(bg, 0.13),
+        knob_track: lighten(bg, 0.2),
         fader_handle: lighten(bg, 0.48),
         track_colors: seed.tracks,
         eq_lf: seed.eq[0],
@@ -204,22 +239,23 @@ fn dark(seed: Seed) -> ThemePalette {
         piano_key_label: lighten(bg, 0.32),
         clip_style: ClipStyle::DARK,
         lane_style: LaneStyle::DARK,
-    }
+    };
+    with_text_tiers(palette, [0.43, 0.64], |step| darken(seed.text, step))
 }
 
 /// Fill a complete palette from a light seed: surfaces step down
 /// from the background, text is ink, grids darker than paper.
 fn light(seed: Seed) -> ThemePalette {
     let bg = seed.bg;
-    ThemePalette {
+    let palette = ThemePalette {
         name: seed.name.to_string(),
         bg_dark: bg,
         bg_surface: darken(bg, 0.035),
         bg_elevated: darken(bg, 0.065),
         bg_hover: darken(bg, 0.10),
         text: seed.text,
-        text_dim: lighten(seed.text, 0.38),
-        text_muted: lighten(seed.text, 0.58),
+        text_dim: seed.text,
+        text_muted: seed.text,
         accent: seed.accent,
         accent_dim: lighten(seed.accent, 0.3),
         border: darken(bg, 0.14),
@@ -235,8 +271,8 @@ fn light(seed: Seed) -> ThemePalette {
         knob_arc: darken(bg, 0.45),
         knob_body: darken(bg, 0.05),
         knob_body_engaged: darken(bg, 0.10),
-        knob_track: darken(bg, 0.18),
-        fader_handle: darken(bg, 0.45),
+        knob_track: darken(bg, 0.22),
+        fader_handle: darken(bg, 0.52),
         track_colors: seed.tracks,
         eq_lf: darken(seed.eq[0], 0.12),
         eq_lmf: darken(seed.eq[1], 0.12),
@@ -258,7 +294,8 @@ fn light(seed: Seed) -> ThemePalette {
         piano_key_label: darken(bg, 0.45),
         clip_style: ClipStyle::LIGHT,
         lane_style: LaneStyle::LIGHT,
-    }
+    };
+    with_text_tiers(palette, [0.38, 0.58], |step| lighten(seed.text, step))
 }
 
 /// All built-in themes, default first.
@@ -357,7 +394,7 @@ pub fn builtins() -> Vec<ThemePalette> {
             name: "Solarized Dark",
             bg: rgb8(0, 43, 54),
             accent: rgb8(38, 139, 210),
-            text: rgb8(147, 161, 161),
+            text: rgb8(196, 203, 203),
             tracks: [
                 rgb8(220, 50, 47),
                 rgb8(203, 75, 22),
@@ -416,7 +453,7 @@ pub fn builtins() -> Vec<ThemePalette> {
             name: "One Dark",
             bg: rgb8(40, 44, 52),
             accent: rgb8(97, 175, 239),
-            text: rgb8(171, 178, 191),
+            text: rgb8(209, 213, 220),
             tracks: [
                 rgb8(224, 108, 117),
                 rgb8(209, 154, 102),
@@ -491,7 +528,7 @@ pub fn builtins() -> Vec<ThemePalette> {
             name: "Solarized Light",
             bg: rgb8(253, 246, 227),
             accent: rgb8(38, 139, 210),
-            text: rgb8(88, 110, 117),
+            text: rgb8(40, 62, 70),
             tracks: [
                 rgb8(220, 50, 47),
                 rgb8(203, 75, 22),
@@ -619,17 +656,105 @@ mod tests {
         assert_eq!(themes[0].name, "Charcoal", "default first");
     }
 
+    /// Body text meets WCAG AAA.
+    const TEXT_CONTRAST: f32 = 7.0;
+    /// WCAG's 3:1 for graphics cannot hold for a knob ring, which sits
+    /// between the body inside it, the strip round it and the band colour
+    /// drawn over it: a ring 3:1 off a dark body is brighter than the dimmer
+    /// band colours. 1.4:1 is the smallest step that reads at the ring's
+    /// 2.5 px on every built-in theme.
+    const KNOB_RING_STEP: f32 = 1.4;
+    /// A fader handle is the control itself, so it keeps WCAG's 3:1 for
+    /// graphics.
+    const FADER_HANDLE_CONTRAST: f32 = 3.0;
+
+    fn shortfalls(
+        theme: &ThemePalette,
+        role: &str,
+        colour: Color,
+        backgrounds: &[(&str, Color)],
+        floor: f32,
+    ) -> Vec<String> {
+        backgrounds
+            .iter()
+            .map(|&(name, background)| (name, contrast_ratio(colour, background)))
+            .filter(|&(_, ratio)| ratio < floor)
+            .map(|(name, ratio)| format!("{}: {role} on {name} {ratio:.2} < {floor}", theme.name))
+            .collect()
+    }
+
     #[test]
-    fn builtin_text_contrasts_with_background() {
-        // Cheap luminance gate: every theme's primary text must sit
-        // far from its background, dark or light.
-        fn luma(c: Color) -> f32 {
-            0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
-        }
-        for t in builtins() {
-            let d = (luma(t.text) - luma(t.bg_dark)).abs();
-            assert!(d > 0.45, "theme {} text/bg contrast too low: {d}", t.name);
-        }
+    fn every_builtin_theme_keeps_its_text_tiers_readable_on_every_surface() {
+        let failures: Vec<String> = builtins()
+            .iter()
+            .flat_map(|theme| {
+                let surfaces = theme.text_surfaces();
+                [
+                    ("text", theme.text, TEXT_CONTRAST),
+                    ("text_dim", theme.text_dim, TEXT_DIM_CONTRAST),
+                    ("text_muted", theme.text_muted, TEXT_MUTED_CONTRAST),
+                ]
+                .into_iter()
+                .flat_map(move |(role, colour, floor)| {
+                    shortfalls(theme, role, colour, &surfaces, floor)
+                })
+            })
+            .collect();
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    #[test]
+    fn every_builtin_theme_steps_its_knob_rings_clear_of_body_strip_and_arc() {
+        let failures: Vec<String> = builtins()
+            .iter()
+            .flat_map(|theme| {
+                let around = [
+                    ("knob_body", theme.knob_body),
+                    ("bg_surface", theme.bg_surface),
+                    ("bg_elevated", theme.bg_elevated),
+                ];
+                let ring = [("knob_track", theme.knob_track)];
+                let mut failures = shortfalls(
+                    theme,
+                    "knob_track",
+                    theme.knob_track,
+                    &around,
+                    KNOB_RING_STEP,
+                );
+                for (role, arc) in [
+                    ("accent", theme.accent),
+                    ("eq_lf", theme.eq_lf),
+                    ("eq_lmf", theme.eq_lmf),
+                    ("eq_hmf", theme.eq_hmf),
+                    ("eq_hf", theme.eq_hf),
+                ] {
+                    failures.extend(shortfalls(theme, role, arc, &ring, KNOB_RING_STEP));
+                }
+                failures
+            })
+            .collect();
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    #[test]
+    fn every_builtin_theme_sets_its_fader_handles_clear_of_their_track_and_strip() {
+        let failures: Vec<String> = builtins()
+            .iter()
+            .flat_map(|theme| {
+                let behind = [
+                    ("fader_track", theme.bg_elevated),
+                    ("bg_surface", theme.bg_surface),
+                ];
+                shortfalls(
+                    theme,
+                    "fader_handle",
+                    theme.fader_handle,
+                    &behind,
+                    FADER_HANDLE_CONTRAST,
+                )
+            })
+            .collect();
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
 
     #[test]

@@ -29,7 +29,7 @@ fn label(frame: &mut canvas::Frame, text: String, at: Point, align: Horizontal) 
     frame.fill_text(canvas::Text {
         content: text,
         position: at,
-        color: th::text_muted(),
+        color: th::text_dim(),
         size: LABEL_SIZE.into(),
         horizontal_alignment: align,
         vertical_alignment: iced::alignment::Vertical::Center,

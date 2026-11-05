@@ -77,7 +77,7 @@ fn display_field<'a>(
     width: f32,
 ) -> Element<'a, Message> {
     container(
-        column![value.into(), style::display_label(label, th::text_muted())]
+        column![value.into(), style::display_label(label, th::text_dim())]
             .spacing(1)
             .align_x(Alignment::Center),
     )
@@ -192,7 +192,7 @@ impl App {
 
         container(
             row![
-                column![bpm_input, style::display_label("BPM", th::text_muted())]
+                column![bpm_input, style::display_label("BPM", th::text_dim())]
                     .spacing(1)
                     .align_x(Alignment::Center),
                 nudges,
@@ -237,7 +237,7 @@ impl App {
         let label = if locked {
             style::display_label("CAPTURE LOCK", th::accent())
         } else {
-            style::display_label("SWING", th::text_muted())
+            style::display_label("SWING", th::text_dim())
         };
 
         container(

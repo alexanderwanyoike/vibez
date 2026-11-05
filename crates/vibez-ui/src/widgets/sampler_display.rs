@@ -265,7 +265,7 @@ impl canvas::Program<Message> for SampleView<'_> {
                     frame.fill_text(canvas::Text {
                         content: time_label(at),
                         position: Point::new(x + 2.0, plot.y + plot.height + LABEL_H / 2.0),
-                        color: th::text_muted(),
+                        color: th::text_dim(),
                         size: 9.0.into(),
                         vertical_alignment: iced::alignment::Vertical::Center,
                         ..canvas::Text::default()
