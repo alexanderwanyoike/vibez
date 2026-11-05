@@ -1,7 +1,7 @@
 //! The filled, borderless look buttons and switches share: the control
 //! shade at rest, the hover shade under the pointer, solid colour while on.
 
-use iced::widget::button;
+use iced::widget::{button, pick_list};
 use iced::{Border, Color, Theme};
 
 use crate::theme as th;
@@ -25,6 +25,12 @@ pub fn ink(on: Option<Color>, status: button::Status) -> Color {
         None if status == button::Status::Disabled => th::text_muted(),
         None => th::text_dim(),
     }
+}
+
+/// A pick list filled like a control, its handle lit in `highlight` while
+/// hovered or open.
+pub fn list(highlight: Color) -> impl Fn(&Theme, pick_list::Status) -> pick_list::Style {
+    move |_theme, _status| todo!("{highlight:?}")
 }
 
 fn hovered(status: button::Status) -> bool {
@@ -70,6 +76,18 @@ mod tests {
 
         assert_eq!(hovered.background, Some(th::bg_hover().into()));
         assert_eq!(hovered.text_color, th::text());
+    }
+
+    #[test]
+    fn a_pick_list_is_filled_like_a_control_and_lights_its_handle_while_open() {
+        let idle = list(LIT)(&Theme::Dark, pick_list::Status::Active);
+        let open = list(LIT)(&Theme::Dark, pick_list::Status::Opened);
+
+        assert_eq!(idle.background, th::control().into());
+        assert_eq!(idle.border.width, 0.0);
+        assert_eq!(idle.handle_color, th::text_dim());
+        assert_eq!(open.background, th::bg_hover().into());
+        assert_eq!(open.handle_color, LIT);
     }
 
     #[test]
