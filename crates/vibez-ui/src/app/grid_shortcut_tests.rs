@@ -10,6 +10,7 @@ use vibez_core::perform::GrooveGrid;
 /// clip is open in the piano roll.
 fn app_with_note_clip(open: bool) -> App {
     let mut app = super::test_support::app();
+    app.state.view.workspace = crate::state::Workspace::Arrange;
     let mut track = ProjectTrack::new(TrackId::new(), "MIDI".into(), 0);
     track.kind = vibez_core::midi::TrackKind::Midi;
     let track_id = track.id;
@@ -69,5 +70,17 @@ fn command_one_without_an_open_clip_narrows_the_arrange_grid() {
     narrow_grid(&mut app);
 
     assert_eq!(app.state.view.arrange_grid.adaptive_bias, 1);
+    assert_eq!(app.state.view.clip_grid, GridConfig::default());
+}
+
+#[test]
+fn command_one_with_the_perform_pads_focused_edits_no_grid() {
+    let mut app = app_with_note_clip(true);
+    app.state.view.workspace = crate::state::Workspace::Perform;
+    app.state.perform.editor_focus = crate::domains::perform::PerformEditorFocus::PadSurface;
+
+    narrow_grid(&mut app);
+
+    assert_eq!(app.state.view.arrange_grid, GridConfig::default());
     assert_eq!(app.state.view.clip_grid, GridConfig::default());
 }
