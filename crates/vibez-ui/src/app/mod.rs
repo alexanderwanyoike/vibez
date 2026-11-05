@@ -772,6 +772,8 @@ mod clip_drag_undo_tests;
 
 #[cfg(test)]
 mod clip_drag_cancel_tests;
+#[cfg(test)]
+mod fade_drag_cancel_tests;
 
 #[cfg(test)]
 mod clip_shortcut_tests;
