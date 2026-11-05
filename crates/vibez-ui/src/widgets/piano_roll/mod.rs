@@ -13,7 +13,7 @@ use crate::state::{GridConfig, PianoRollEditMode, SnapGrid, UiNoteClip, UndoGest
 use crate::timeline_geometry::TimelineGeometry;
 use crate::widgets::clip_loop_markers::{self, LoopDrag};
 use crate::widgets::double_click::DoubleClick;
-use crate::widgets::drag_phase::past_click_slop;
+use crate::widgets::drag_phase::{past_click_slop, DragPhase};
 use crate::widgets::local_drag::LocalDrag;
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::MidiNote;
@@ -340,7 +340,7 @@ enum DragAction {
         start_x: f32,
         start_y: f32,
         undo_gesture: UndoGestureId,
-        started: bool,
+        phase: DragPhase,
         sent_moves: Vec<(usize, f64, u8)>,
     },
     /// Resizing the grabbed note and every note selected with it, together.
@@ -350,7 +350,7 @@ enum DragAction {
         original_notes: Vec<MovedNote>,
         start_x: f32,
         undo_gesture: UndoGestureId,
-        started: bool,
+        phase: DragPhase,
         sent_duration: f64,
     },
     DrawNote {
@@ -584,7 +584,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                                     original_notes: grabbed_notes(&clip_data.notes, &resized),
                                     start_x: pos.x,
                                     undo_gesture: UndoGestureId::new(),
-                                    started: false,
+                                    phase: DragPhase::Pending,
                                     sent_duration: note.duration_beats,
                                 });
                                 return (
@@ -641,7 +641,7 @@ impl canvas::Program<Message> for PianoRollWidget {
                                     start_x: pos.x,
                                     start_y: pos.y,
                                     undo_gesture: UndoGestureId::new(),
-                                    started: false,
+                                    phase: DragPhase::Pending,
                                     sent_moves,
                                 });
                             }
@@ -750,22 +750,18 @@ impl canvas::Program<Message> for PianoRollWidget {
                         Some(DragAction::MoveNote {
                             start_x,
                             start_y,
-                            started,
+                            phase,
                             ..
-                        }) if !*started => {
-                            if !past_click_slop(Point::new(*start_x, *start_y), local) {
+                        }) => {
+                            if !phase.follow(Point::new(*start_x, *start_y), local) {
                                 return (canvas::event::Status::Captured, None);
                             }
-                            *started = true;
                         }
-                        Some(DragAction::ResizeNote {
-                            start_x, started, ..
-                        }) if !*started => {
-                            if !past_click_slop(Point::new(*start_x, 0.0), Point::new(local.x, 0.0))
-                            {
+                        // A resize follows the pointer's x alone.
+                        Some(DragAction::ResizeNote { start_x, phase, .. }) => {
+                            if !phase.follow(Point::new(*start_x, 0.0), Point::new(local.x, 0.0)) {
                                 return (canvas::event::Status::Captured, None);
                             }
-                            *started = true;
                         }
                         _ => {}
                     }

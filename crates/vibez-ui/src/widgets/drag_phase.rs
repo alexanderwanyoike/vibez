@@ -14,6 +14,25 @@ pub fn past_click_slop(from: Point, to: Point) -> bool {
     (to.x - from.x).abs() > CLICK_SLOP_PX || (to.y - from.y).abs() > CLICK_SLOP_PX
 }
 
+/// Whether a press is still a click or has become a drag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DragPhase {
+    #[default]
+    Pending,
+    Dragging,
+}
+
+impl DragPhase {
+    /// Becomes `Dragging` once the pointer pressed at `from` passes the click
+    /// slop at `to`, and stays so; true while dragging.
+    pub fn follow(&mut self, from: Point, to: Point) -> bool {
+        if *self == Self::Pending && past_click_slop(from, to) {
+            *self = Self::Dragging;
+        }
+        *self == Self::Dragging
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -25,5 +44,15 @@ mod tests {
         assert!(!past_click_slop(pressed, Point::new(104.0, 46.0)));
         assert!(past_click_slop(pressed, Point::new(104.5, 50.0)));
         assert!(past_click_slop(pressed, Point::new(100.0, 54.5)));
+    }
+
+    #[test]
+    fn a_drag_stays_a_drag_when_the_pointer_comes_back() {
+        let pressed = Point::new(100.0, 50.0);
+        let mut phase = DragPhase::default();
+
+        assert!(!phase.follow(pressed, Point::new(102.0, 50.0)));
+        assert!(phase.follow(pressed, Point::new(110.0, 50.0)));
+        assert!(phase.follow(pressed, pressed));
     }
 }
