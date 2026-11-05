@@ -132,6 +132,15 @@ fn ring_path(area: Rectangle, width: f32) -> canvas::Path {
     )
 }
 
+/// The line marking how far through `film` a playing clip is.
+fn progress_line(film: Rectangle, progress: f32) -> Rectangle {
+    let played = (film.width - 2.0) * progress.clamp(0.0, 1.0);
+    Rectangle::new(
+        Point::new(film.x + 1.0 + played, film.y + 1.0),
+        Size::new(1.0, film.height - 2.0),
+    )
+}
+
 fn rounded(area: Rectangle, radius: impl Into<iced::border::Radius>) -> canvas::Path {
     canvas::Path::rounded_rectangle(area.position(), area.size(), radius.into())
 }
@@ -609,15 +618,15 @@ impl canvas::Program<Message> for ClipSlot<'_> {
             let mut overlay = canvas::Frame::new(renderer, bounds.size());
             let film = film(bounds.size());
             if let Some(progress) = self.progress {
-                let played = (film.width - 2.0) * progress.clamp(0.0, 1.0);
+                let line = progress_line(film, progress);
                 overlay.fill_rectangle(
                     Point::new(film.x + 1.0, film.y + 1.0),
-                    Size::new(played, film.height - 2.0),
+                    Size::new(line.x - film.x - 1.0, film.height - 2.0),
                     th::with_alpha(self.color, 0.07),
                 );
                 overlay.fill_rectangle(
-                    Point::new(film.x + 1.0 + played, film.y + 1.0),
-                    Size::new(1.0, film.height - 2.0),
+                    line.position(),
+                    line.size(),
                     th::with_alpha(self.color, 0.7),
                 );
             }
