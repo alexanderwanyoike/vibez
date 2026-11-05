@@ -173,6 +173,33 @@ fn find_note_clip_mut(
         .find(|clip| clip.id == clip_id)
 }
 
+/// Apply `edit` to each indexed note of a clip with its value, and send
+/// every note it reached to the engine.
+fn edit_notes<T>(
+    tracks: &mut TimelineContent,
+    engine: &mut impl EngineHandle,
+    track_id: TrackId,
+    clip_id: ClipId,
+    values: impl IntoIterator<Item = (usize, T)>,
+    edit: impl Fn(&mut MidiNote, T),
+) {
+    let Some(clip) = find_note_clip_mut(tracks, track_id, clip_id) else {
+        return;
+    };
+    for (note_index, value) in values {
+        let Some(note) = clip.notes.get_mut(note_index) else {
+            continue;
+        };
+        edit(note, value);
+        engine.send(EngineCommand::EditNote {
+            track_id,
+            clip_id,
+            note_index,
+            note: *note,
+        });
+    }
+}
+
 /// Snap every note start to the grid and sync changed notes to the
 /// engine.
 fn quantize_note_clip(
@@ -365,50 +392,30 @@ impl PianoRollState {
                 track_id,
                 clip_id,
                 velocities,
-            } => {
-                let mut updates: Vec<(usize, MidiNote)> = Vec::new();
-                if let Some(clip) = find_note_clip_mut(tracks, track_id, clip_id) {
-                    for (note_index, velocity) in velocities {
-                        let Some(note) = clip.notes.get_mut(note_index) else {
-                            continue;
-                        };
-                        note.velocity = velocity.clamp(1, 127);
-                        updates.push((note_index, *note));
-                    }
-                }
-                for (note_index, note) in updates {
-                    engine.send(EngineCommand::EditNote {
-                        track_id,
-                        clip_id,
-                        note_index,
-                        note,
-                    });
-                }
-            }
+            } => edit_notes(
+                tracks,
+                engine,
+                track_id,
+                clip_id,
+                velocities,
+                |note, velocity| {
+                    note.velocity = velocity.clamp(1, 127);
+                },
+            ),
             PianoRollMsg::SetNoteDurations {
                 track_id,
                 clip_id,
                 durations,
-            } => {
-                let mut updates: Vec<(usize, MidiNote)> = Vec::new();
-                if let Some(clip) = find_note_clip_mut(tracks, track_id, clip_id) {
-                    for (note_index, duration_beats) in durations {
-                        let Some(note) = clip.notes.get_mut(note_index) else {
-                            continue;
-                        };
-                        note.duration_beats = duration_beats;
-                        updates.push((note_index, *note));
-                    }
-                }
-                for (note_index, note) in updates {
-                    engine.send(EngineCommand::EditNote {
-                        track_id,
-                        clip_id,
-                        note_index,
-                        note,
-                    });
-                }
-            }
+            } => edit_notes(
+                tracks,
+                engine,
+                track_id,
+                clip_id,
+                durations,
+                |note, duration| {
+                    note.duration_beats = duration;
+                },
+            ),
             PianoRollMsg::SelectNote(track_id, clip_id, note_index, shift_held) => {
                 if let Some(track) = find_track_mut(tracks, track_id) {
                     if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
