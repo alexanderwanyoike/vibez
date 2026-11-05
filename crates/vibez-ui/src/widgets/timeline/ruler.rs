@@ -107,8 +107,15 @@ impl RulerWidget {
     }
 
     /// The loop edit for the pointer at `beat`, if it changes the loop.
-    fn brace_edit(&self, drag: BraceDrag, gesture: UndoGestureId, beat: f64) -> Option<Message> {
-        let (start_beats, end_beats) = drag.loop_at(beat, self.grid, self.pixels_per_beat())?;
+    fn brace_edit(
+        &self,
+        drag: BraceDrag,
+        gesture: UndoGestureId,
+        beat: f64,
+        free: bool,
+    ) -> Option<Message> {
+        let context = self.snap_context(free);
+        let (start_beats, end_beats) = drag.loop_at(beat, &self.snap_targets, context)?;
         ((start_beats, end_beats) != (self.loop_start_beats, self.loop_end_beats)).then(|| {
             Message::Transport(TransportMsg::SetArrangementLoopRegion {
                 start_beats,
@@ -183,9 +190,12 @@ impl canvas::Program<Message> for RulerWidget {
                 };
                 let local = Point::new(pos.x - bounds.x, pos.y - bounds.y);
                 let message = match drag {
-                    RulerDragAction::Brace { drag, gesture } => {
-                        self.brace_edit(drag, gesture, self.geometry().x_to_beat(local.x))
-                    }
+                    RulerDragAction::Brace { drag, gesture } => self.brace_edit(
+                        drag,
+                        gesture,
+                        self.geometry().x_to_beat(local.x),
+                        state.alt_held,
+                    ),
                     RulerDragAction::Numbers {
                         beat,
                         start,

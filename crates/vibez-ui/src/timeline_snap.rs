@@ -47,6 +47,7 @@ pub struct SnapContext {
 enum Moves {
     Nothing,
     SelectedClips,
+    Loop,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -137,9 +138,13 @@ impl SnapTargets {
     }
 
     pub fn with_marker(mut self, beat: f64, kind: SnapTargetKind) -> Self {
+        let moved_by = match kind {
+            SnapTargetKind::LoopStart | SnapTargetKind::LoopEnd => Moves::Loop,
+            _ => Moves::Nothing,
+        };
         self.magnets.push(Magnet {
             target: SnapTarget { beat, kind },
-            moved_by: Moves::Nothing,
+            moved_by,
         });
         self
     }
@@ -165,6 +170,16 @@ impl SnapTargets {
         )
     }
 
+    /// Where a dragged end of the loop at `edge` lands.
+    pub fn loop_edge(&self, edge: f64, context: SnapContext) -> Snapped {
+        self.land(
+            &[edge],
+            Self::grid_shift(edge, context),
+            context,
+            Moves::Loop,
+        )
+    }
+
     /// Where the start of a span at `start`, `length` long, lands after
     /// `travel` beats of drag. The grid snaps the travel, so an off-grid
     /// span keeps its offset from the grid, while either edge may lock onto
@@ -176,12 +191,35 @@ impl SnapTargets {
         travel: f64,
         context: SnapContext,
     ) -> Snapped {
+        self.moved(start, length, travel, context, Moves::SelectedClips)
+    }
+
+    /// Where the loop at `start`, `length` long, starts after `travel`
+    /// beats of drag, landing as [`Self::moved_span`] does.
+    pub fn moved_loop(
+        &self,
+        start: f64,
+        length: f64,
+        travel: f64,
+        context: SnapContext,
+    ) -> Snapped {
+        self.moved(start, length, travel, context, Moves::Loop)
+    }
+
+    fn moved(
+        &self,
+        start: f64,
+        length: f64,
+        travel: f64,
+        context: SnapContext,
+        moves: Moves,
+    ) -> Snapped {
         let moved = start + travel;
         self.land(
             &[moved, moved + length],
             Self::grid_shift(travel, context),
             context,
-            Moves::SelectedClips,
+            moves,
         )
     }
 

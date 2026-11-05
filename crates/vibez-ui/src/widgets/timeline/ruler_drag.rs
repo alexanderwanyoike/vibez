@@ -1,6 +1,6 @@
 //! Where a drag in the ruler's loop strip puts the Arrange loop.
 
-use crate::state::GridConfig;
+use crate::timeline_snap::{SnapContext, SnapTargets};
 use crate::widgets::span_edges::{nearest_edge, span_with_end, span_with_start, SpanEdge};
 
 /// Which part of the loop brace a press in the loop strip took hold of.
@@ -39,19 +39,29 @@ pub(super) struct BraceDrag {
 }
 
 impl BraceDrag {
-    /// The loop with the pointer at `beat`, snapped to the grid at
-    /// `pixels_per_beat`; `None` while a new loop is still too short to
-    /// draw.
-    pub fn loop_at(self, beat: f64, grid: GridConfig, pixels_per_beat: f32) -> Option<(f64, f64)> {
-        let step = grid.effective_grid(pixels_per_beat).beat_size();
-        let snap = |beat: f64| grid.snap_beat(beat, pixels_per_beat);
+    /// The loop with the pointer at `beat`, snapped onto `targets`; `None`
+    /// while a new loop is still too short to draw.
+    pub fn loop_at(
+        self,
+        beat: f64,
+        targets: &SnapTargets,
+        context: SnapContext,
+    ) -> Option<(f64, f64)> {
+        let step = context
+            .grid
+            .effective_grid(context.pixels_per_beat)
+            .beat_size();
+        let snap = |beat: f64| targets.loop_edge(beat, context).beat;
         let (start, end) = self.original;
         match self.grab {
             BraceGrab::Start => Some(span_with_start(snap(beat), end, step)),
             BraceGrab::End => Some(span_with_end(snap(beat), start, step, f64::INFINITY)),
             BraceGrab::Whole => {
-                let shift = snap(beat - self.pressed_beat).max(-start);
-                Some((start + shift, end + shift))
+                let moved = targets
+                    .moved_loop(start, end - start, beat - self.pressed_beat, context)
+                    .beat
+                    .max(0.0);
+                Some((moved, moved + end - start))
             }
             BraceGrab::New => {
                 let anchor = snap(self.pressed_beat);
@@ -66,13 +76,19 @@ impl BraceDrag {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::SnapGrid;
+    use crate::state::{GridConfig, SnapGrid};
 
-    /// One beat grid at 20 px per beat.
-    const PPB: f32 = 20.0;
+    /// A one beat grid at 20 px per beat.
+    fn grid() -> SnapContext {
+        SnapContext {
+            grid: GridConfig::new(SnapGrid::QUARTER, true, false, 0),
+            pixels_per_beat: 20.0,
+            free: false,
+        }
+    }
 
-    fn grid() -> GridConfig {
-        GridConfig::new(SnapGrid::QUARTER, true, false, 0)
+    fn loop_at(drag: BraceDrag, beat: f64) -> Option<(f64, f64)> {
+        drag.loop_at(beat, &SnapTargets::default(), grid())
     }
 
     fn drag(grab: BraceGrab, pressed_beat: f64) -> BraceDrag {
@@ -106,29 +122,29 @@ mod tests {
     #[test]
     fn dragging_an_end_snaps_it_and_never_crosses_the_other() {
         let start = drag(BraceGrab::Start, 16.0);
-        assert_eq!(start.loop_at(11.6, grid(), PPB), Some((12.0, 32.0)));
-        assert_eq!(start.loop_at(40.0, grid(), PPB), Some((31.0, 32.0)));
-        assert_eq!(start.loop_at(-5.0, grid(), PPB), Some((0.0, 32.0)));
+        assert_eq!(loop_at(start, 11.6), Some((12.0, 32.0)));
+        assert_eq!(loop_at(start, 40.0), Some((31.0, 32.0)));
+        assert_eq!(loop_at(start, -5.0), Some((0.0, 32.0)));
 
         let end = drag(BraceGrab::End, 32.0);
-        assert_eq!(end.loop_at(35.3, grid(), PPB), Some((16.0, 35.0)));
-        assert_eq!(end.loop_at(2.0, grid(), PPB), Some((16.0, 17.0)));
+        assert_eq!(loop_at(end, 35.3), Some((16.0, 35.0)));
+        assert_eq!(loop_at(end, 2.0), Some((16.0, 17.0)));
     }
 
     #[test]
     fn dragging_the_middle_moves_the_whole_loop_by_whole_grid_steps() {
         let whole = drag(BraceGrab::Whole, 20.3);
 
-        assert_eq!(whole.loop_at(24.1, grid(), PPB), Some((20.0, 36.0)));
-        assert_eq!(whole.loop_at(-30.0, grid(), PPB), Some((0.0, 16.0)));
+        assert_eq!(loop_at(whole, 24.1), Some((20.0, 36.0)));
+        assert_eq!(loop_at(whole, -30.0), Some((0.0, 16.0)));
     }
 
     #[test]
     fn dragging_outside_the_brace_draws_a_new_snapped_loop_either_way() {
         let new = drag(BraceGrab::New, 40.2);
 
-        assert_eq!(new.loop_at(40.4, grid(), PPB), None);
-        assert_eq!(new.loop_at(43.8, grid(), PPB), Some((40.0, 44.0)));
-        assert_eq!(new.loop_at(37.1, grid(), PPB), Some((37.0, 40.0)));
+        assert_eq!(loop_at(new, 40.4), None);
+        assert_eq!(loop_at(new, 43.8), Some((40.0, 44.0)));
+        assert_eq!(loop_at(new, 37.1), Some((37.0, 40.0)));
     }
 }
