@@ -72,7 +72,7 @@ fn shade(track: Color, selected: bool, style: ClipStyle, lane: Color, text: Colo
 #[cfg(test)]
 mod tests {
     use super::shade;
-    use crate::theme::ClipStyle;
+    use crate::theme::{ClipStyle, ColourStrength};
     use iced::Color;
 
     const RED: Color = Color::from_rgb(0.8, 0.4, 0.4);
@@ -157,5 +157,50 @@ mod tests {
             selected.selection.map(|c| (c.r, c.g, c.b)),
             Some((0.9, 0.9, 0.9))
         );
+    }
+
+    /// WCAG contrast of `ink` drawn over `body` over `lane`, blended in
+    /// linear light as the renderer does.
+    fn ink_contrast(ink: Color, body: Color, lane: Color) -> f32 {
+        fn linear(c: f32) -> f32 {
+            if c <= 0.04045 {
+                c / 12.92
+            } else {
+                ((c + 0.055) / 1.055).powf(2.4)
+            }
+        }
+        fn luminance(c: Color) -> f32 {
+            0.2126 * linear(c.r) + 0.7152 * linear(c.g) + 0.0722 * linear(c.b)
+        }
+        let under = body.a * luminance(body) + (1.0 - body.a) * luminance(lane);
+        let over = ink.a * luminance(ink) + (1.0 - ink.a) * under;
+        (under.max(over) + 0.05) / (under.min(over) + 0.05)
+    }
+
+    #[test]
+    fn notes_waveforms_and_titles_stay_readable_at_every_colour_strength() {
+        for name in ["Charcoal", "Porcelain"] {
+            let theme = crate::themes::builtin_by_name(name).unwrap();
+            let lane = theme.lane();
+            for strength in [
+                ColourStrength::Vivid,
+                ColourStrength::Medium,
+                ColourStrength::Soft,
+            ] {
+                let style = strength.clip_style(theme.clip_style);
+                for authored in theme.track_colors {
+                    let colors = shade(strength.track(authored), false, style, lane, TEXT);
+                    let body = ink_contrast(colors.ink, colors.body, lane);
+                    let title = ink_contrast(colors.text, colors.title, lane);
+                    // Card 28's calm Charcoal body measures about 1.9 and
+                    // reads fine, so no strength may fall below it.
+                    assert!(body >= 1.8, "{name} {strength:?} {authored:?} body {body}");
+                    assert!(
+                        title >= 4.0,
+                        "{name} {strength:?} {authored:?} title {title}"
+                    );
+                }
+            }
+        }
     }
 }

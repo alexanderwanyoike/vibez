@@ -92,6 +92,8 @@ pub struct UiSettings {
     /// the app.
     #[serde(default = "default_interface_scale")]
     pub interface_scale: f32,
+    #[serde(default)]
+    pub colour_strength: crate::theme::ColourStrength,
     /// Ask GitHub at startup whether a newer release exists. On by
     /// default: the check is one request a day and the result is a
     /// dismissible chip, never a dialog. Off means no network call.
@@ -161,6 +163,7 @@ impl Default for UiSettings {
             confirm_project_track_deletion: false,
             auto_save_enabled: default_auto_save_enabled(),
             interface_scale: default_interface_scale(),
+            colour_strength: crate::theme::ColourStrength::default(),
             check_for_updates: default_check_for_updates(),
             last_update_check_unix: None,
         }
@@ -583,6 +586,23 @@ mod tests {
             serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
         assert_eq!(loaded.interface_scale, 1.25);
         assert_eq!(loaded.clamped_interface_scale(), 1.25);
+    }
+
+    #[test]
+    fn settings_written_before_colour_strength_show_vivid_colours() {
+        let loaded: UiSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(loaded.colour_strength, crate::theme::ColourStrength::Vivid);
+    }
+
+    #[test]
+    fn colour_strength_roundtrips() {
+        let settings = UiSettings {
+            colour_strength: crate::theme::ColourStrength::Soft,
+            ..Default::default()
+        };
+        let loaded: UiSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(loaded.colour_strength, crate::theme::ColourStrength::Soft);
     }
 
     #[test]

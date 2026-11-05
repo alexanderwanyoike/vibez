@@ -402,6 +402,137 @@ pub fn epoch() -> u64 {
     EPOCH.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+/// How strongly track colours show. A viewer preference saved in
+/// `ui.json` and applied over whichever theme is active, so a `.vzt` file
+/// never carries it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ColourStrength {
+    #[default]
+    Vivid,
+    Medium,
+    Soft,
+}
+
+impl ColourStrength {
+    /// A theme's track colour at this strength. Scaling HSL saturation
+    /// keeps each track's hue and lightness, so tracks stay tellable apart
+    /// and the ink drawn over them keeps its contrast.
+    pub fn track(self, authored: Color) -> Color {
+        let keep = match self {
+            Self::Vivid => return authored,
+            Self::Medium => MEDIUM_SATURATION,
+            Self::Soft => SOFT_SATURATION,
+        };
+        let hsl = Hsl::of(authored);
+        Hsl {
+            saturation: hsl.saturation * keep,
+            ..hsl
+        }
+        .color(authored.a)
+    }
+
+    /// A theme's clip style at this strength. Themes author the calm Medium
+    /// body, so Vivid and Soft are measured from it.
+    pub fn clip_style(self, authored: ClipStyle) -> ClipStyle {
+        match self {
+            Self::Vivid => ClipStyle {
+                body_opacity: authored.body_opacity
+                    + (1.0 - authored.body_opacity) * VIVID_BODY_TOWARD_SOLID,
+                body_toward_lane: authored.body_toward_lane * VIVID_BODY_LANE_MIX_KEPT,
+                ..authored
+            },
+            Self::Medium => authored,
+            Self::Soft => ClipStyle {
+                body_opacity: authored.body_opacity * SOFT_BODY_OPACITY_KEPT,
+                body_toward_lane: authored.body_toward_lane
+                    + (1.0 - authored.body_toward_lane) * SOFT_BODY_TOWARD_LANE,
+                ..authored
+            },
+        }
+    }
+}
+
+// Tuned by eye in Charcoal and Porcelain. Medium's saturation lands near
+// card 28b's muted palette. Soft's body stays close to Medium's because a
+// darker body on a dark lane loses the dark notes drawn over it.
+const MEDIUM_SATURATION: f32 = 0.8;
+const SOFT_SATURATION: f32 = 0.55;
+const VIVID_BODY_TOWARD_SOLID: f32 = 0.7;
+const VIVID_BODY_LANE_MIX_KEPT: f32 = 0.25;
+const SOFT_BODY_OPACITY_KEPT: f32 = 0.92;
+const SOFT_BODY_TOWARD_LANE: f32 = 0.06;
+
+/// A colour as hue, saturation and lightness, all in 0..=1.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Hsl {
+    pub hue: f32,
+    pub saturation: f32,
+    pub lightness: f32,
+}
+
+impl Hsl {
+    pub fn of(c: Color) -> Self {
+        let max = c.r.max(c.g).max(c.b);
+        let min = c.r.min(c.g).min(c.b);
+        let lightness = (max + min) / 2.0;
+        let chroma = max - min;
+        if chroma == 0.0 {
+            return Self {
+                hue: 0.0,
+                saturation: 0.0,
+                lightness,
+            };
+        }
+        let saturation = chroma / (1.0 - (2.0 * lightness - 1.0).abs());
+        let sector = if max == c.r {
+            ((c.g - c.b) / chroma).rem_euclid(6.0)
+        } else if max == c.g {
+            (c.b - c.r) / chroma + 2.0
+        } else {
+            (c.r - c.g) / chroma + 4.0
+        };
+        Self {
+            hue: sector / 6.0,
+            saturation,
+            lightness,
+        }
+    }
+
+    fn color(self, alpha: f32) -> Color {
+        let chroma = (1.0 - (2.0 * self.lightness - 1.0).abs()) * self.saturation;
+        let sector = self.hue * 6.0;
+        let second = chroma * (1.0 - (sector.rem_euclid(2.0) - 1.0).abs());
+        let (r, g, b) = match sector as u32 {
+            0 => (chroma, second, 0.0),
+            1 => (second, chroma, 0.0),
+            2 => (0.0, chroma, second),
+            3 => (0.0, second, chroma),
+            4 => (second, 0.0, chroma),
+            _ => (chroma, 0.0, second),
+        };
+        let base = self.lightness - chroma / 2.0;
+        Color {
+            r: r + base,
+            g: g + base,
+            b: b + base,
+            a: alpha,
+        }
+    }
+}
+
+static STRENGTH: RwLock<ColourStrength> = RwLock::new(ColourStrength::Vivid);
+
+/// Swap the colour strength; the next frame repaints everything.
+pub fn set_colour_strength(strength: ColourStrength) {
+    *STRENGTH.write().unwrap() = strength;
+    EPOCH.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn colour_strength() -> ColourStrength {
+    *STRENGTH.read().unwrap()
+}
+
 /// Snapshot of the whole current palette (theme save, swatches).
 #[allow(dead_code)] // wired up by the Appearance settings
 pub fn current() -> ThemePalette {
@@ -465,7 +596,7 @@ accessors! {
 }
 
 pub fn clip_style() -> ClipStyle {
-    CURRENT.read().unwrap().clip_style
+    colour_strength().clip_style(CURRENT.read().unwrap().clip_style)
 }
 
 pub fn lane_style() -> LaneStyle {
@@ -576,7 +707,7 @@ pub fn perform_grid_line() -> Color {
 /// Get a track color by index (wraps around).
 pub fn track_color(index: u8) -> Color {
     let palette = CURRENT.read().unwrap();
-    palette.track_colors[index as usize % palette.track_colors.len()]
+    colour_strength().track(palette.track_colors[index as usize % palette.track_colors.len()])
 }
 
 /// Darken a color by a factor (for borders, etc.)
@@ -661,6 +792,60 @@ mod tests {
         let palette: ThemePalette = serde_json::from_value(json).unwrap();
 
         assert_eq!(palette.lane_style, LaneStyle::DARK);
+    }
+
+    fn default_track_colours() -> Vec<Color> {
+        ["Charcoal", "Porcelain"]
+            .into_iter()
+            .flat_map(|name| crate::themes::builtin_by_name(name).unwrap().track_colors)
+            .collect()
+    }
+
+    #[test]
+    fn vivid_shows_track_colours_as_the_theme_authored_them() {
+        for color in default_track_colours() {
+            assert_eq!(ColourStrength::Vivid.track(color), color);
+        }
+    }
+
+    #[test]
+    fn medium_and_soft_desaturate_track_colours_keeping_their_lightness() {
+        for color in default_track_colours() {
+            let [soft, medium, vivid] = [
+                ColourStrength::Soft,
+                ColourStrength::Medium,
+                ColourStrength::Vivid,
+            ]
+            .map(|strength| Hsl::of(strength.track(color)));
+
+            assert!(
+                soft.saturation < medium.saturation && medium.saturation < vivid.saturation,
+                "{color:?}: soft {soft:?} medium {medium:?} vivid {vivid:?}"
+            );
+            for hsl in [soft, medium] {
+                assert!(hsl.saturation > 0.0, "{color:?} keeps some colour");
+                assert!((hsl.lightness - vivid.lightness).abs() < 0.01, "{color:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn medium_shows_the_authored_clip_style_and_vivid_bodies_are_the_most_solid() {
+        for authored in [ClipStyle::DARK, ClipStyle::LIGHT] {
+            let [soft, medium, vivid] = [
+                ColourStrength::Soft,
+                ColourStrength::Medium,
+                ColourStrength::Vivid,
+            ]
+            .map(|strength| strength.clip_style(authored));
+
+            assert_eq!(medium, authored);
+            assert!(soft.body_opacity < medium.body_opacity);
+            assert!(medium.body_opacity < vivid.body_opacity);
+            assert!(vivid.body_toward_lane < medium.body_toward_lane);
+            assert!(medium.body_toward_lane < soft.body_toward_lane);
+            assert_eq!((soft.ink, vivid.ink), (authored.ink, authored.ink));
+        }
     }
 
     #[test]

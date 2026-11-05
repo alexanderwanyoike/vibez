@@ -291,6 +291,7 @@ impl App {
             confirm_project_track_deletion: self.state.confirm_project_track_deletion,
             auto_save_enabled: self.state.auto_save_enabled,
             interface_scale: self.interface_scale,
+            colour_strength: crate::theme::colour_strength(),
             check_for_updates: self.state.update_check.enabled,
             last_update_check_unix: self.state.update_check.last_check_unix,
         };

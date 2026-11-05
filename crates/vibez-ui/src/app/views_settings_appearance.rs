@@ -1,4 +1,4 @@
-//! Appearance settings: theme selection and interface scale.
+//! Appearance settings: theme selection, colour strength and interface scale.
 //!
 //! Split out of `views_settings.rs`, which had reached the 1,000-line
 //! ceiling this repository enforces.
@@ -38,6 +38,7 @@ impl App {
                 palette.track_colors[3],
                 palette.track_colors[5],
             ] {
+                let color = th::colour_strength().track(color);
                 swatches = swatches.push(
                     container(
                         column![]
@@ -202,6 +203,24 @@ impl App {
         let list = scrollable(column![builtin_col, divider(), user_header, user_col,].spacing(8))
             .height(Length::Fixed(300.0));
 
+        let strength_header = text("Colour strength").size(13).color(th::text());
+        let strength_hint = text(
+            "How strongly track colours show on clips, headers, the mixer and \
+             Perform, whichever theme is active.",
+        )
+        .size(11)
+        .color(th::text_dim());
+        let strength_choice = crate::widgets::device_controls::segmented(
+            &[
+                (th::ColourStrength::Vivid, "Vivid"),
+                (th::ColourStrength::Medium, "Medium"),
+                (th::ColourStrength::Soft, "Soft"),
+            ],
+            th::colour_strength(),
+            Message::SetColourStrength,
+            th::accent(),
+        );
+
         // Interface scale. The readout is a percentage because that is
         // how the setting is named and reasoned about; the slider works
         // in the multiplier iced actually consumes.
@@ -234,6 +253,10 @@ impl App {
             list,
             divider(),
             save_row,
+            divider(),
+            strength_header,
+            strength_hint,
+            strength_choice,
             divider(),
             scale_header,
             scale_hint,
