@@ -717,7 +717,7 @@ mod tests {
     }
 
     #[test]
-    fn command_number_shortcuts_control_the_arrange_grid() {
+    fn command_number_shortcuts_control_the_focused_grid() {
         use iced::keyboard::Key;
 
         let command = command_modifier();
