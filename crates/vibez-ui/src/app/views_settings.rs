@@ -14,6 +14,10 @@ use super::*;
 
 impl App {
     pub(super) fn view_settings_modal(&self) -> Element<'_, Message> {
+        let sheet = settings_sheet_size(iced::Size::new(
+            self.state.view.window_width,
+            self.state.view.window_height,
+        ));
         let title = text("Settings").size(18).color(th::accent());
         let close_btn = button(icons::icon(icons::X).size(14).color(th::text_dim()))
             .on_press(Message::CloseSettings)
@@ -53,32 +57,7 @@ impl App {
             )
             .on_press(Message::SelectSettingsTab(tab))
             .padding([6, 8])
-            .style(move |_theme: &Theme, status| {
-                let bg = if is_active {
-                    None
-                } else {
-                    match status {
-                        button::Status::Hovered | button::Status::Pressed => {
-                            Some(th::bg_hover().into())
-                        }
-                        _ => None,
-                    }
-                };
-                button::Style {
-                    background: bg,
-                    text_color: color,
-                    border: iced::Border {
-                        color: if is_active {
-                            th::accent()
-                        } else {
-                            Color::TRANSPARENT
-                        },
-                        width: if is_active { 2.0 } else { 0.0 },
-                        radius: 0.0.into(),
-                    },
-                    ..Default::default()
-                }
-            })
+            .style(move |_theme: &Theme, status| settings_tab_style(is_active, status))
         };
 
         let active = self.state.settings_tab;
@@ -153,20 +132,19 @@ impl App {
         ]
         .spacing(8)
         .padding(20)
-        // Wide enough for all eight tab labels on one line with room to
-        // spare; still comfortably inside the 900px minimum window. Grow
-        // this before adding a ninth tab.
-        .width(Length::Fixed(600.0));
+        .width(Length::Fixed(sheet.width));
 
-        let dialog = container(content).style(|_theme: &Theme| container::Style {
-            background: Some(th::bg_surface().into()),
-            border: iced::Border {
-                color: th::border(),
-                width: 1.0,
-                radius: 8.0.into(),
-            },
-            ..Default::default()
-        });
+        let dialog = container(content)
+            .max_height(sheet.height)
+            .style(|_theme: &Theme| container::Style {
+                background: Some(th::bg_surface().into()),
+                border: iced::Border {
+                    color: th::border(),
+                    width: 1.0,
+                    radius: 8.0.into(),
+                },
+                ..Default::default()
+            });
 
         // Centered overlay with dimmed background
         mouse_area(
@@ -422,6 +400,43 @@ impl App {
         ]
         .spacing(10)
         .into()
+    }
+}
+
+/// The Settings dialog's size in a window `window` big.
+fn settings_sheet_size(window: iced::Size) -> iced::Size {
+    // Wide enough for all eight tab labels on one line with room to
+    // spare; still comfortably inside the 900px minimum window. Grow
+    // this before adding a ninth tab.
+    iced::Size::new(600.0, window.height)
+}
+
+fn settings_tab_style(is_active: bool, status: button::Status) -> button::Style {
+    let bg = if is_active {
+        None
+    } else {
+        match status {
+            button::Status::Hovered | button::Status::Pressed => Some(th::bg_hover().into()),
+            _ => None,
+        }
+    };
+    button::Style {
+        background: bg,
+        text_color: if is_active {
+            th::accent()
+        } else {
+            th::text_dim()
+        },
+        border: iced::Border {
+            color: if is_active {
+                th::accent()
+            } else {
+                Color::TRANSPARENT
+            },
+            width: if is_active { 2.0 } else { 0.0 },
+            radius: 0.0.into(),
+        },
+        ..Default::default()
     }
 }
 
