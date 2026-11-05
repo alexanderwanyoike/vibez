@@ -599,18 +599,8 @@ impl App {
                 .into()
         };
 
-        let construction = container(column![toolbar, timeline].height(Length::Fill))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .style(|_theme: &Theme| container::Style {
-                background: Some(th::bg_dark().into()),
-                border: iced::Border {
-                    color: th::border(),
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
-            });
+        let construction =
+            crate::widgets::shell_card::shell_card(column![toolbar, timeline].height(Length::Fill));
 
         mouse_area(construction)
             .on_press(Message::Perform(PerformMsg::FocusEditor(

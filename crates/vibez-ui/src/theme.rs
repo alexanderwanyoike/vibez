@@ -735,6 +735,12 @@ pub fn card_inset() -> Color {
     blend(bg_elevated(), display_bg(), 0.35)
 }
 
+/// A hairline drawn over `surface`: a faint step toward the text colour, so
+/// it reads the same on dark and light themes.
+pub fn hairline(surface: Color) -> Color {
+    blend(surface, text(), 0.065)
+}
+
 /// The line parting lanes and regions: a groove sunk to the well shade.
 pub fn groove() -> Color {
     display_bg()

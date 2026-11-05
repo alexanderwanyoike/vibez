@@ -350,19 +350,9 @@ impl App {
         } else {
             column![header, grid].spacing(12)
         };
-        let surface = container(content)
+        let surface = crate::widgets::shell_card::shell_card(container(content).padding(14))
             .width(Length::Fixed(surface_width))
-            .height(Length::Fill)
-            .padding(14)
-            .style(|_theme: &Theme| container::Style {
-                background: Some(th::perform_inset().into()),
-                border: iced::Border {
-                    color: th::border(),
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
-            });
+            .height(Length::Fill);
 
         mouse_area(surface)
             .on_press(Message::Perform(PerformMsg::FocusEditor(

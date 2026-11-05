@@ -20,6 +20,7 @@ use crate::widgets::piano_roll::{PianoRollWidget, VelocityLaneWidget};
 use super::*;
 
 const DETAIL_PANEL_MIN_HEIGHT: f32 = 180.0;
+const DETAIL_CARD_PADDING: f32 = 10.0;
 const AUDIO_DETAIL_PANEL_PREFERRED_HEIGHT: f32 = 260.0;
 const MIDI_DETAIL_PANEL_PREFERRED_HEIGHT: f32 = 360.0;
 // The transport, workspace tabs and status chrome consume roughly 140 px at
@@ -291,7 +292,7 @@ impl App {
                 tab == DetailPanelTab::Devices,
                 DetailPanelTab::Devices,
             );
-            let tab_bar = row![clip_tab, devices_tab].spacing(4).padding([4, 8]);
+            let tab_bar = row![clip_tab, devices_tab].spacing(4);
 
             // Tab content
             let tab_content: Element<'_, Message> = match self.state.view.detail_panel_tab {
@@ -326,7 +327,10 @@ impl App {
                 DetailPanelTab::Devices => self.view_device_chain(track_id, track, track_color),
             };
 
-            column![tab_bar, tab_content].height(Length::Fill).into()
+            column![tab_bar, tab_content]
+                .spacing(DETAIL_CARD_PADDING)
+                .height(Length::Fill)
+                .into()
         } else {
             let label = text("Select a track to view devices")
                 .size(14)
@@ -338,19 +342,11 @@ impl App {
         };
 
         let panel_height = self.effective_detail_height();
-        container(detail_content)
-            .width(Length::Fill)
-            .height(Length::Fixed(panel_height))
-            .style(|_theme: &Theme| container::Style {
-                background: Some(th::bg_surface().into()),
-                border: iced::Border {
-                    color: th::groove(),
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
-            })
-            .into()
+        crate::widgets::shell_card::shell_card(
+            container(detail_content).padding(DETAIL_CARD_PADDING),
+        )
+        .height(Length::Fixed(panel_height))
+        .into()
     }
 
     pub(super) fn detail_playhead_samples(&self) -> Option<u64> {

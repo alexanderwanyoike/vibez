@@ -1,7 +1,8 @@
 //! Split out of app.rs; inherent methods on [`super::App`].
 
 use iced::widget::{
-    button, canvas, column, container, horizontal_space, mouse_area, progress_bar, row, stack, text,
+    button, canvas, column, container, horizontal_space, mouse_area, progress_bar, row, stack,
+    text, Space,
 };
 use iced::{Element, Length, Theme};
 
@@ -13,48 +14,63 @@ use crate::message::Message;
 use crate::shell_layout::PANE_GAP;
 use crate::state::Workspace;
 use crate::theme as th;
+use crate::widgets::shell_card::shell_card;
 
 use super::*;
 
-fn pane_splitter_style(active: bool) -> container::Style {
-    container::Style {
-        background: Some(
-            if active {
-                th::accent_dim()
-            } else {
-                th::divider()
-            }
-            .into(),
-        ),
-        ..Default::default()
-    }
+/// A gap between cards that resizes them, marked by a slim rule while it
+/// is being dragged.
+fn pane_splitter<'a>(
+    active: bool,
+    vertical: bool,
+    on_press: Message,
+    interaction: iced::mouse::Interaction,
+) -> Element<'a, Message> {
+    let rule = container(Space::new(Length::Fill, Length::Fill)).style(move |_theme: &Theme| {
+        container::Style {
+            background: active.then(|| th::accent_dim().into()),
+            ..Default::default()
+        }
+    });
+    let inset = (PANE_GAP - PANE_RULE) / 2.0;
+    let gap = if vertical {
+        container(rule)
+            .width(Length::Fixed(PANE_GAP))
+            .height(Length::Fill)
+            .padding([0.0, inset])
+    } else {
+        container(rule)
+            .width(Length::Fill)
+            .height(Length::Fixed(PANE_GAP))
+            .padding([inset, 0.0])
+    };
+    mouse_area(gap)
+        .on_press(on_press)
+        .interaction(interaction)
+        .into()
 }
+
+const PANE_RULE: f32 = 2.0;
 
 pub(super) fn horizontal_pane_splitter(
     active: bool,
     on_press: Message,
 ) -> Element<'static, Message> {
-    mouse_area(
-        container(text(""))
-            .width(Length::Fixed(PANE_GAP))
-            .height(Length::Fill)
-            .style(move |_theme: &Theme| pane_splitter_style(active)),
+    pane_splitter(
+        active,
+        true,
+        on_press,
+        iced::mouse::Interaction::ResizingHorizontally,
     )
-    .on_press(on_press)
-    .interaction(iced::mouse::Interaction::ResizingHorizontally)
-    .into()
 }
 
 pub(super) fn vertical_pane_splitter(active: bool, on_press: Message) -> Element<'static, Message> {
-    mouse_area(
-        container(text(""))
-            .width(Length::Fill)
-            .height(Length::Fixed(PANE_GAP))
-            .style(move |_theme: &Theme| pane_splitter_style(active)),
+    pane_splitter(
+        active,
+        false,
+        on_press,
+        iced::mouse::Interaction::ResizingVertically,
     )
-    .on_press(on_press)
-    .interaction(iced::mouse::Interaction::ResizingVertically)
-    .into()
 }
 
 impl App {
@@ -76,44 +92,51 @@ impl App {
     // ── View ──
 
     pub(super) fn view(&self) -> Element<'_, Message> {
-        let workspace_content = match self.state.view.workspace {
-            Workspace::Arrange => self.view_arrangement(),
+        let workspace: Element<'_, Message> = match self.state.view.workspace {
+            Workspace::Arrange => shell_card(self.view_arrangement()).into(),
             Workspace::Perform => self.view_perform(),
-            Workspace::Mix => self.view_mixer(),
+            Workspace::Mix => shell_card(self.view_mixer()).into(),
         };
-        let browser_workspace = matches!(
-            self.state.view.workspace,
-            Workspace::Arrange | Workspace::Perform
-        );
-        let content: Element<'_, Message> = if browser_workspace && self.state.browser.open {
-            row![
-                self.view_sample_browser_panel(),
-                self.view_browser_splitter(),
-                workspace_content
-            ]
-            .height(Length::FillPortion(5))
-            .into()
-        } else {
-            workspace_content
-        };
-
         let detail_splitter = vertical_pane_splitter(
             self.state.view.detail_panel_resize_active,
             Message::View(ViewMsg::BeginDetailPanelResize),
         );
-        let detail_panel = self.view_detail_panel();
-        let control_bar = self.view_control_bar();
-        let status_bar = self.view_status();
+        let work_column = column![
+            container(workspace).height(Length::Fill),
+            detail_splitter,
+            self.view_detail_panel()
+        ];
+        let browser_workspace = matches!(
+            self.state.view.workspace,
+            Workspace::Arrange | Workspace::Perform
+        );
+        let body: Element<'_, Message> = if browser_workspace && self.state.browser.open {
+            row![
+                self.view_sample_browser_panel(),
+                self.view_browser_splitter(),
+                work_column
+            ]
+            .into()
+        } else {
+            work_column.into()
+        };
 
         let layout = column![
-            control_bar,
-            content,
-            detail_splitter,
-            detail_panel,
-            status_bar
+            self.view_control_bar(),
+            container(body)
+                .padding([0.0, PANE_GAP])
+                .height(Length::Fill),
+            Space::with_height(PANE_GAP),
+            self.view_status()
         ];
 
-        let layout_container = container(layout).width(Length::Fill).height(Length::Fill);
+        let layout_container = container(layout)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(|_theme: &Theme| container::Style {
+                background: Some(th::display_bg().into()),
+                ..Default::default()
+            });
         // Outer mouse_area cancels an active sample-drag on any release
         // that wasn't captured by a drop target (clip canvas, drum pad).
         let base_layout: Element<'_, Message> = mouse_area(layout_container)

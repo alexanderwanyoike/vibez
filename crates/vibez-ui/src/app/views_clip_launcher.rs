@@ -237,15 +237,13 @@ impl App {
             .height(Length::Fill)
             .into()
         };
-        container(column![
-            self.view_perform_mode_selector(width),
-            self.view_clip_record_controls(),
-            content
-        ])
-        .width(Length::Fill)
-        .height(Length::FillPortion(5))
-        .style(surface)
-        .into()
+        super::views_perform::perform_cards(
+            column![
+                self.view_perform_mode_selector(width),
+                self.view_clip_record_controls()
+            ],
+            content,
+        )
     }
 
     fn view_clip_record_controls(&self) -> Element<'_, Message> {
@@ -829,14 +827,7 @@ impl App {
         .spacing(8)
         .align_y(iced::Alignment::Center);
         workspace = workspace.push(container(footer).padding([if compact { 4 } else { 8 }, 12]));
-        container(workspace)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .style(|_| container::Style {
-                background: Some(Color::BLACK.into()),
-                ..Default::default()
-            })
-            .into()
+        crate::widgets::shell_card::shell_card(workspace).into()
     }
 }
 

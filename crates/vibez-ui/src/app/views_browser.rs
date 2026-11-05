@@ -148,7 +148,7 @@ impl App {
         .height(Length::Fill)
         .into();
 
-        let panel = container(
+        let panel = crate::widgets::shell_card::shell_card(
             column![
                 container(column![title_row, search, search_context].spacing(6))
                     .padding([8, 10])
@@ -159,16 +159,7 @@ impl App {
             .height(Length::Fill),
         )
         .width(Length::Fixed(width))
-        .height(Length::Fill)
-        .style(|_theme: &Theme| container::Style {
-            background: Some(th::bg_surface().into()),
-            border: iced::Border {
-                color: th::border(),
-                width: 1.0,
-                radius: 0.0.into(),
-            },
-            ..Default::default()
-        });
+        .height(Length::Fill);
         crate::widgets::on_blur::on_blur(
             panel,
             self.state.browser.keyboard_focus,
