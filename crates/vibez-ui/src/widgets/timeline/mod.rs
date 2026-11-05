@@ -7,6 +7,8 @@ use vibez_core::clip_timeline::BeatClipTimeline;
 use vibez_core::id::ClipId;
 use vibez_core::track::FadeCurve;
 
+use source_peaks::source_peaks;
+
 // ── Lightweight data types for rendering ──
 
 /// Lightweight copy of clip data for rendering.
@@ -51,7 +53,7 @@ pub struct TimelineNoteClip {
     pub position_beats: f64,
     pub duration_beats: f64,
     pub name: String,
-    pub notes: Vec<(u8, f64, f64)>, // (pitch, start, duration)
+    pub notes: Arc<NoteSummary>,
     pub start_marker_beats: f64,
     pub loop_enabled: bool,
     pub loop_start_beats: f64,
@@ -71,7 +73,6 @@ impl TimelineNoteClip {
 }
 
 /// Compute waveform peaks for a clip, with loop-aware wrapping.
-/// Uses `peak_in_range` on contiguous segments for O(pixels) cost regardless of clip length.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct PeakCacheKey {
     audio: usize,
@@ -141,16 +142,9 @@ pub fn compute_clip_peaks(clip: &crate::state::UiClip) -> Arc<Vec<(f32, f32)>> {
         return Arc::new(vec![(0.0, 0.0); num_peaks]);
     }
 
-    let peak_for_range = |src_start: usize, src_end: usize| -> (f32, f32) {
-        let mut mn = 0.0f32;
-        let mut mx = 0.0f32;
-        for ch in 0..channels {
-            let (ch_min, ch_max) = clip.audio.peak_in_range(ch, src_start, src_end);
-            mn = mn.min(ch_min);
-            mx = mx.max(ch_max);
-        }
-        (mn, mx)
-    };
+    let source = source_peaks(&clip.audio);
+    let peak_for_range =
+        |src_start: usize, src_end: usize| source.peak(&clip.audio, src_start, src_end);
 
     // Cache full loop region peak for spans >= loop_len
     let full_loop_peak = if looping {
@@ -245,20 +239,25 @@ mod clips_tests;
 mod drag_preview;
 mod fade_drag;
 mod lane_grid;
+mod lane_layers;
+mod lane_timing;
 mod loop_tint;
 pub mod marquee;
 mod minimap;
 mod note_marks;
+mod note_summary;
 mod ruler;
 mod ruler_drag;
 mod ruler_draw;
 mod ruler_scale;
+mod source_peaks;
 mod time_ruler;
 
 pub use clip_drag::ClipDragAction;
 pub use clips::*;
 pub use marquee::{build_row_spans, TrackRowSpan};
 pub use minimap::*;
+pub use note_summary::{NoteSpan, NoteSummary};
 pub use ruler::*;
 pub use time_ruler::{TimeRulerWidget, TIME_RULER_HEIGHT};
 
@@ -271,14 +270,12 @@ mod performance_tests {
     use vibez_core::id::ClipId;
     use vibez_core::track::ClipPlaybackDirection;
 
-    #[test]
-    fn duplicated_long_clips_reuse_cached_waveform_peaks() {
-        let frames = 44_100 * 30;
+    fn long_clip(frames: usize) -> UiClip {
         let audio = Arc::new(DecodedAudio {
             channels: vec![vec![0.25; frames], vec![-0.25; frames]],
             sample_rate: 44_100,
         });
-        let clip = UiClip {
+        UiClip {
             id: ClipId::new(),
             name: "Long loop.wav".into(),
             audio,
@@ -300,7 +297,12 @@ mod performance_tests {
             warped: false,
             warped_to_bpm: None,
             original_audio: None,
-        };
+        }
+    }
+
+    #[test]
+    fn duplicated_long_clips_reuse_cached_waveform_peaks() {
+        let clip = long_clip(44_100 * 30);
 
         let first = compute_clip_peaks(&clip);
         for _ in 0..12 {
@@ -308,6 +310,25 @@ mod performance_tests {
             assert_eq!(duplicate_peaks.len(), 1000);
             assert!(Arc::ptr_eq(&first, &duplicate_peaks));
         }
+    }
+
+    #[test]
+    fn resizing_a_clip_never_rescans_its_source() {
+        let frames = 44_100 * 30;
+        let mut clip = long_clip(frames);
+        compute_clip_peaks(&clip);
+        let scans = super::source_peaks::SOURCE_SCANS.with(|scans| scans.get());
+
+        for duration in [frames / 2, frames / 3, frames / 4, frames - 1] {
+            clip.duration = duration as u64;
+            let peaks = compute_clip_peaks(&clip);
+            assert!(peaks.iter().all(|&(min, max)| (min, max) == (-0.25, 0.25)));
+        }
+
+        assert_eq!(
+            super::source_peaks::SOURCE_SCANS.with(|scans| scans.get()),
+            scans
+        );
     }
 
     #[test]

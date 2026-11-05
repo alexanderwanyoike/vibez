@@ -24,6 +24,9 @@ use crate::widgets::timeline::marquee;
 use vibez_core::id::{ClipId, TrackId};
 
 use super::clip_drag::ClipDragAction;
+use super::lane_layers::StaticLayer;
+use super::lane_timing;
+use super::note_summary::note_clip_summary;
 use super::*;
 
 mod drag_steps;
@@ -54,6 +57,7 @@ pub struct ClipInteractionState {
     /// Bypasses all snapping, read live through drags, as Alt does in
     /// Ableton.
     pub alt_held: bool,
+    pub(super) static_layer: StaticLayer,
 }
 
 /// Canvas for ONE track's clip area (waveforms, borders, names, playhead overlay).
@@ -148,6 +152,7 @@ impl TrackClipCanvas {
         sample_drop_duration_beats: Option<f64>,
         sample_drop_detail: Option<String>,
     ) -> Self {
+        let timing = lane_timing::start();
         let geometry = TimelineGeometry::from_zoom(zoom_level, scroll_offset_beats);
         let visible_beats = geometry.visible_beats(viewport_width.max(1.0));
         let prefetch = visible_beats * 0.25;
@@ -228,22 +233,14 @@ impl TrackClipCanvas {
                 position_beats: c.position_beats,
                 duration_beats: c.duration_beats,
                 name: c.name.clone(),
-                notes: c
-                    .notes
-                    .iter()
-                    .flat_map(|note| {
-                        c.note_occurrences(note.start_beat)
-                            .into_iter()
-                            .map(move |occurrence| (note.pitch, occurrence, note.duration_beats))
-                    })
-                    .collect(),
+                notes: note_clip_summary(c, geometry.pixels_per_beat()),
                 start_marker_beats: c.start_marker_beats,
                 loop_enabled: c.loop_enabled,
                 loop_start_beats: c.loop_start_beats,
                 loop_end_beats: c.loop_end_beats,
             })
             .collect();
-        Self {
+        let lane = Self {
             vertical_wheel_routing: VerticalWheelRouting::default(),
             track_id,
             track_ids,
@@ -280,7 +277,9 @@ impl TrackClipCanvas {
             snap_targets: Arc::default(),
             clip_drag: None,
             track_name: track.name.clone(),
-        }
+        };
+        lane_timing::finish(timing, lane_timing::Phase::Build);
+        lane
     }
 
     /// Opt this lane into box selection by handing it the column layout
@@ -376,13 +375,16 @@ impl canvas::Program<Message> for TrackClipCanvas {
 
     fn draw(
         &self,
-        _state: &Self::State,
+        state: &Self::State,
         renderer: &Renderer,
         _theme: &Theme,
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
-        self.draw_impl(renderer, bounds, cursor)
+        let timing = lane_timing::start();
+        let geometry = self.draw_impl(&state.static_layer, renderer, bounds, cursor);
+        lane_timing::finish(timing, lane_timing::Phase::Draw);
+        geometry
     }
     fn mouse_interaction(
         &self,

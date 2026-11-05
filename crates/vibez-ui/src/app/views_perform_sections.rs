@@ -14,9 +14,10 @@ use crate::icons;
 use crate::message::Message;
 use crate::state::{ArrangementSelection, TrackTimelineContent};
 use crate::theme as th;
+use crate::timeline_geometry::TimelineGeometry;
 use crate::typography::{PERFORM_DISPLAY, PERFORM_LABEL, PERFORM_TECH, PERFORM_TECH_STRONG};
 use crate::widgets::timeline::{
-    ArrangementMinimap, MinimapTrack, RulerWidget, TimelineNoteClip, TrackClipCanvas,
+    ArrangementMinimap, MinimapTrack, NoteSummary, RulerWidget, TimelineNoteClip, TrackClipCanvas,
 };
 
 use super::views_automation::AutomationLaneLayout;
@@ -499,17 +500,20 @@ impl App {
                         position_beats: preview.position_beats,
                         duration_beats: preview.length_beats,
                         name: "● RECORDING LIVE".into(),
-                        notes: preview
-                            .notes
-                            .iter()
-                            .map(|note| {
+                        notes: Arc::new(NoteSummary::new(
+                            preview.notes.iter().map(|note| {
                                 (
                                     note.pitch,
                                     (note.start_beat - preview.position_beats).max(0.0),
                                     note.duration_beats,
                                 )
-                            })
-                            .collect(),
+                            }),
+                            TimelineGeometry::from_zoom(
+                                viewport.zoom_level,
+                                viewport.scroll_offset_beats,
+                            )
+                            .pixels_per_beat(),
+                        )),
                         start_marker_beats: 0.0,
                         loop_enabled: false,
                         loop_start_beats: 0.0,

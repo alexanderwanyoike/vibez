@@ -102,7 +102,7 @@ fn note_clips_keep_their_notes_at_one_pixel_per_beat() {
 
     assert_eq!(canvas.geometry().pixels_per_beat(), 1.0);
     assert_eq!(canvas.note_clips.len(), 1);
-    assert_eq!(canvas.note_clips[0].notes.len(), 64);
+    assert_eq!(canvas.note_clips[0].notes.spans().len(), 64);
 }
 
 #[test]
@@ -117,7 +117,52 @@ fn track_canvas_materialises_only_the_visible_note_clips() {
 
     assert_eq!(canvas.note_clips.len(), 1);
     assert_eq!(canvas.note_clips[0].clip_id, visible_id);
-    assert_eq!(canvas.note_clips[0].notes.len(), 64);
+    assert_eq!(canvas.note_clips[0].notes.spans().len(), 64);
+}
+
+#[test]
+fn editing_one_clips_notes_rebuilds_only_that_clips_summary() {
+    let mut content = TrackTimelineContent::default();
+    content.note_clips.push(note_clip(0.0));
+    content.note_clips.push(note_clip(32.0));
+    let before = track_canvas(&content, 1.0);
+
+    content.note_clips[0].notes[0].pitch += 1;
+    let edited = track_canvas(&content, 1.0);
+    content.note_clips[0].duration_beats = 16.0;
+    let resized = track_canvas(&content, 1.0);
+
+    assert!(!Arc::ptr_eq(
+        &before.note_clips[0].notes,
+        &edited.note_clips[0].notes
+    ));
+    assert!(!Arc::ptr_eq(
+        &edited.note_clips[0].notes,
+        &resized.note_clips[0].notes
+    ));
+    assert!(Arc::ptr_eq(
+        &before.note_clips[1].notes,
+        &resized.note_clips[1].notes
+    ));
+}
+
+#[test]
+fn a_note_summary_is_kept_until_the_zoom_leaves_its_bucket() {
+    let mut content = TrackTimelineContent::default();
+    content.note_clips.push(note_clip(0.0));
+
+    let twenty_pixels_per_beat = track_canvas(&content, 1.0);
+    let twenty_four = track_canvas(&content, 1.2);
+    let forty = track_canvas(&content, 2.0);
+
+    assert!(Arc::ptr_eq(
+        &twenty_pixels_per_beat.note_clips[0].notes,
+        &twenty_four.note_clips[0].notes
+    ));
+    assert!(!Arc::ptr_eq(
+        &twenty_four.note_clips[0].notes,
+        &forty.note_clips[0].notes
+    ));
 }
 
 #[test]
@@ -139,13 +184,19 @@ fn looped_note_previews_repeat_their_notes_on_every_pass() {
 
     let canvas = track_canvas(&content, 1.0);
 
+    let starts: Vec<_> = canvas.note_clips[0]
+        .notes
+        .spans()
+        .iter()
+        .map(|span| (span.pitch, span.start, span.end))
+        .collect();
     assert_eq!(
-        canvas.note_clips[0].notes,
+        starts,
         vec![
             (60, 0.0, 0.5),
-            (60, 2.0, 0.5),
-            (60, 4.0, 0.5),
-            (60, 6.0, 0.5),
+            (60, 2.0, 2.5),
+            (60, 4.0, 4.5),
+            (60, 6.0, 6.5),
         ]
     );
 }
@@ -416,7 +467,7 @@ fn recording_preview_is_visible_but_not_hit_testable() {
         position_beats: 0.0,
         duration_beats: 4.0,
         name: "● RECORDING LIVE".into(),
-        notes: vec![(60, 0.0, 0.5)],
+        notes: Arc::new(NoteSummary::new([(60, 0.0, 0.5)], 1.0)),
         start_marker_beats: 0.0,
         loop_enabled: false,
         loop_start_beats: 0.0,
@@ -1798,4 +1849,110 @@ fn a_clip_dragged_down_a_tall_lane_changes_track_only_past_its_bottom_edge() {
 
     assert_eq!(target_at(&mut state, 209.0), canvas.track_id);
     assert_eq!(target_at(&mut state, 210.0), below);
+}
+
+const LANE: Rectangle = Rectangle {
+    x: 0.0,
+    y: 0.0,
+    width: 800.0,
+    height: 70.0,
+};
+
+fn cached_layer_key(content: &TrackTimelineContent, edit: impl Fn(&mut TrackClipCanvas)) -> u64 {
+    let mut canvas = track_canvas(content, 1.0);
+    edit(&mut canvas);
+    canvas.static_layer_key(LANE, mouse::Cursor::Unavailable)
+}
+
+fn dragging(canvas: &mut TrackClipCanvas, anchor: ClipId) {
+    canvas.selected_clips.insert(anchor);
+    canvas.clip_drag = Some(crate::state::ClipDragPreview {
+        step: crate::state::ClipDragStep {
+            gesture: UndoGestureId::new(),
+            kind: crate::state::ClipDragKind::Move,
+            anchor,
+            origin_track: canvas.track_id,
+            origin: crate::state::ClipSpan {
+                start_beats: 0.0,
+                length_beats: 32.0,
+            },
+            guide: None,
+            pointer: Point::ORIGIN,
+        },
+        readout: String::new(),
+    });
+}
+
+#[test]
+fn a_lanes_cached_layer_outlasts_playback_and_the_steps_of_a_drag() {
+    let mut content = TrackTimelineContent::default();
+    content.note_clips.push(note_clip(0.0));
+    content.note_clips.push(note_clip(32.0));
+    let dragged = content.note_clips[0].id;
+
+    let resting = cached_layer_key(&content, |_| {});
+    let playing = cached_layer_key(&content, |canvas| {
+        canvas.playhead_beats = 9.0;
+        canvas.playback_playhead_beats = Some(3.0);
+    });
+    content.note_clips[0].position_beats = 2.0;
+    let first_step = cached_layer_key(&content, |canvas| dragging(canvas, dragged));
+    content.note_clips[0].position_beats = 6.0;
+    content.note_clips[0].duration_beats = 12.0;
+    let later_step = cached_layer_key(&content, |canvas| dragging(canvas, dragged));
+
+    assert_eq!(playing, resting);
+    assert_eq!(later_step, first_step);
+}
+
+#[test]
+fn a_lanes_cached_layer_is_redrawn_when_a_resting_clip_or_the_view_changes() {
+    let mut content = TrackTimelineContent::default();
+    content.note_clips.push(note_clip(0.0));
+    content.note_clips.push(note_clip(32.0));
+    let first = content.note_clips[0].id;
+    let resting = cached_layer_key(&content, |_| {});
+
+    let selected = cached_layer_key(&content, |canvas| {
+        canvas.selected_clips.insert(first);
+    });
+    let scrolled = cached_layer_key(&content, |canvas| canvas.scroll_offset_beats = 1.0);
+    let muted = cached_layer_key(&content, |canvas| canvas.muted = true);
+    let looped = cached_layer_key(&content, |canvas| {
+        canvas.loop_enabled = true;
+        canvas.loop_start_beats = 4.0;
+        canvas.loop_end_beats = 8.0;
+    });
+    let loop_moved = cached_layer_key(&content, |canvas| {
+        canvas.loop_enabled = true;
+        canvas.loop_start_beats = 4.0;
+        canvas.loop_end_beats = 12.0;
+    });
+    let taller = track_canvas(&content, 1.0).static_layer_key(
+        Rectangle {
+            height: 2.0 * LANE.height,
+            ..LANE
+        },
+        mouse::Cursor::Unavailable,
+    );
+    let mut moved = content.clone();
+    moved.note_clips[1].position_beats = 36.0;
+    let mut edited = content.clone();
+    edited.note_clips[1].notes[0].pitch += 1;
+    let mut renamed = content.clone();
+    renamed.note_clips[1].name = "Verse".into();
+
+    for changed in [
+        selected,
+        scrolled,
+        muted,
+        looped,
+        taller,
+        cached_layer_key(&moved, |_| {}),
+        cached_layer_key(&edited, |_| {}),
+        cached_layer_key(&renamed, |_| {}),
+    ] {
+        assert_ne!(changed, resting);
+    }
+    assert_ne!(loop_moved, looped);
 }
