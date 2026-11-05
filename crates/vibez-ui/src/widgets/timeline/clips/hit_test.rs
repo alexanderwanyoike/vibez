@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::widgets::timeline::clip_drag::ClipEdge;
+use crate::widgets::timeline::clip_frame::clip_box;
 
 /// The Clip under the pointer.
 #[derive(Debug, Clone, Copy)]
@@ -15,14 +16,19 @@ pub(crate) struct ClipHit {
 }
 
 /// The resize zone under `pos_x` of a Clip drawn from `clip_x`, `clip_w`
-/// wide. Each edge's zone runs the Clip's full height; where the zones of a
-/// narrow Clip overlap, the nearer edge wins.
+/// wide. Each edge's zone runs the Clip's full height and shrinks with the
+/// Clip's width, as in Ableton, so zooming out never turns a move into a
+/// resize.
 fn edge_at(pos_x: f32, clip_x: f32, clip_w: f32) -> Option<ClipEdge> {
+    if clip_w < RESIZABLE_CLIP_MIN_PX {
+        return None;
+    }
+    let zone = RESIZE_EDGE_PX.min(clip_w * RESIZE_EDGE_MAX_FRACTION);
     let from_start = pos_x - clip_x;
     let from_end = clip_x + clip_w - pos_x;
-    if from_end < RESIZE_EDGE_PX && from_end <= from_start {
+    if from_end < zone {
         Some(ClipEdge::End)
-    } else if from_start < RESIZE_EDGE_PX {
+    } else if from_start < zone {
         Some(ClipEdge::Start)
     } else {
         None
@@ -68,43 +74,66 @@ impl TrackClipCanvas {
         })
     }
 
-    /// Find a clip at the given pixel position.
+    /// The Clip under `pos_x`, searched in reverse draw order so the Clip
+    /// drawn on top wins where Clips overlap.
     pub(crate) fn hit_test(&self, pos_x: f32) -> Option<ClipHit> {
         let geometry = self.geometry();
         let spb = self.spb();
+        let audio_clips = self.clips.iter().rev().map(|clip| ClipHit {
+            clip_id: clip.clip_id,
+            is_note_clip: false,
+            edge: None,
+            position_beats: clip.position as f64 / spb,
+            duration_beats: clip.duration as f64 / spb,
+        });
+        let note_clips = self.note_clips.iter().rev().map(|clip| ClipHit {
+            clip_id: clip.clip_id,
+            is_note_clip: true,
+            edge: None,
+            position_beats: clip.position_beats,
+            duration_beats: clip.duration_beats,
+        });
 
-        for clip in &self.clips {
-            let clip_start_beat = clip.position as f64 / spb;
-            let clip_dur_beats = clip.duration as f64 / spb;
-            let clip_x = self.beat_to_x(clip_start_beat);
-            let clip_w = geometry.width_for_beats(clip_dur_beats);
+        note_clips.chain(audio_clips).find_map(|hit| {
+            let body = clip_box(
+                self.beat_to_x(hit.position_beats),
+                CLIP_Y,
+                geometry.width_for_beats(hit.duration_beats),
+                0.0,
+            );
+            (pos_x >= body.x && pos_x <= body.x + body.width).then(|| ClipHit {
+                edge: edge_at(pos_x, body.x, body.width),
+                ..hit
+            })
+        })
+    }
+}
 
-            if pos_x >= clip_x && pos_x <= clip_x + clip_w {
-                return Some(ClipHit {
-                    clip_id: clip.clip_id,
-                    is_note_clip: false,
-                    edge: edge_at(pos_x, clip_x, clip_w),
-                    position_beats: clip_start_beat,
-                    duration_beats: clip_dur_beats,
-                });
-            }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_wide_clip_resizes_from_a_full_edge_zone_on_both_sides() {
+        assert_eq!(edge_at(107.0, 100.0, 200.0), Some(ClipEdge::Start));
+        assert_eq!(edge_at(293.0, 100.0, 200.0), Some(ClipEdge::End));
+        assert_eq!(edge_at(109.0, 100.0, 200.0), None);
+        assert_eq!(edge_at(291.0, 100.0, 200.0), None);
+    }
+
+    #[test]
+    fn a_short_clip_keeps_a_move_zone_in_its_middle() {
+        assert_eq!(edge_at(103.0, 100.0, 16.0), Some(ClipEdge::Start));
+        assert_eq!(edge_at(113.0, 100.0, 16.0), Some(ClipEdge::End));
+        assert_eq!(edge_at(105.0, 100.0, 16.0), None);
+        assert_eq!(edge_at(108.0, 100.0, 16.0), None);
+        assert_eq!(edge_at(111.0, 100.0, 16.0), None);
+    }
+
+    #[test]
+    fn a_tiny_clip_only_moves() {
+        for x in [100.0, 100.5, 102.0, 103.5, 104.0] {
+            assert_eq!(edge_at(x, 100.0, 4.0), None, "at {x}");
         }
-
-        for note_clip in &self.note_clips {
-            let clip_x = self.beat_to_x(note_clip.position_beats);
-            let clip_w = geometry.width_for_beats(note_clip.duration_beats);
-
-            if pos_x >= clip_x && pos_x <= clip_x + clip_w {
-                return Some(ClipHit {
-                    clip_id: note_clip.clip_id,
-                    is_note_clip: true,
-                    edge: edge_at(pos_x, clip_x, clip_w),
-                    position_beats: note_clip.position_beats,
-                    duration_beats: note_clip.duration_beats,
-                });
-            }
-        }
-
-        None
     }
 }

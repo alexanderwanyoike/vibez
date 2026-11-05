@@ -1529,3 +1529,110 @@ fn the_pointer_shows_a_resize_cursor_on_either_clip_edge() {
     );
     assert_eq!(cursor_at(3.0, 0.0), mouse::Interaction::Pointer);
 }
+
+/// A three bar Clip at beat 4, unselected, at the zoom where it is 16 px
+/// wide, as at fit zoom on a real song.
+fn canvas_with_a_short_clip_at_fit_zoom() -> TrackClipCanvas {
+    let (mut canvas, clip_id) = canvas_with_selected_audio_clip();
+    canvas.selected_clips.remove(&clip_id);
+    canvas.zoom_level = 1.0 / 15.0;
+    canvas.clips[0].position = (4.0 * canvas.spb()) as u64;
+    canvas.clips[0].duration = (12.0 * canvas.spb()) as u64;
+    canvas
+}
+
+#[test]
+fn a_short_clip_at_fit_zoom_moves_when_dragged_near_its_start() {
+    let canvas = canvas_with_a_short_clip_at_fit_zoom();
+    let start = Point::new(canvas.beat_to_x(4.0) + 5.0, CLIP_Y + 4.0);
+    let target = Point::new(start.x + 20.0, start.y);
+    let mut state = ClipInteractionState::default();
+
+    left_event(
+        &canvas,
+        &mut state,
+        iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left),
+        start,
+    );
+    let dragged = left_event(
+        &canvas,
+        &mut state,
+        iced::mouse::Event::CursorMoved { position: target },
+        target,
+    );
+
+    assert!(
+        matches!(
+            &dragged,
+            Some(Message::UndoGesture { edit, .. }) if matches!(
+                **edit,
+                Message::Arrangement(ArrangementMsg::MoveSelectedClips { .. })
+            )
+        ),
+        "{dragged:?}"
+    );
+}
+
+#[test]
+fn a_short_clip_at_fit_zoom_shows_the_grab_cursor_near_its_start() {
+    let canvas = canvas_with_a_short_clip_at_fit_zoom();
+
+    let cursor = <TrackClipCanvas as canvas::Program<Message>>::mouse_interaction(
+        &canvas,
+        &ClipInteractionState::default(),
+        Rectangle::new(Point::ORIGIN, Size::new(800.0, 80.0)),
+        mouse::Cursor::Available(Point::new(canvas.beat_to_x(4.0) + 5.0, CLIP_Y + 4.0)),
+    );
+
+    assert_eq!(cursor, mouse::Interaction::Grab);
+}
+
+#[test]
+fn a_clips_end_zone_stops_at_its_drawn_right_edge() {
+    let (canvas, clip_id) = canvas_with_selected_audio_clip();
+    let end_x = canvas.beat_to_x(canvas.clips[0].duration as f64 / canvas.spb());
+
+    let inside = canvas.hit_test(end_x - 1.5).expect("the clip");
+
+    assert_eq!(
+        (inside.clip_id, inside.edge),
+        (
+            clip_id,
+            Some(crate::widgets::timeline::clip_drag::ClipEdge::End)
+        )
+    );
+    assert!(
+        canvas.hit_test(end_x - 0.5).is_none(),
+        "the gap after the clip is lane"
+    );
+}
+
+#[test]
+fn pressing_where_clips_overlap_picks_the_one_drawn_on_top() {
+    let (mut canvas, under_id) = canvas_with_selected_audio_clip();
+    canvas.selected_clips.clear();
+    canvas.clips[0].duration = (8.0 * canvas.spb()) as u64;
+    let (other, on_top_id) = canvas_with_selected_audio_clip();
+    let mut on_top = other.clips.into_iter().next().expect("a clip");
+    on_top.position = (4.0 * canvas.spb()) as u64;
+    canvas.clips.push(on_top);
+    let press = Point::new(canvas.beat_to_x(6.0), CLIP_Y + 4.0);
+
+    let pressed = left_event(
+        &canvas,
+        &mut ClipInteractionState::default(),
+        iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left),
+        press,
+    );
+
+    match pressed {
+        Some(Message::Arrangement(ArrangementMsg::SelectArrangementClip {
+            selection: crate::state::ArrangementSelection::AudioClip { clip_id, .. },
+            ..
+        })) => assert_eq!(
+            clip_id, on_top_id,
+            "picked the clip underneath, {under_id:?}"
+        ),
+        other => panic!("expected a clip selection, got {other:?}"),
+    }
+}

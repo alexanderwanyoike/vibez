@@ -218,8 +218,14 @@ pub fn compute_clip_peaks(clip: &crate::state::UiClip) -> Arc<Vec<(f32, f32)>> {
 
 // ── RulerWidget ──
 
-/// Pixel threshold for resize handle on right edge of clip.
+/// Widest a Clip's resize zone gets, at either edge.
 pub(super) const RESIZE_EDGE_PX: f32 = 8.0;
+/// Share of a Clip's width each resize zone may take, so a narrow Clip
+/// always keeps a move zone in its middle.
+pub(super) const RESIZE_EDGE_MAX_FRACTION: f32 = 0.25;
+/// Below this width a Clip has no resize zones: a 1 px handle cannot be
+/// aimed at, and grabbing the Clip to move it matters more.
+pub(super) const RESIZABLE_CLIP_MIN_PX: f32 = 6.0;
 
 /// Height of the clip title bar zone (move/resize). Below this is the body zone (seek/region select).
 pub(super) const CLIP_TITLE_HEIGHT: f32 = 16.0;
