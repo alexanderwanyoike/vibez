@@ -4,16 +4,31 @@
 use iced::widget::button;
 use iced::{Border, Color, Theme};
 
+use crate::theme as th;
+
 pub const RADIUS: f32 = 4.0;
 
 /// The fill of a control lit in `on`, if it is on.
-pub fn fill(_on: Option<Color>, _status: button::Status) -> Color {
-    todo!()
+pub fn fill(on: Option<Color>, status: button::Status) -> Color {
+    match on {
+        Some(colour) => colour,
+        None if hovered(status) => th::bg_hover(),
+        None => th::control(),
+    }
 }
 
 /// The label colour over [`fill`].
-pub fn ink(_on: Option<Color>, _status: button::Status) -> Color {
-    todo!()
+pub fn ink(on: Option<Color>, status: button::Status) -> Color {
+    match on {
+        Some(_) => th::bg_dark(),
+        None if hovered(status) => th::text(),
+        None if status == button::Status::Disabled => th::text_muted(),
+        None => th::text_dim(),
+    }
+}
+
+fn hovered(status: button::Status) -> bool {
+    matches!(status, button::Status::Hovered | button::Status::Pressed)
 }
 
 /// A control's style, lit in `on` while it is on.
@@ -32,7 +47,6 @@ pub fn style(on: Option<Color>) -> impl Fn(&Theme, button::Status) -> button::St
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::theme as th;
 
     const LIT: Color = Color::from_rgb(0.9, 0.5, 0.1);
 
