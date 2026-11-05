@@ -18,6 +18,9 @@ use crate::widgets::shell_card::shell_card;
 
 use super::*;
 
+const STATUS_TEXT_SIZE: f32 = 11.0;
+const STATUS_SPACING: f32 = 20.0;
+
 /// A gap between cards that resizes them, marked by a slim rule while it
 /// is being dragged.
 fn pane_splitter<'a>(
@@ -285,9 +288,9 @@ impl App {
             .into()
     }
 
-    /// Persistent project-save state at the far right of the bottom bar.
-    /// Unlike transient status text, this remains visible after another
-    /// operation reports its own result.
+    /// Persistent project-save state in the bottom bar. Unlike transient
+    /// status text, this remains visible after another operation reports
+    /// its own result.
     fn view_project_save_status(&self) -> Element<'_, Message> {
         let (icon, label, color) = if self.save_runtime.is_saving() {
             (icons::CIRCLE_DOT, "Saving...", th::accent())
@@ -299,67 +302,71 @@ impl App {
             (icons::CIRCLE, "Not saved", th::text_dim())
         };
 
-        container(
-            row![
-                icons::icon(icon).size(9).color(color),
-                text(label).size(11).color(color)
-            ]
-            .spacing(5)
-            .align_y(iced::Alignment::Center),
-        )
-        .padding([1, 7])
-        .style(move |_theme: &Theme| container::Style {
-            border: iced::Border {
-                color,
-                width: 1.0,
-                radius: 3.0.into(),
-            },
-            ..Default::default()
-        })
+        row![
+            icons::icon(icon).size(9).color(color),
+            text(label).size(STATUS_TEXT_SIZE).color(th::text_muted())
+        ]
+        .spacing(5)
+        .align_y(iced::Alignment::Center)
         .into()
     }
 
     pub(super) fn view_status(&self) -> Element<'_, Message> {
-        let status = text(&self.state.status_text).size(11).color(th::text_dim());
-        let content: Element<'_, Message> = match self.state.export_progress {
-            Some(percent) => row![
-                status,
-                horizontal_space(),
-                progress_bar(0.0..=100.0, percent as f32)
-                    .width(180)
-                    .height(5),
-                text(format!("{percent}%")).size(11).color(th::text()),
-                self.view_project_save_status(),
-            ]
-            .spacing(8)
-            .align_y(iced::Alignment::Center)
-            .into(),
-            // An export in flight owns the right-hand side of the bar;
-            // a release notice can wait for the next frame that has room.
-            None => match self.state.update_check.notice() {
-                Some(version) => row![
-                    status,
-                    horizontal_space(),
-                    self.view_update_notice(version),
-                    self.view_project_save_status()
+        let quiet = |label: String| -> Element<'_, Message> {
+            text(label)
+                .size(STATUS_TEXT_SIZE)
+                .color(th::text_muted())
+                .wrapping(text::Wrapping::None)
+                .into()
+        };
+        let mut content = row![
+            text(&self.state.status_text)
+                .size(STATUS_TEXT_SIZE)
+                .color(th::text_dim()),
+            horizontal_space(),
+        ]
+        .spacing(STATUS_SPACING)
+        .align_y(iced::Alignment::Center);
+        content = match self.state.export_progress {
+            Some(percent) => content.push(
+                row![
+                    progress_bar(0.0..=100.0, percent as f32)
+                        .width(180)
+                        .height(5),
+                    text(format!("{percent}%"))
+                        .size(STATUS_TEXT_SIZE)
+                        .color(th::text()),
                 ]
                 .spacing(8)
-                .align_y(iced::Alignment::Center)
-                .into(),
-                None => row![status, horizontal_space(), self.view_project_save_status()]
-                    .spacing(8)
-                    .align_y(iced::Alignment::Center)
-                    .into(),
-            },
+                .align_y(iced::Alignment::Center),
+            ),
+            // An export in flight owns the bar; a release notice can wait
+            // for the next frame that has room.
+            None => content.push_maybe(
+                self.state
+                    .update_check
+                    .notice()
+                    .map(|version| self.view_update_notice(version)),
+            ),
         };
+        let project_file = self
+            .state
+            .project
+            .current_path
+            .as_ref()
+            .and_then(|path| path.file_name())
+            .map(|name| quiet(name.to_string_lossy().into_owned()));
+        let content = content
+            .push(quiet(format!("Theme: {}", self.state.current_theme_name)))
+            .push(self.view_project_save_status())
+            .push(quiet(format!("Vibez {}", env!("CARGO_PKG_VERSION"))))
+            .push_maybe(project_file);
 
         container(content)
             .width(Length::Fill)
-            .padding([3, 12])
-            .style(|_theme: &Theme| container::Style {
-                background: Some(th::bg_dark().into()),
-                ..Default::default()
-            })
+            .height(Length::Fixed(crate::shell_layout::STATUS_HEIGHT))
+            .padding([0, 16])
+            .align_y(iced::alignment::Vertical::Center)
             .into()
     }
 }
