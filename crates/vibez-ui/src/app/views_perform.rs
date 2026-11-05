@@ -23,9 +23,6 @@ const PAD_SURFACE_MIN_WIDTH: f32 = 320.0;
 const SECTION_CONSTRUCTION_MIN_WIDTH: f32 = 460.0;
 const SECTION_TOOLBAR_INLINE_MIN_WIDTH: f32 = 640.0;
 pub(super) const SECTION_TRACK_GUTTER_WIDTH: f32 = 112.0;
-pub(super) const SECTION_SCROLLBAR_SPACING: f32 = 1.0;
-pub(super) const SECTION_SCROLLBAR_RESERVATION: f32 =
-    crate::widgets::quiet_scroll::THICKNESS + SECTION_SCROLLBAR_SPACING;
 
 pub(super) fn perform_tool_button(
     icon: char,
@@ -152,10 +149,7 @@ impl App {
     }
 
     pub(super) fn section_timeline_viewport_width(&self) -> f32 {
-        (self.section_construction_width()
-            - SECTION_TRACK_GUTTER_WIDTH
-            - SECTION_SCROLLBAR_RESERVATION)
-            .max(1.0)
+        (self.section_construction_width() - SECTION_TRACK_GUTTER_WIDTH).max(1.0)
     }
 
     pub(super) fn perform_surface_drag_width(&self, cursor_x: f32) -> f32 {

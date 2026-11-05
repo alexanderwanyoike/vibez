@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use iced::widget::{
-    button, canvas, center, column, container, horizontal_space, mouse_area, row, scrollable, text,
+    button, canvas, center, column, container, horizontal_space, mouse_area, row, text,
 };
 use iced::{Element, Length, Theme};
 
@@ -24,7 +24,7 @@ use crate::widgets::track_header::{color_bar, header_shade, quiet_action_style};
 use vibez_core::time::BEATS_PER_BAR;
 
 use super::views_automation::AutomationLaneLayout;
-use super::views_perform::{SECTION_SCROLLBAR_SPACING, SECTION_TRACK_GUTTER_WIDTH};
+use super::views_perform::SECTION_TRACK_GUTTER_WIDTH;
 use super::*;
 
 const SECTION_RULER_HEIGHT: f32 = 28.0;
@@ -46,10 +46,7 @@ impl App {
         let recording_preview = self.state.perform.section_record.live_preview();
         let total_beats = selected.map_or(16.0, |section| section.length_beats);
         let viewport = *self.state.perform.section_editor.viewport();
-        let viewport_width = (section_width
-            - SECTION_TRACK_GUTTER_WIDTH
-            - super::views_perform::SECTION_SCROLLBAR_RESERVATION)
-            .max(1.0);
+        let viewport_width = (section_width - SECTION_TRACK_GUTTER_WIDTH).max(1.0);
         let row_height = if self.state.perform.section_timeline_expanded {
             78.0
         } else {
@@ -470,16 +467,13 @@ impl App {
                 }
             }
 
-            let body = crate::widgets::quiet_scroll::scroll(
+            let body = crate::widgets::quiet_scroll::vertical(
                 container(track_rows)
                     .width(Length::Fill)
                     .style(|_theme: &Theme| container::Style {
                         background: Some(th::display_bg().into()),
                         ..Default::default()
                     }),
-                scrollable::Direction::Vertical(
-                    crate::widgets::quiet_scroll::scrollbar().spacing(SECTION_SCROLLBAR_SPACING),
-                ),
             )
             .width(Length::Fill)
             .height(Length::Fill);
