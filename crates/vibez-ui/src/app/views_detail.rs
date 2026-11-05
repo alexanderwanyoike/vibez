@@ -108,21 +108,6 @@ fn single_selected_audio_clip_for_track(
     }
 }
 
-/// A tab in the detail panel's switch, raised onto the control shade while
-/// `active`, like the workspace switch.
-fn detail_tab<'a>(
-    label: &'a str,
-    active: bool,
-    tab: DetailPanelTab,
-) -> iced::widget::Button<'a, Message> {
-    button(text(label).size(12))
-        .on_press(Message::View(ViewMsg::SwitchDetailTab(tab)))
-        .padding([4, 12])
-        .style(super::views_control_bar_style::segment(
-            active.then(th::text),
-        ))
-}
-
 impl App {
     // ── Detail panel (Ableton-style device chain) ──
 
@@ -289,16 +274,18 @@ impl App {
             let track_color = th::track_color(track.color_index);
 
             let tab = self.state.view.detail_panel_tab;
-            let clip_tab = detail_tab("Clip", tab == DetailPanelTab::Clip, DetailPanelTab::Clip);
-            let devices_tab = detail_tab(
-                "Devices",
-                tab == DetailPanelTab::Devices,
-                DetailPanelTab::Devices,
-            );
+            let tabs = [
+                ("Clip", DetailPanelTab::Clip),
+                ("Devices", DetailPanelTab::Devices),
+            ]
+            .map(|(label, choice)| crate::widgets::segment_group::Choice {
+                label,
+                shortcut: None,
+                selected: tab == choice,
+                on_press: Message::View(ViewMsg::SwitchDetailTab(choice)),
+            });
             let tab_bar = row![
-                container(row![clip_tab, devices_tab].spacing(2))
-                    .padding(super::views_control_bar_style::GROUP_INSET)
-                    .style(super::views_control_bar_style::group),
+                crate::widgets::segment_group::switch(tabs),
                 text(&track.name)
                     .size(12)
                     .font(crate::typography::TRACK_TITLE)

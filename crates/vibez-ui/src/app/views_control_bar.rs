@@ -12,6 +12,7 @@ use crate::icons;
 use crate::message::Message;
 use crate::state::Workspace;
 use crate::theme as th;
+use crate::widgets::segment_group;
 
 use super::views_control_bar_style as style;
 use super::*;
@@ -127,21 +128,14 @@ impl App {
     }
 
     fn view_workspace_switch(&self) -> Element<'_, Message> {
-        let segments = workspace_segments(self.state.view.workspace).map(|segment| {
-            button(text(segment.label).size(12).font(if segment.selected {
-                crate::typography::PERFORM_LABEL
-            } else {
-                iced::Font::DEFAULT
-            }))
-            .on_press(Message::View(ViewMsg::SwitchWorkspace(segment.workspace)))
-            .padding([4, 10])
-            .style(style::segment(segment.selected.then(th::text)))
-            .into()
-        });
-        container(row(segments).spacing(2))
-            .padding(style::GROUP_INSET)
-            .style(style::group)
-            .into()
+        segment_group::switch(
+            workspace_segments(self.state.view.workspace).map(|segment| segment_group::Choice {
+                label: segment.label,
+                shortcut: None,
+                selected: segment.selected,
+                on_press: Message::View(ViewMsg::SwitchWorkspace(segment.workspace)),
+            }),
+        )
     }
 }
 

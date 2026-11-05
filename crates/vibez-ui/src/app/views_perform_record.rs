@@ -1,6 +1,6 @@
-//! Compact Section Record and Capture strip shared by every Perform mode.
+//! Section Record and Capture controls and status for Perform's header.
 
-use iced::widget::{button, column, container, horizontal_space, pick_list, row, text};
+use iced::widget::{button, container, horizontal_space, pick_list, row, text};
 use iced::{Element, Length, Theme};
 
 use crate::domains::perform::{
@@ -11,31 +11,19 @@ use crate::icons;
 use crate::message::Message;
 use crate::theme as th;
 use crate::typography::{PERFORM_LABEL, PERFORM_TECH, PERFORM_TECH_STRONG};
+use crate::widgets::{control_style, segment_group};
 
+use super::views_perform_header::RecordGroup;
 use super::*;
 
-const SECTION_RECORD_INLINE_MIN_WIDTH: f32 = 1_120.0;
-const SECTION_RECORD_STATUS_BELOW_MIN_WIDTH: f32 = 680.0;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SectionRecordBarLayout {
-    Inline,
-    StatusBelow,
-    StackedControls,
-}
-
-fn section_record_bar_layout(workspace_width: f32) -> SectionRecordBarLayout {
-    if workspace_width >= SECTION_RECORD_INLINE_MIN_WIDTH {
-        SectionRecordBarLayout::Inline
-    } else if workspace_width >= SECTION_RECORD_STATUS_BELOW_MIN_WIDTH {
-        SectionRecordBarLayout::StatusBelow
-    } else {
-        SectionRecordBarLayout::StackedControls
-    }
-}
+/// Room around a record control's label, so buttons and lists stand the
+/// same height.
+pub(super) const RECORD_CONTROL_PADDING: [f32; 2] = [6.0, 10.0];
 
 impl App {
-    pub(super) fn view_section_record_bar(&self) -> Element<'_, Message> {
+    /// Section Record's and Capture's controls and status, for Perform's
+    /// header.
+    pub(super) fn section_record_group(&self) -> RecordGroup<'_> {
         let record = &self.state.perform.section_record;
         let capture = &self.state.perform.capture;
         let active = record.is_active();
@@ -85,70 +73,13 @@ impl App {
             .on_press(Message::Perform(PerformMsg::SectionRecord(
                 SectionRecordMsg::Toggle,
             )))
-            .padding([7, 12])
-            .style(move |_theme: &Theme, status| {
-                let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
-                button::Style {
-                    background: Some(
-                        if recording {
-                            th::danger()
-                        } else if active || hovered {
-                            th::accent()
-                        } else {
-                            th::perform_inset()
-                        }
-                        .into(),
-                    ),
-                    text_color: if active { th::bg_dark() } else { th::danger() },
-                    border: iced::Border {
-                        color: if active {
-                            th::danger()
-                        } else {
-                            th::border_light()
-                        },
-                        width: 1.0,
-                        radius: 3.0.into(),
-                    },
-                    ..Default::default()
-                }
-            });
+            .padding(RECORD_CONTROL_PADDING)
+            .style(control_style::style(lit(recording, active)));
 
         let capture_button = button(capture_button_content(capture_active))
             .on_press(Message::Perform(PerformMsg::Capture(CaptureMsg::Toggle)))
-            .padding([7, 12])
-            .style(move |_theme: &Theme, status| {
-                let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
-                let emphasized = capture_active || hovered;
-                button::Style {
-                    background: Some(
-                        if capturing {
-                            th::danger()
-                        } else if capture_active {
-                            th::accent()
-                        } else if hovered {
-                            th::blend(th::perform_inset(), th::accent(), 0.14)
-                        } else {
-                            th::perform_inset()
-                        }
-                        .into(),
-                    ),
-                    text_color: if emphasized {
-                        th::bg_dark()
-                    } else {
-                        th::accent()
-                    },
-                    border: iced::Border {
-                        color: if capturing {
-                            th::danger()
-                        } else {
-                            th::accent_dim()
-                        },
-                        width: 1.0,
-                        radius: 3.0.into(),
-                    },
-                    ..Default::default()
-                }
-            });
+            .padding(RECORD_CONTROL_PADDING)
+            .style(control_style::style(lit(capturing, capture_active)));
 
         let count_in = record_pick_list(
             &SectionRecordCountIn::ALL,
@@ -176,70 +107,45 @@ impl App {
             th::text_dim()
         };
 
-        let status = |narrow: bool| -> Element<'_, Message> {
-            let target = text(target.clone())
-                .font(PERFORM_TECH)
+        let line = |content: String, font| {
+            text(content)
+                .font(font)
                 .size(9)
-                .color(th::text_dim());
-            let phase = text(phase.clone())
-                .font(PERFORM_LABEL)
-                .size(9)
-                .color(state_color);
-            let destination = text(capture_phase.clone())
-                .font(PERFORM_LABEL)
-                .size(9)
-                .color(if capturing {
-                    th::danger()
-                } else {
-                    th::accent()
-                });
-            if narrow {
-                column![target, row![phase, destination].spacing(12)]
-                    .spacing(3)
-                    .into()
+                .wrapping(text::Wrapping::None)
+        };
+        let status = row![
+            line(target, PERFORM_TECH).color(th::text_dim()),
+            line(phase, PERFORM_LABEL).color(state_color),
+            line(capture_phase, PERFORM_LABEL).color(if capturing {
+                th::danger()
             } else {
-                row![target, phase, destination]
-                    .spacing(12)
-                    .align_y(iced::Alignment::Center)
-                    .into()
-            }
-        };
-        let layout = section_record_bar_layout(self.browser_workspace_width());
-        let content: Element<'_, Message> = match layout {
-            SectionRecordBarLayout::Inline | SectionRecordBarLayout::StatusBelow => {
-                let controls = row![record_button, count_in, mode, quantization, capture_button]
-                    .spacing(7)
-                    .align_y(iced::Alignment::Center);
-                if layout == SectionRecordBarLayout::Inline {
-                    row![
-                        controls,
-                        container(horizontal_space()).width(Length::Fill),
-                        status(false),
-                    ]
-                    .align_y(iced::Alignment::Center)
-                    .into()
-                } else {
-                    column![controls, status(false)].spacing(6).into()
-                }
-            }
-            SectionRecordBarLayout::StackedControls => column![
-                row![record_button, count_in, mode]
-                    .spacing(7)
-                    .align_y(iced::Alignment::Center),
-                row![quantization, capture_button]
-                    .spacing(7)
-                    .align_y(iced::Alignment::Center),
-                status(true),
-            ]
-            .spacing(6)
-            .into(),
-        };
+                th::accent()
+            }),
+        ]
+        .spacing(12)
+        .align_y(iced::Alignment::Center);
+        RecordGroup {
+            status: status.into(),
+            controls: vec![
+                record_button.into(),
+                count_in,
+                mode,
+                quantization,
+                capture_button.into(),
+            ],
+        }
+    }
+}
 
-        container(content)
-            .width(Length::Fill)
-            .height(Length::Shrink)
-            .padding([5, 12])
-            .into()
+/// The fill of a record control: red while it records, the accent while it
+/// is armed or finishing, and the plain control shade otherwise.
+fn lit(recording: bool, active: bool) -> Option<iced::Color> {
+    if recording {
+        Some(th::danger())
+    } else if active {
+        Some(th::accent())
+    } else {
+        None
     }
 }
 
@@ -297,7 +203,7 @@ fn record_button_content(active: bool) -> Element<'static, Message> {
         .font(PERFORM_TECH_STRONG)
         .size(9)
         .color(color),
-        shortcut_keycap("F4", color, active),
+        segment_group::shortcut("F4", color),
     ]
     .spacing(6)
     .align_y(iced::Alignment::Center)
@@ -321,7 +227,7 @@ fn capture_button_content(active: bool) -> Element<'static, Message> {
         .font(PERFORM_TECH_STRONG)
         .size(9)
         .color(color),
-        shortcut_keycap("F5", color, active),
+        segment_group::shortcut("F5", color),
     ]
     .spacing(6)
     .align_y(iced::Alignment::Center)
@@ -358,25 +264,6 @@ fn capture_to_arrange_icon() -> Element<'static, Message> {
     .into()
 }
 
-fn shortcut_keycap(
-    label: &'static str,
-    color: iced::Color,
-    active: bool,
-) -> Element<'static, Message> {
-    container(text(label).font(PERFORM_TECH_STRONG).size(8).color(color))
-        .padding([1, 4])
-        .style(move |_theme: &Theme| container::Style {
-            background: (!active).then(|| th::blend(th::bg_dark(), color, 0.08).into()),
-            border: iced::Border {
-                color: th::blend(th::border_light(), color, 0.3),
-                width: 1.0,
-                radius: 2.0.into(),
-            },
-            ..Default::default()
-        })
-        .into()
-}
-
 fn record_pick_list<'a, T: Copy + Eq + std::fmt::Display + 'static>(
     options: &'static [T],
     selected: T,
@@ -387,18 +274,15 @@ fn record_pick_list<'a, T: Copy + Eq + std::fmt::Display + 'static>(
         Message::Perform(PerformMsg::SectionRecord(message(value)))
     })
     .width(Length::Fixed(width))
-    .padding([5, 7])
+    .padding(RECORD_CONTROL_PADDING)
     .text_size(9)
+    .style(control_style::list(th::accent()))
     .into()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        capture_destination_label, count_in_beats_remaining, section_record_bar_layout,
-        SectionRecordBarLayout, SECTION_RECORD_INLINE_MIN_WIDTH,
-        SECTION_RECORD_STATUS_BELOW_MIN_WIDTH,
-    };
+    use super::{capture_destination_label, count_in_beats_remaining};
     use crate::domains::perform::CapturePhase;
 
     #[test]
@@ -427,26 +311,6 @@ mod tests {
         assert_eq!(
             capture_destination_label(240_000, 48_000, CapturePhase::Recording),
             "ARRANGE @ 00:05.00 · CAPTURING"
-        );
-    }
-
-    #[test]
-    fn record_bar_adapts_before_controls_or_status_can_be_squashed() {
-        assert_eq!(
-            section_record_bar_layout(SECTION_RECORD_INLINE_MIN_WIDTH),
-            SectionRecordBarLayout::Inline
-        );
-        assert_eq!(
-            section_record_bar_layout(SECTION_RECORD_INLINE_MIN_WIDTH - 1.0),
-            SectionRecordBarLayout::StatusBelow
-        );
-        assert_eq!(
-            section_record_bar_layout(SECTION_RECORD_STATUS_BELOW_MIN_WIDTH),
-            SectionRecordBarLayout::StatusBelow
-        );
-        assert_eq!(
-            section_record_bar_layout(SECTION_RECORD_STATUS_BELOW_MIN_WIDTH - 1.0),
-            SectionRecordBarLayout::StackedControls
         );
     }
 }
