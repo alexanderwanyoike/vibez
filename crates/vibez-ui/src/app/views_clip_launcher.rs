@@ -749,7 +749,7 @@ impl App {
                             .width(Length::Fill)
                         )
                         .align_bottom(Length::Fill)
-                        .padding(crate::widgets::clip_slot::FILM_INSET + 1.0),
+                        .padding(crate::widgets::clip_slot::BUTTON_INSET),
                     ]
                     .into();
                     let cell: Element<'_, Message> = if let Some(clip) = slot {
@@ -763,7 +763,7 @@ impl App {
                                 false,
                             ))
                             .align_right(Length::Fill)
-                            .padding(crate::widgets::clip_slot::FILM_INSET + 1.0)
+                            .padding(crate::widgets::clip_slot::BUTTON_INSET)
                         ]
                         .into()
                     } else {
