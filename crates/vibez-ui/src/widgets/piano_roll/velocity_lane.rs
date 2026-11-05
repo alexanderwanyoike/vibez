@@ -163,11 +163,7 @@ impl VelocityLaneWidget {
             .grid
             .effective_grid(geometry.pixels_per_beat())
             .beat_size();
-        let first_step = (geometry.x_to_beat(KEY_WIDTH) / grid_step).floor().max(0.0) as usize;
-        let num_steps =
-            (geometry.x_to_beat(bounds.width).max(self.total_beats) / grid_step).ceil() as usize;
-        for step in first_step..=num_steps {
-            let beat = step as f64 * grid_step;
+        for beat in geometry.grid_beats(grid_step, KEY_WIDTH, bounds.width) {
             let x = geometry.beat_to_x(beat).floor() + 0.5;
             if x > bounds.width {
                 break;

@@ -84,11 +84,8 @@ impl PianoRollWidget {
 
         // ── Vertical musical grid lines ──
         let grid_step = self.grid.effective_grid(grid_ppb).beat_size();
-        let first_step = (geometry.x_to_beat(KEY_WIDTH) / grid_step).floor().max(0.0) as usize;
-        let num_steps = (geometry.x_to_beat(w).max(total) / grid_step).ceil() as usize;
 
-        for step in first_step..=num_steps {
-            let beat = step as f64 * grid_step;
+        for beat in geometry.grid_beats(grid_step, KEY_WIDTH, w) {
             // Snap to half-pixel for crisp 1px rendering (avoids blurry subpixel splits)
             let x = geometry.beat_to_x(beat).floor() + 0.5;
             if x > w {
@@ -418,8 +415,7 @@ impl PianoRollWidget {
         );
 
         // Ruler tick marks and labels
-        for step in first_step..=num_steps {
-            let beat = step as f64 * grid_step;
+        for beat in geometry.grid_beats(grid_step, KEY_WIDTH, w) {
             let x = geometry.beat_to_x(beat).floor() + 0.5;
             if x > w {
                 break;

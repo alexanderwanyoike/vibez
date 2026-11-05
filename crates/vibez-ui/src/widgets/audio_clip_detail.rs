@@ -385,13 +385,10 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
         let pixels_per_beat = geometry.pixels_per_beat();
         let samples_per_beat = self.samples_per_beat();
         let grid_step = self.grid.effective_grid(pixels_per_beat).beat_size();
-        let first_step = (geometry.x_to_beat(0.0) / grid_step).floor().max(0.0) as usize;
-        let last_step = (geometry.x_to_beat(w) / grid_step).ceil().max(0.0) as usize;
 
         // Musical grid behind the waveform. Audio and MIDI editors now
         // describe time with the same bars-and-beats language.
-        for step in first_step..=last_step {
-            let beat = step as f64 * grid_step;
+        for beat in geometry.grid_beats(grid_step, 0.0, w) {
             let x = geometry.beat_to_x(beat).floor() + 0.5;
             if x > w {
                 break;
@@ -512,8 +509,7 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
                 .with_color(theme::border())
                 .with_width(1.0),
         );
-        for step in first_step..=last_step {
-            let beat = step as f64 * grid_step;
+        for beat in geometry.grid_beats(grid_step, 0.0, w) {
             let x = geometry.beat_to_x(beat).floor() + 0.5;
             if x > w {
                 break;
