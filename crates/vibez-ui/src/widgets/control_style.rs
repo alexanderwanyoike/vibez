@@ -33,7 +33,12 @@ fn hovered(status: button::Status) -> bool {
 
 /// A control's style, lit in `on` while it is on.
 pub fn style(on: Option<Color>) -> impl Fn(&Theme, button::Status) -> button::Style {
-    move |_theme, status| button::Style {
+    move |_theme, status| styled(on, status)
+}
+
+/// [`style`] in one `status`, for controls that adjust it.
+pub fn styled(on: Option<Color>, status: button::Status) -> button::Style {
+    button::Style {
         background: Some(fill(on, status).into()),
         text_color: ink(on, status),
         border: Border {
