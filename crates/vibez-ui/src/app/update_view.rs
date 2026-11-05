@@ -19,6 +19,9 @@ impl App {
     }
 
     pub(super) fn on_grid_shortcut_pressed(&mut self, command: GridCommand) -> Task<Message> {
+        if !self.editor_shortcuts_have_focus() {
+            return Task::none();
+        }
         let target = if self.focused_piano_roll_clip().is_some() {
             GridTarget::Clip
         } else {
