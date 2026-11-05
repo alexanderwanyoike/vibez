@@ -242,6 +242,7 @@ mod clips;
 mod clips_draw;
 #[cfg(test)]
 mod clips_tests;
+mod drag_preview;
 mod fade_drag;
 mod lane_grid;
 mod loop_tint;

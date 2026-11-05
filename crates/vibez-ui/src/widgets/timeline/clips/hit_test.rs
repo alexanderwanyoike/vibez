@@ -1,7 +1,7 @@
 //! Clip hit testing and marquee message construction.
 
 use super::*;
-use crate::widgets::timeline::clip_drag::ClipEdge;
+use crate::state::ClipEdge;
 use crate::widgets::timeline::clip_frame::clip_box;
 
 /// The Clip under the pointer.

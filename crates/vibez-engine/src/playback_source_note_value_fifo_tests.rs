@@ -135,8 +135,9 @@ fn pending_notes_keep_current_first_match_edits_and_clamps_until_fifo_release() 
             insertion: a,
         })
         .unwrap();
-    // Move preserves the sounding voice; duration/groove edits deliberately
-    // flush it, so they cannot witness insertion's no-flush invariant here.
+    // The move leaves the playhead before the Clip, so it releases the
+    // sounding note as Ableton does; the exact release count below still
+    // shows that insertion itself releases nothing.
     commands
         .push(EngineCommand::MoveNoteClip {
             track_id,
@@ -316,13 +317,13 @@ fn pending_notes_keep_current_first_match_edits_and_clamps_until_fifo_release() 
     assert_eq!(before_last.latch, first.latch);
     for block in 0..3 {
         measured(&mut engine, &mut output[..16]);
-        assert_signal(&output[..16], 0.375);
+        assert_signal(&output[..16], 0.125);
         before_last.assert_unchanged(&engine.tracks()[0].playback_source.note_clips[0]);
         second.assert_unchanged(&engine.tracks()[0].playback_source.note_clips[1]);
         assert_eq!(engine.transport().position(), 144 + (block + 1) * 8);
         assert!(engine.transport().is_playing());
         assert_eq!(engine.transport().audio_length(), Some(24 * 22_050));
-        assert_eq!(target_calls.observed(), (1, 0, 0));
+        assert_eq!(target_calls.observed(), (1, 1, 0));
         assert_eq!(live_calls.observed(), (1, 0, 0));
         assert_eq!(
             commands.slots(),
@@ -431,12 +432,13 @@ fn pending_notes_keep_current_first_match_edits_and_clamps_until_fifo_release() 
             owner
         );
     }
-    assert_eq!(target_calls.observed(), (1, 0, 0));
+    assert_eq!(target_calls.observed(), (1, 1, 0));
     assert_eq!(live_calls.observed(), (1, 1, 0));
     assert_eq!(engine.transport().position(), 168);
-    // Move's existing schedule retriggers its original note at global beat0.5.
+    // The moved Clip starts its original note again at global beat0.5.
     // The inserted starts remain local. MPC's48-tick Sixteenth pair rounds
     // swing0.62 to30/96 beat, mapping local0.75 to0.8125.
+    let moved_on = 11_025;
     let b_on = 22_050;
     let last_on = (1.3125_f64 * 22_050.0).ceil() as u64;
     let a_on = 33_075;
@@ -450,7 +452,9 @@ fn pending_notes_keep_current_first_match_edits_and_clamps_until_fifo_release() 
         measured(&mut engine, &mut output[..frames * 2]);
         for (frame, &[left, right]) in output[..frames * 2].as_chunks::<2>().0.iter().enumerate() {
             let position = start + frame as u64;
-            let expected = if position < b_on {
+            let expected = if position < moved_on {
+                0.0
+            } else if position < b_on {
                 0.25
             } else if position < last_on {
                 0.125
@@ -476,7 +480,7 @@ fn pending_notes_keep_current_first_match_edits_and_clamps_until_fifo_release() 
         }
         block += 1;
     }
-    assert_eq!(target_calls.observed(), (5, 4, 0));
+    assert_eq!(target_calls.observed(), (5, 5, 0));
     assert_eq!(live_calls.observed(), (1, 1, 0));
     assert_eq!(engine.transport().position(), end);
     assert!(engine.transport().is_playing());

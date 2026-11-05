@@ -489,6 +489,7 @@ impl App {
                     editor.marquee.as_ref().map(|marquee| marquee.rect),
                 )
                 .with_snap_targets(snap_targets.clone())
+                .with_clip_drag(editor.clip_drag.as_ref().map(|drag| drag.preview.clone()))
                 .with_vertical_track_scrolling();
                 if let Some(preview) = recording_preview.as_ref().filter(|preview| {
                     preview.target_id == section_id && preview.track_id == track.id

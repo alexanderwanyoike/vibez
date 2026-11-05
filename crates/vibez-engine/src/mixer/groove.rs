@@ -1,8 +1,13 @@
 //! Shared event-read boundary for non-destructive MIDI clip Groove.
 
 use super::*;
+use vibez_core::id::ClipId;
 use vibez_core::midi::MidiNote;
 use vibez_core::perform::GrooveGrid;
+
+/// A scheduled note-on: frame offset, pitch, velocity and the Clip it
+/// belongs to.
+pub(super) type TimedNoteOn = (u32, u8, u8, ClipId);
 
 #[inline]
 pub(super) fn mapped_note_start(clip: &EngineNoteClip, note: &MidiNote, swing: SwingAmount) -> f64 {
@@ -31,7 +36,7 @@ pub(super) fn collect_timed_note_events(
     frames: usize,
     samples_per_beat: f64,
     swing: SwingAmount,
-    note_ons: &mut Vec<(u32, u8, u8)>,
+    note_ons: &mut Vec<TimedNoteOn>,
     note_offs: &mut Vec<(u32, u8)>,
 ) {
     if frames == 0 || samples_per_beat <= 0.0 {
@@ -79,6 +84,7 @@ pub(super) fn collect_timed_note_events(
                 {
                     push_note_on(
                         clip_start + start,
+                        clip.id,
                         note,
                         pos,
                         frames,
@@ -122,7 +128,7 @@ pub(super) fn collect_sounding_note_ons(
     pos: u64,
     samples_per_beat: f64,
     swing: SwingAmount,
-    note_ons: &mut Vec<(u32, u8, u8)>,
+    note_ons: &mut Vec<TimedNoteOn>,
 ) {
     if pos == 0 || samples_per_beat <= 0.0 {
         return;
@@ -148,7 +154,7 @@ pub(super) fn collect_sounding_note_ons(
             if mapped_note_start(clip, note, swing) <= previous
                 && mapped_note_end(clip, note_index, swing) > current
             {
-                note_ons.push((0, note.pitch, note.velocity));
+                note_ons.push((0, note.pitch, note.velocity, clip.id));
             }
         }
     }
@@ -163,7 +169,7 @@ fn collect_looping_clip_events(
     frames: usize,
     samples_per_beat: f64,
     swing: SwingAmount,
-    note_ons: &mut Vec<(u32, u8, u8)>,
+    note_ons: &mut Vec<TimedNoteOn>,
     note_offs: &mut Vec<(u32, u8)>,
 ) {
     let timeline = clip.timeline();
@@ -177,6 +183,7 @@ fn collect_looping_clip_events(
         {
             push_note_on(
                 clip.position_beats + local,
+                clip.id,
                 note,
                 pos,
                 frames,
@@ -223,14 +230,15 @@ fn collect_looping_clip_events(
 
 fn push_note_on(
     beat: f64,
+    clip_id: ClipId,
     note: &MidiNote,
     pos: u64,
     frames: usize,
     samples_per_beat: f64,
-    note_ons: &mut Vec<(u32, u8, u8)>,
+    note_ons: &mut Vec<TimedNoteOn>,
 ) {
     if let Some(frame) = frame_for_beat(beat, pos, frames, samples_per_beat) {
-        note_ons.push((frame, note.pitch, note.velocity));
+        note_ons.push((frame, note.pitch, note.velocity, clip_id));
     }
 }
 

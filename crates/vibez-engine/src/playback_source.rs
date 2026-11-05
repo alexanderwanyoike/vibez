@@ -286,6 +286,18 @@ impl EngineNoteClip {
         )
     }
 
+    /// Whether a note of `pitch` in this Clip lies under Arrangement `beat`.
+    pub(crate) fn holds_note_at(&self, pitch: u8, beat: f64) -> bool {
+        let local = beat - self.position_beats;
+        if !(0.0..self.duration_beats).contains(&local) {
+            return false;
+        }
+        let source = self.timeline().source_at(local);
+        self.notes.iter().any(|note| {
+            note.pitch == pitch && note.start_beat <= source && source < note.end_beat()
+        })
+    }
+
     #[inline]
     pub(crate) fn next_same_pitch_start_beat(&self, note_index: usize) -> Option<f64> {
         #[cfg(test)]

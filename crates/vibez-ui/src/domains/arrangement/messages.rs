@@ -6,7 +6,9 @@ use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::track::{ClipTranspose, MediaSourceRef};
 
-use crate::state::{ArrangementSelection, AudioClipInspectorField, AudioClipRotaryField};
+use crate::state::{
+    ArrangementSelection, AudioClipInspectorField, AudioClipRotaryField, ClipDragStep,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AudioSliceMarkers {
@@ -232,6 +234,12 @@ pub enum ArrangementMsg {
         new_position_beats: f64,
         target_track: TrackId,
     },
+    /// One pointer step of a Clip drag: `edit` changes the Clips and every
+    /// lane draws `step` until the drag drops or is cancelled.
+    DragClips {
+        step: ClipDragStep,
+        edit: Box<ArrangementMsg>,
+    },
     /// A drag of `anchor` (a move or either edge) was released: the Clips
     /// it carried overwrite what they landed on. Overwriting waits for the
     /// release so the drag can pass over other Clips without cutting them.
@@ -353,6 +361,7 @@ impl ArrangementMsg {
                 | Self::SetAudioClipFadeCurve { .. }
                 | Self::SetAudioClipCrossfadeCurve { .. }
                 | Self::MoveSelectedClips { .. }
+                | Self::DragClips { .. }
                 | Self::DropClips { .. }
                 | Self::ToggleClipLoop(..)
                 | Self::ToggleClipReverse(..)
@@ -449,6 +458,7 @@ impl ArrangementMsg {
                 self,
                 Self::DuplicateSelectedClip
                     | Self::MoveSelectedClips { .. }
+                    | Self::DragClips { .. }
                     | Self::DropClips { .. }
                     | Self::ResizeSelectedClips { .. }
                     | Self::TrimSelectedClipsStart { .. }

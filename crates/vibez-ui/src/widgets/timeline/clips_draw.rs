@@ -8,6 +8,7 @@ use crate::theme;
 
 use super::clip_colors::{clip_colors, ClipColors};
 use super::clip_frame::{clip_box, draw_clip_back, draw_clip_front, LoopPasses};
+use super::drag_preview::draw_drag_shadow;
 use super::fade_drag::{fade_curve_handle, fade_handle_xs};
 use super::lane_grid::{lane_grid, GridLine};
 use super::loop_tint::{parts, LoopSpan};
@@ -171,12 +172,13 @@ impl TrackClipCanvas {
             }
         }
 
+        self.draw_drag_origin(&mut frame, h);
+
         // Draw audio clips
         if self.bpm > 0.0 {
             let spb = self.sample_rate as f64 * 60.0 / self.bpm;
             for (clip, is_recording_preview) in self
-                .clips
-                .iter()
+                .dragged_last(&self.clips, |clip| clip.clip_id)
                 .map(|clip| (clip, false))
                 .chain(self.audio_recording_preview.iter().map(|clip| (clip, true)))
             {
@@ -198,6 +200,9 @@ impl TrackClipCanvas {
                 let clip_h = h - 2.0 * CLIP_Y;
                 let body = clip_box(clip_x, clip_y, clip_w, clip_h);
 
+                if !is_recording_preview && self.is_dragged(clip.clip_id) {
+                    draw_drag_shadow(&mut frame, body);
+                }
                 let looped = clip.loop_enabled && clip.loop_end > clip.loop_start;
                 let loop_passes = looped.then(|| {
                     let pass_px =
@@ -368,8 +373,7 @@ impl TrackClipCanvas {
         // Draw note clips (for instrument tracks)
         if self.is_instrument && self.bpm > 0.0 {
             for (note_clip, is_recording_preview) in self
-                .note_clips
-                .iter()
+                .dragged_last(&self.note_clips, |clip| clip.clip_id)
                 .map(|clip| (clip, false))
                 .chain(self.recording_preview.iter().map(|clip| (clip, true)))
             {
@@ -388,6 +392,9 @@ impl TrackClipCanvas {
                 let clip_h = h - 2.0 * CLIP_Y;
                 let body = clip_box(clip_x, clip_y, clip_w, clip_h);
 
+                if !is_recording_preview && self.is_dragged(note_clip.clip_id) {
+                    draw_drag_shadow(&mut frame, body);
+                }
                 let looping =
                     note_clip.loop_enabled && note_clip.loop_end_beats > note_clip.loop_start_beats;
                 let loop_passes =
@@ -463,6 +470,8 @@ impl TrackClipCanvas {
                 }
             }
         }
+
+        self.draw_drag_guide(&mut frame, w, h);
 
         // A playing Section has an engine-owned playback marker in addition
         // to its runtime edit cursor. Draw it first and in the accent colour
@@ -578,6 +587,8 @@ impl TrackClipCanvas {
                 }
             }
         }
+
+        self.draw_drag_readout(&mut frame, w, h);
 
         vec![frame.into_geometry()]
     }

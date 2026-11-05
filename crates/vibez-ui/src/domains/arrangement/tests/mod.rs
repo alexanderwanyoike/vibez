@@ -61,6 +61,7 @@ mod channel_selection;
 mod clipboard_loops;
 mod content_swap;
 mod crossfades;
+mod drag_preview;
 mod duplicate_block;
 mod edge_trims;
 mod group_move;

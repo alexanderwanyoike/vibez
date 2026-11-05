@@ -13,8 +13,8 @@ use crate::domains::transport::TransportMsg;
 use crate::domains::view::ViewMsg;
 use crate::message::Message;
 use crate::state::{
-    ArrangementMarqueeRect, ArrangementSelection, ContextMenuTarget, GridConfig, ProjectTrack,
-    TrackTimelineContent, UndoGestureId,
+    ArrangementMarqueeRect, ArrangementSelection, ClipDragPreview, ClipSpan, ContextMenuTarget,
+    GridConfig, ProjectTrack, TrackTimelineContent, UndoGestureId,
 };
 use crate::timeline_geometry::TimelineGeometry;
 use crate::timeline_snap::{SnapContext, SnapTargets};
@@ -23,9 +23,10 @@ use crate::widgets::local_drag::LocalDrag;
 use crate::widgets::timeline::marquee;
 use vibez_core::id::{ClipId, TrackId};
 
-use super::clip_drag::{ClipDragAction, ClipEdge};
+use super::clip_drag::ClipDragAction;
 use super::*;
 
+mod drag_steps;
 mod hit_test;
 
 use hit_test::ClipHit;
@@ -110,6 +111,9 @@ pub struct TrackClipCanvas {
     pub sample_drop_detail: Option<String>,
     /// Clip edges and markers on every lane that drags and clicks lock onto.
     pub snap_targets: Arc<SnapTargets>,
+    /// The Clip drag in flight on this lane's timeline, whichever lane it
+    /// began on.
+    pub clip_drag: Option<ClipDragPreview>,
     /// The track name this canvas was constructed with. Drawn on the drop
     /// indicator so the user can verify which lane will receive the drop.
     pub track_name: String,
@@ -274,6 +278,7 @@ impl TrackClipCanvas {
             sample_drop_duration_beats,
             sample_drop_detail,
             snap_targets: Arc::default(),
+            clip_drag: None,
             track_name: track.name.clone(),
         }
     }
@@ -293,6 +298,11 @@ impl TrackClipCanvas {
 
     pub fn with_snap_targets(mut self, snap_targets: Arc<SnapTargets>) -> Self {
         self.snap_targets = snap_targets;
+        self
+    }
+
+    pub fn with_clip_drag(mut self, clip_drag: Option<ClipDragPreview>) -> Self {
+        self.clip_drag = clip_drag;
         self
     }
 
@@ -388,7 +398,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                 ClipDragAction::FadeCurve(_) => mouse::Interaction::ResizingVertically,
                 ClipDragAction::CrossfadeCurve(_) => mouse::Interaction::ResizingVertically,
                 ClipDragAction::RegionSelect { .. } => mouse::Interaction::Crosshair,
-                ClipDragAction::PendingSeek { .. } => mouse::Interaction::Pointer,
+                ClipDragAction::PendingSeek { .. } => mouse::Interaction::Text,
                 ClipDragAction::PanViewport { .. } => mouse::Interaction::Grabbing,
             };
         }
@@ -413,10 +423,10 @@ impl canvas::Program<Message> for TrackClipCanvas {
                 if in_title_bar {
                     return mouse::Interaction::Grab;
                 }
-                // Body zone — pointer (for seek / region select)
-                return mouse::Interaction::Pointer;
             }
-            return mouse::Interaction::Pointer;
+            // A click on a clip body or an empty lane seeks and a drag
+            // selects time, so both show the same I-beam.
+            return mouse::Interaction::Text;
         }
 
         mouse::Interaction::default()
@@ -484,15 +494,16 @@ impl canvas::Program<Message> for TrackClipCanvas {
                             ArrangementSelection::AudioClip { track_id, clip_id }
                         };
 
+                        let origin = ClipSpan {
+                            start_beats: pos_beats,
+                            length_beats: dur_beats,
+                        };
                         if let Some(edge) = edge {
                             state.drag = Some(ClipDragAction::ResizeClip {
                                 undo_gesture: UndoGestureId::new(),
                                 anchor: selection,
                                 edge,
-                                fixed_beat: match edge {
-                                    ClipEdge::Start => pos_beats + dur_beats,
-                                    ClipEdge::End => pos_beats,
-                                },
+                                origin,
                                 start_local_x: pos.x,
                                 phase: DragPhase::Pending,
                             });
@@ -503,8 +514,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 clip_id,
                                 start_local_x: pos.x,
                                 start_scroll_beats: self.scroll_offset_beats,
-                                original_position_beats: pos_beats,
-                                length_beats: dur_beats,
+                                origin,
                                 start_y: pos.y,
                                 collapse_to: (self.selected_clips.contains(&clip_id)
                                     && !state.shift_held)
@@ -671,91 +681,17 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                     )),
                                 );
                             }
-                            ClipDragAction::MoveClip {
-                                undo_gesture,
-                                clip_id,
-                                start_local_x,
-                                start_scroll_beats,
-                                original_position_beats,
-                                length_beats,
-                                start_y,
-                                phase,
-                                ..
-                            } => {
-                                if !phase.follow(Point::new(*start_local_x, *start_y), local) {
-                                    return (canvas::event::Status::Captured, None);
-                                }
-                                let delta_px = local_x - *start_local_x;
-                                let travel = crate::timeline_geometry::compensated_drag_beat(
-                                    *original_position_beats,
-                                    delta_px,
-                                    geometry.pixels_per_beat(),
-                                    *start_scroll_beats,
-                                    self.scroll_offset_beats,
-                                ) - *original_position_beats;
-                                let new_pos = self
-                                    .snap_targets
-                                    .moved_span(
-                                        *original_position_beats,
-                                        *length_beats,
-                                        travel,
-                                        self.snap_context(state.alt_held),
-                                    )
-                                    .beat
-                                    .max(0.0);
-
-                                // Resolve against real row geometry when the
-                                // surface supplied it; stepping by a fixed
-                                // row height mis-targets as soon as a track
-                                // above has its automation lanes expanded.
-                                let target_track = self
-                                    .resolve_lane_at(self.row_top() + local.y)
-                                    .filter(|_| (local.y - *start_y).abs() > CROSS_TRACK_MIN_PX)
-                                    .and_then(|lane| self.track_ids.get(lane).copied())
-                                    .unwrap_or(track_id);
-                                let edit =
-                                    Message::Arrangement(ArrangementMsg::MoveSelectedClips {
-                                        anchor: *clip_id,
-                                        new_position_beats: new_pos,
-                                        target_track,
-                                    })
-                                    .in_undo_gesture(*undo_gesture);
-                                return (canvas::event::Status::Captured, Some(edit));
+                            ClipDragAction::MoveClip { .. } => {
+                                return (
+                                    canvas::event::Status::Captured,
+                                    self.move_step(state, local),
+                                );
                             }
-                            ClipDragAction::ResizeClip {
-                                undo_gesture,
-                                anchor,
-                                edge,
-                                fixed_beat,
-                                start_local_x,
-                                phase,
-                            } => {
-                                if !phase.follow_x(*start_local_x, local_x) {
-                                    return (canvas::event::Status::Captured, None);
-                                }
-                                let pointer = self.x_to_beat(local_x);
-                                let context = self.snap_context(state.alt_held);
-                                let anchor = *anchor;
-                                let edit = match edge {
-                                    ClipEdge::Start => ArrangementMsg::TrimSelectedClipsStart {
-                                        anchor,
-                                        new_start_beats: self
-                                            .snap_targets
-                                            .span_start(pointer, *fixed_beat, context)
-                                            .beat,
-                                    },
-                                    ClipEdge::End => ArrangementMsg::ResizeSelectedClips {
-                                        anchor,
-                                        new_duration_beats: self
-                                            .snap_targets
-                                            .span_end(*fixed_beat, pointer, context)
-                                            .beat
-                                            - *fixed_beat,
-                                    },
-                                };
-                                let edit =
-                                    Message::Arrangement(edit).in_undo_gesture(*undo_gesture);
-                                return (canvas::event::Status::Captured, Some(edit));
+                            ClipDragAction::ResizeClip { .. } => {
+                                return (
+                                    canvas::event::Status::Captured,
+                                    self.edge_step(state, local),
+                                );
                             }
                             ClipDragAction::FadeClip(drag) => {
                                 let handle = self
@@ -959,6 +895,31 @@ impl canvas::Program<Message> for TrackClipCanvas {
             // handled here would run its edit once per lane, and a Delete
             // bound here raced the piano roll's and deleted the clip while a
             // note was selected.
+
+            // Escape cancels the drag this lane holds, and the lane captures
+            // it so it does nothing else (docs/PATTERNS.md, Undo).
+            canvas::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+                key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
+                ..
+            }) => {
+                let gesture = match state.drag.take() {
+                    Some(
+                        ClipDragAction::MoveClip { undo_gesture, .. }
+                        | ClipDragAction::ResizeClip { undo_gesture, .. },
+                    ) => undo_gesture,
+                    Some(ClipDragAction::FadeClip(drag)) => drag.undo_gesture,
+                    Some(ClipDragAction::FadeCurve(drag)) => drag.undo_gesture,
+                    Some(ClipDragAction::CrossfadeCurve(drag)) => drag.undo_gesture,
+                    other => {
+                        state.drag = other;
+                        return (canvas::event::Status::Ignored, None);
+                    }
+                };
+                return (
+                    canvas::event::Status::Captured,
+                    Some(Message::CancelUndoGesture(gesture)),
+                );
+            }
 
             // -- Track shift key state for multi-select --
             canvas::Event::Keyboard(iced::keyboard::Event::ModifiersChanged(modifiers)) => {

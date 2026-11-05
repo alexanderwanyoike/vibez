@@ -33,7 +33,7 @@ fn note_ons(clip: EngineNoteClip, frames: usize) -> Vec<(u32, u8)> {
         &mut offs,
     );
     ons.into_iter()
-        .map(|(frame, pitch, _)| (frame, pitch))
+        .map(|(frame, pitch, _, _)| (frame, pitch))
         .collect()
 }
 

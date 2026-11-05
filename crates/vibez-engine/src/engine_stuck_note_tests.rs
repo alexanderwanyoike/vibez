@@ -667,3 +667,84 @@ fn a_legato_launch_picks_up_notes_already_sounding_at_its_start() {
         );
     }
 }
+
+/// The held-note fixture played on to about beat 1, its log cleared.
+fn engine_with_held_note_at_beat_one() -> (
+    AudioEngine,
+    rtrb::Producer<EngineCommand>,
+    NoteEventLog,
+    TrackId,
+    ClipId,
+) {
+    let (mut engine, cmd_tx, events, tid) = engine_with_held_note();
+    let mut buf = vec![0.0f32; 512 * 2];
+    for _ in 0..43 {
+        engine.process(&mut buf, 2);
+    }
+    events.lock().unwrap().clear();
+    let cid = engine.tracks()[0].playback_source.note_clips[0].id;
+    (engine, cmd_tx, events, tid, cid)
+}
+
+fn note_clip_bounds(track_id: TrackId, clip_id: ClipId, duration_beats: f64) -> EngineCommand {
+    EngineCommand::SetNoteClipBounds {
+        track_id,
+        clip_id,
+        duration_beats,
+        start_marker_beats: 0.0,
+        loop_start_beats: 0.0,
+        loop_end_beats: 0.0,
+    }
+}
+
+#[test]
+fn moving_a_clip_away_from_the_playhead_releases_its_sounding_note() {
+    let (mut engine, mut cmd_tx, events, tid, cid) = engine_with_held_note_at_beat_one();
+    cmd_tx
+        .push(EngineCommand::MoveNoteClip {
+            track_id: tid,
+            clip_id: cid,
+            new_position_beats: 16.0,
+        })
+        .unwrap();
+    engine.process(&mut vec![0.0f32; 512 * 2], 2);
+    assert_eq!(
+        *events.lock().unwrap(),
+        vec![(false, 60)],
+        "the note's end moved away with its clip, so only the move can release it"
+    );
+}
+
+#[test]
+fn moving_a_clip_that_still_holds_its_note_under_the_playhead_keeps_it_sounding() {
+    let (mut engine, mut cmd_tx, events, tid, cid) = engine_with_held_note_at_beat_one();
+    cmd_tx
+        .push(EngineCommand::MoveNoteClip {
+            track_id: tid,
+            clip_id: cid,
+            new_position_beats: 0.5,
+        })
+        .unwrap();
+    engine.process(&mut vec![0.0f32; 512 * 2], 2);
+    assert!(events.lock().unwrap().is_empty());
+}
+
+#[test]
+fn resizing_a_clip_keeps_its_notes_inside_the_new_bounds_sounding() {
+    let (mut engine, mut cmd_tx, events, tid, cid) = engine_with_held_note_at_beat_one();
+    cmd_tx.push(note_clip_bounds(tid, cid, 4.0)).unwrap();
+    engine.process(&mut vec![0.0f32; 512 * 2], 2);
+    assert!(
+        events.lock().unwrap().is_empty(),
+        "a resize drag step must not cut a note it keeps: {:?}",
+        events.lock().unwrap()
+    );
+}
+
+#[test]
+fn resizing_a_clip_to_end_before_the_playhead_releases_its_notes() {
+    let (mut engine, mut cmd_tx, events, tid, cid) = engine_with_held_note_at_beat_one();
+    cmd_tx.push(note_clip_bounds(tid, cid, 0.5)).unwrap();
+    engine.process(&mut vec![0.0f32; 512 * 2], 2);
+    assert_eq!(*events.lock().unwrap(), vec![(false, 60)]);
+}

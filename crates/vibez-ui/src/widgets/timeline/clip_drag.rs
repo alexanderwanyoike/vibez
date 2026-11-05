@@ -1,17 +1,10 @@
 //! Pointer gestures that can own the per-track Clip canvas.
 
-use crate::state::{ArrangementSelection, UndoGestureId};
+use crate::state::{ArrangementSelection, ClipEdge, ClipSpan, UndoGestureId};
 use crate::widgets::drag_phase::DragPhase;
 use vibez_core::id::ClipId;
 
 use super::fade_drag::{CrossfadeCurveDrag, FadeClipDrag, FadeCurveDrag};
-
-/// The edge of a Clip a resize drag holds.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ClipEdge {
-    Start,
-    End,
-}
 
 #[derive(Debug, Clone)]
 pub enum ClipDragAction {
@@ -20,8 +13,7 @@ pub enum ClipDragAction {
         clip_id: ClipId,
         start_local_x: f32,
         start_scroll_beats: f64,
-        original_position_beats: f64,
-        length_beats: f64,
+        origin: ClipSpan,
         start_y: f32,
         /// Set when the press landed on an already-selected Clip: the
         /// selection stays for a group drag, and a click without a drag
@@ -35,8 +27,7 @@ pub enum ClipDragAction {
         undo_gesture: UndoGestureId,
         anchor: ArrangementSelection,
         edge: ClipEdge,
-        /// The Clip's other edge, which stays put.
-        fixed_beat: f64,
+        origin: ClipSpan,
         start_local_x: f32,
         /// Pending until the pointer travels past the click slop, so a
         /// shaky click never changes the Clip's length.

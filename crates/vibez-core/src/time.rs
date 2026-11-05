@@ -48,6 +48,34 @@ impl MusicalTime {
             (false, _) => plural(rest, "beat"),
         }
     }
+
+    /// A position as bar, beat and sixteenth counted from 1, such as
+    /// "33.1.1", as Ableton reads positions.
+    pub fn bar_beat_sixteenth(self) -> String {
+        // The epsilon keeps a position a hair under a line, from float
+        // error, on that line.
+        let sixteenths = (self.0.max(0.0) * 4.0 + 1e-6).floor() as u64;
+        let per_bar = (BEATS_PER_BAR * 4.0) as u64;
+        format!(
+            "{}.{}.{}",
+            sixteenths / per_bar + 1,
+            sixteenths % per_bar / 4 + 1,
+            sixteenths % 4 + 1
+        )
+    }
+
+    /// A length as whole bars, beats and sixteenths, such as "4.0.0", as
+    /// Ableton reads lengths.
+    pub fn bars_beats_sixteenths(self) -> String {
+        let sixteenths = (self.0.max(0.0) * 4.0).round() as u64;
+        let per_bar = (BEATS_PER_BAR * 4.0) as u64;
+        format!(
+            "{}.{}.{}",
+            sixteenths / per_bar,
+            sixteenths % per_bar / 4,
+            sixteenths % 4
+        )
+    }
 }
 
 /// Converts between musical time and sample time at a fixed tempo.
@@ -121,6 +149,25 @@ mod tests {
         assert_eq!(label(4.1), "1 bar 0.1 beats");
         assert_eq!(label(12.3), "3 bars 0.3 beats");
         assert_eq!(label(4.0 + 1.0 / 3.0), "1 bar 0.33 beats");
+    }
+
+    #[test]
+    fn a_position_reads_as_bar_beat_sixteenth_from_one() {
+        let label = |beats| MusicalTime(beats).bar_beat_sixteenth();
+        assert_eq!(label(0.0), "1.1.1");
+        assert_eq!(label(128.0), "33.1.1");
+        assert_eq!(label(5.75), "2.2.4");
+        assert_eq!(label(4.0 - 1e-9), "2.1.1");
+        assert_eq!(label(1.1), "1.2.1");
+    }
+
+    #[test]
+    fn a_length_reads_as_bars_beats_sixteenths_from_zero() {
+        let label = |beats| MusicalTime(beats).bars_beats_sixteenths();
+        assert_eq!(label(16.0), "4.0.0");
+        assert_eq!(label(6.5), "1.2.2");
+        assert_eq!(label(0.25), "0.0.1");
+        assert_eq!(label(12.3), "3.0.1");
     }
 
     #[test]

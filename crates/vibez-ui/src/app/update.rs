@@ -131,6 +131,9 @@ impl App {
             Message::UndoGesture { id, edit } => (*edit, Some(id)),
             message => (message, None),
         };
+        if undo_gesture.is_some_and(|gesture| self.state.project.history.is_reverted(gesture)) {
+            return Task::none();
+        }
         if let Message::Devices(edit) = &message {
             self.discard_param_entry(edit);
             if crate::domains::devices::is_unchanged_param_edit(&self.state.project_tracks, edit) {
@@ -295,6 +298,7 @@ impl App {
             Message::UndoGesture { .. } => {
                 unreachable!("undo gesture wrappers are removed before routing")
             }
+            Message::CancelUndoGesture(gesture) => self.cancel_drag(gesture),
             Message::KeyboardInput { event, occurred_at } => {
                 return self.handle_keyboard_input(event, occurred_at);
             }

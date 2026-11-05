@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 mod browser_results;
 mod browser_state;
+mod clip_drag;
 mod project_tracks;
 mod same_channels;
 mod snapshot;
@@ -16,6 +17,7 @@ use crate::remote_provider::RemoteCatalogSnapshot;
 use crate::widgets::clip_editor_view::StoredClipView;
 pub use browser_results::LocalResults;
 pub use browser_state::*;
+pub use clip_drag::*;
 pub use snapshot::*;
 pub use ui_types::*;
 
@@ -492,6 +494,9 @@ pub struct TimelineEditorState {
     /// Live rubber-band, present only while a box drag is in flight.
     /// Every lane draws its own slice of it.
     pub marquee: Option<ArrangementMarquee>,
+    /// The Clip drag in flight, present from its first step until it drops
+    /// or is cancelled. Every lane draws its preview.
+    pub clip_drag: Option<ClipDrag>,
     /// The move, resize or trim drag in flight, which drives edge
     /// auto-scroll on ticks.
     pub edit_drag: EditDrag,
@@ -572,6 +577,7 @@ impl Default for TimelineEditorState {
             selection_end_beats: 0.0,
             time_selection_track: None,
             marquee: None,
+            clip_drag: None,
             edit_drag: EditDrag::Idle,
             audio_clip_inspector_edits: HashMap::new(),
             audio_clip_transpose_debounce: HashMap::new(),

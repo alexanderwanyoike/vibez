@@ -7,7 +7,7 @@ use vibez_core::id::{EffectId, TrackId};
 use vibez_core::midi::{InstrumentKind, TrackKind};
 use vibez_engine::commands::EngineCommand;
 
-use crate::state::ProjectTrack;
+use crate::state::{ProjectTrack, UndoGestureId};
 
 use super::*;
 
@@ -87,6 +87,20 @@ impl App {
         self.apply_snapshot(snapshot);
         self.state.project.dirty = dirty_before;
         true
+    }
+
+    /// Escape during a lane drag: what the drag `gesture` edited, the
+    /// engine and a clip drag's selection go back to how the drag found
+    /// them, and no undo step is left.
+    pub(super) fn cancel_drag(&mut self, gesture: UndoGestureId) {
+        self.state.arrangement.editor.cancel_clip_drag();
+        self.state.perform.timeline_editor_mut().cancel_clip_drag();
+        if let Some(snapshot) = self.state.project.history.revert_gesture(gesture) {
+            self.apply_snapshot(snapshot);
+        }
+        self.state.arrangement.end_drag_resize();
+        self.state.perform.timeline_editor_mut().end_drag_resize();
+        self.state.status_text = "Drag cancelled".into();
     }
 
     pub(super) fn apply_snapshot(&mut self, snapshot: crate::state::ProjectSnapshot) {
