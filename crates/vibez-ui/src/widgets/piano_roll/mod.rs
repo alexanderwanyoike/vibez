@@ -757,9 +757,8 @@ impl canvas::Program<Message> for PianoRollWidget {
                                 return (canvas::event::Status::Captured, None);
                             }
                         }
-                        // A resize follows the pointer's x alone.
                         Some(DragAction::ResizeNote { start_x, phase, .. }) => {
-                            if !phase.follow(Point::new(*start_x, 0.0), Point::new(local.x, 0.0)) {
+                            if !phase.follow_x(*start_x, local.x) {
                                 return (canvas::event::Status::Captured, None);
                             }
                         }

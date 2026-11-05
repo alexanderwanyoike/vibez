@@ -11,7 +11,11 @@ pub const CLICK_SLOP_PX: f32 = 4.0;
 
 /// Whether the pointer at `to` has left a click pressed at `from`.
 pub fn past_click_slop(from: Point, to: Point) -> bool {
-    (to.x - from.x).abs() > CLICK_SLOP_PX || (to.y - from.y).abs() > CLICK_SLOP_PX
+    past_slop(to.x - from.x) || past_slop(to.y - from.y)
+}
+
+fn past_slop(travel: f32) -> bool {
+    travel.abs() > CLICK_SLOP_PX
 }
 
 /// Whether a press is still a click or has become a drag.
@@ -26,7 +30,17 @@ impl DragPhase {
     /// Becomes `Dragging` once the pointer pressed at `from` passes the click
     /// slop at `to`, and stays so; true while dragging.
     pub fn follow(&mut self, from: Point, to: Point) -> bool {
-        if *self == Self::Pending && past_click_slop(from, to) {
+        self.advance(past_click_slop(from, to))
+    }
+
+    /// [`Self::follow`] for a drag along x alone, which ignores any
+    /// vertical wobble.
+    pub fn follow_x(&mut self, from_x: f32, to_x: f32) -> bool {
+        self.advance(past_slop(to_x - from_x))
+    }
+
+    fn advance(&mut self, past_slop: bool) -> bool {
+        if *self == Self::Pending && past_slop {
             *self = Self::Dragging;
         }
         *self == Self::Dragging
