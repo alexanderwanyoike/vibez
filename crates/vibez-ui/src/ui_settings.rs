@@ -26,6 +26,9 @@ pub struct UiSettings {
     pub perform_surface_width: f32,
     #[serde(default = "default_detail_panel_height")]
     pub detail_panel_height: f32,
+    /// None until Mix's divider is first dragged.
+    #[serde(default)]
+    pub mix_detail_panel_height: Option<f32>,
     #[serde(default)]
     pub arrange_grid: crate::state::GridConfig,
     #[serde(default)]
@@ -144,6 +147,7 @@ impl Default for UiSettings {
             sample_browser_width: default_sample_browser_width(),
             perform_surface_width: default_perform_surface_width(),
             detail_panel_height: default_detail_panel_height(),
+            mix_detail_panel_height: None,
             arrange_grid: crate::state::GridConfig::default(),
             clip_grid: crate::state::GridConfig::default(),
             audition_enabled: default_audition_enabled(),
