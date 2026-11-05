@@ -13,6 +13,7 @@ use crate::domains::view::ViewMsg;
 use crate::message::Message;
 use crate::state::{ContextMenuTarget, GridConfig, UndoGestureId};
 use crate::timeline_geometry::{TimelineGeometry, TimelineViewport};
+use crate::timeline_snap::{SnapContext, SnapTargets};
 use crate::widgets::double_click::DoubleClick;
 use crate::widgets::drag_phase::{DragPhase, CLICK_SLOP_PX};
 
@@ -38,6 +39,8 @@ pub struct RulerWidget {
     pub time_selection_active: bool,
     pub selection_start_beats: f64,
     pub selection_end_beats: f64,
+    /// Clip edges and markers a seek click locks onto.
+    pub snap_targets: std::sync::Arc<SnapTargets>,
 }
 
 /// Active drag action on the ruler.
@@ -63,7 +66,7 @@ pub struct RulerInteractionState {
     drag: Option<RulerDragAction>,
     double_click: DoubleClick,
     shift_held: bool,
-    /// Bypasses the grid, as Alt does in Ableton.
+    /// Bypasses all snapping, as Alt does in Ableton.
     alt_held: bool,
 }
 
@@ -74,6 +77,11 @@ impl RulerWidget {
 
     fn pixels_per_beat(&self) -> f32 {
         self.geometry().pixels_per_beat()
+    }
+
+    /// `free` bypasses all snapping, as holding Alt does.
+    fn snap_context(&self, free: bool) -> SnapContext {
+        self.grid.snap_context(self.pixels_per_beat(), free)
     }
 
     /// Where the number strip starts, below the loop strip if there is one.
@@ -95,8 +103,15 @@ impl RulerWidget {
     }
 
     /// The loop edit for the pointer at `beat`, if it changes the loop.
-    fn brace_edit(&self, drag: BraceDrag, gesture: UndoGestureId, beat: f64) -> Option<Message> {
-        let (start_beats, end_beats) = drag.loop_at(beat, self.grid, self.pixels_per_beat())?;
+    fn brace_edit(
+        &self,
+        drag: BraceDrag,
+        gesture: UndoGestureId,
+        beat: f64,
+        free: bool,
+    ) -> Option<Message> {
+        let context = self.snap_context(free);
+        let (start_beats, end_beats) = drag.loop_at(beat, &self.snap_targets, context)?;
         ((start_beats, end_beats) != (self.loop_start_beats, self.loop_end_beats)).then(|| {
             Message::Transport(TransportMsg::SetArrangementLoopRegion {
                 start_beats,
@@ -171,9 +186,12 @@ impl canvas::Program<Message> for RulerWidget {
                 };
                 let local = Point::new(pos.x - bounds.x, pos.y - bounds.y);
                 let message = match drag {
-                    RulerDragAction::Brace { drag, gesture } => {
-                        self.brace_edit(drag, gesture, self.geometry().x_to_beat(local.x))
-                    }
+                    RulerDragAction::Brace { drag, gesture } => self.brace_edit(
+                        drag,
+                        gesture,
+                        self.geometry().x_to_beat(local.x),
+                        state.alt_held,
+                    ),
                     RulerDragAction::Numbers {
                         beat,
                         start,
@@ -203,11 +221,8 @@ impl canvas::Program<Message> for RulerWidget {
                             phase: DragPhase::Pending,
                             ..
                         } => {
-                            let beat = if state.alt_held {
-                                beat
-                            } else {
-                                self.grid.snap_beat(beat, self.pixels_per_beat())
-                            };
+                            let context = self.snap_context(state.alt_held);
+                            let beat = self.snap_targets.click(beat, context).beat;
                             Some(Message::Transport(TransportMsg::SeekToBeat(beat)))
                         }
                         RulerDragAction::Numbers { .. } | RulerDragAction::Brace { .. } => None,

@@ -14,6 +14,7 @@ pub enum ClipDragAction {
         start_local_x: f32,
         start_scroll_beats: f64,
         original_position_beats: f64,
+        length_beats: f64,
         start_y: f32,
         /// Set when the press landed on an already-selected Clip: the
         /// selection stays for a group drag, and a click without a drag

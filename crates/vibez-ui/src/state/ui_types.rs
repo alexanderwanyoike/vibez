@@ -1199,14 +1199,6 @@ impl GridConfig {
         }
     }
 
-    /// Length of a span starting at `start` whose end is dragged to `end`.
-    ///
-    /// The end snaps in absolute time, so it lands on a grid line even when
-    /// the start sits off the grid.
-    pub fn length_to_dragged_end(self, start: f64, end: f64, pixels_per_beat: f32) -> f64 {
-        (self.snap_beat(end, pixels_per_beat) - start).max(SHORTEST_LENGTH_BEATS)
-    }
-
     /// Cell-containing snap for creation gestures. See
     /// [`SnapGrid::snap_beat_floor`].
     pub fn snap_beat_floor(self, beat: f64, pixels_per_beat: f32) -> f64 {

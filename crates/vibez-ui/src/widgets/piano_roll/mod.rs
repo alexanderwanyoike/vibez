@@ -13,6 +13,7 @@ use crate::state::{
     GridConfig, PianoRollEditMode, SnapGrid, UiNoteClip, UndoGestureId, SHORTEST_LENGTH_BEATS,
 };
 use crate::timeline_geometry::TimelineGeometry;
+use crate::timeline_snap::SnapTargets;
 use crate::widgets::clip_loop_markers::{self, LoopDrag};
 use crate::widgets::double_click::DoubleClick;
 use crate::widgets::drag_phase::{past_click_slop, DragPhase};
@@ -828,11 +829,16 @@ impl canvas::Program<Message> for PianoRollWidget {
                                         .iter()
                                         .find(|note| note.index == *note_index)
                                         .map_or(0.0, |note| note.start_beat);
-                                    let new_duration = self.grid.length_to_dragged_end(
-                                        start_beat,
-                                        start_beat + *original_duration + beat_delta,
-                                        geometry.pixels_per_beat(),
-                                    );
+                                    let context =
+                                        self.grid.snap_context(geometry.pixels_per_beat(), false);
+                                    let new_duration = SnapTargets::default()
+                                        .span_end(
+                                            start_beat,
+                                            start_beat + *original_duration + beat_delta,
+                                            context,
+                                        )
+                                        .beat
+                                        - start_beat;
                                     if new_duration == *sent_duration {
                                         return (canvas::event::Status::Captured, None);
                                     }

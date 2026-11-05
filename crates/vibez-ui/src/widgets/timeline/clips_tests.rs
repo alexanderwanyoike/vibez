@@ -187,6 +187,7 @@ fn independently_constructed_ruler_and_lane_align_from_the_same_viewport() {
         time_selection_active: false,
         selection_start_beats: 0.0,
         selection_end_beats: 0.0,
+        snap_targets: Default::default(),
     };
 
     assert_eq!(ruler.geometry().beat_to_x(13.25), lane.beat_to_x(13.25));
@@ -601,6 +602,54 @@ fn fade_drag_snaps_to_an_overlapping_neighbour_across_pointer_moves() {
     }
 }
 
+/// The fade in length after dragging the fade in handle of a fresh 4 beat
+/// clip to `to_beat` with `modifiers` held.
+fn fade_in_frames_after_drag(to_beat: f64, modifiers: Modifiers) -> Option<u64> {
+    let (canvas, _) = canvas_with_selected_audio_clip();
+    let handle = Point::new(canvas.beat_to_x(0.0), FADE_HANDLE_Y);
+    let target = Point::new(canvas.beat_to_x(to_beat), FADE_HANDLE_Y);
+    let mut state = ClipInteractionState::default();
+    <TrackClipCanvas as canvas::Program<Message>>::update(
+        &canvas,
+        &mut state,
+        canvas::Event::Keyboard(Event::ModifiersChanged(modifiers)),
+        Rectangle::new(Point::ORIGIN, Size::new(800.0, 80.0)),
+        mouse::Cursor::Available(handle),
+    );
+    left_event(
+        &canvas,
+        &mut state,
+        iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left),
+        handle,
+    );
+    match left_event(
+        &canvas,
+        &mut state,
+        iced::mouse::Event::CursorMoved { position: target },
+        target,
+    ) {
+        Some(Message::UndoGesture { edit, .. }) => match *edit {
+            Message::Arrangement(ArrangementMsg::SetAudioClipFade { frames, .. }) => Some(frames),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+#[test]
+fn a_fade_drag_ends_the_fade_on_the_grid_line_under_the_pointer() {
+    let frames = fade_in_frames_after_drag(1.1, Modifiers::empty()).expect("a fade edit");
+
+    assert_eq!(frames, 22_050);
+}
+
+#[test]
+fn an_alt_fade_drag_follows_the_pointer_off_the_grid() {
+    let frames = fade_in_frames_after_drag(1.1, Modifiers::ALT).expect("a fade edit");
+
+    assert!(frames.abs_diff(24_255) <= 1, "the fade is {frames} frames");
+}
+
 #[test]
 fn selected_audio_fade_curve_handle_drag_emits_vertical_curve_edits() {
     let mut canvas = empty_track_canvas();
@@ -974,11 +1023,26 @@ fn dragging_an_off_grid_clip_moves_it_by_whole_grid_steps_keeping_its_offset() {
 /// Presses `canvas`'s first Clip on its right edge and drags the pointer to
 /// `to_beat`, returning the length the last pointer move asked for.
 fn resize_length_after_drag(canvas: &TrackClipCanvas, to_beat: f64) -> Option<f64> {
+    resize_length_after_modified_drag(canvas, to_beat, Modifiers::empty())
+}
+
+fn resize_length_after_modified_drag(
+    canvas: &TrackClipCanvas,
+    to_beat: f64,
+    modifiers: Modifiers,
+) -> Option<f64> {
     let clip = &canvas.clips[0];
     let end_beat = (clip.position + clip.duration) as f64 / canvas.spb();
     let start = Point::new(canvas.beat_to_x(end_beat) - 2.0, CLIP_Y + 4.0);
     let target = Point::new(canvas.beat_to_x(to_beat), start.y);
     let mut state = ClipInteractionState::default();
+    <TrackClipCanvas as canvas::Program<Message>>::update(
+        canvas,
+        &mut state,
+        canvas::Event::Keyboard(Event::ModifiersChanged(modifiers)),
+        Rectangle::new(Point::ORIGIN, Size::new(800.0, 80.0)),
+        mouse::Cursor::Available(start),
+    );
 
     left_event(
         canvas,
@@ -1174,4 +1238,114 @@ fn an_alt_click_on_a_clip_body_seeks_exactly_where_clicked() {
     let beat = seek_beat_after_click(&canvas, 1.3, CLIP_BODY_Y, Modifiers::ALT).expect("a seek");
 
     assert!((beat - 1.3).abs() < 1e-3, "seeked to {beat}");
+}
+
+/// The off-grid Clip at 1.1..5.1, with another lane holding a note Clip
+/// whose start sits off the grid at beat 9.3.
+fn canvas_beside_an_off_grid_clip() -> (TrackClipCanvas, ClipId) {
+    let (canvas, clip_id) = canvas_with_off_grid_audio_clip();
+    let mut other = note_clip(9.3);
+    other.duration_beats = 4.0;
+    let mut editor = crate::state::TimelineEditorState::default();
+    Arc::make_mut(&mut editor.timeline)
+        .ensure(TrackId::new())
+        .note_clips
+        .push(other);
+    let targets = crate::timeline_snap::SnapTargets::for_editor(&editor, canvas.spb());
+    (canvas.with_snap_targets(Arc::new(targets)), clip_id)
+}
+
+/// Presses `canvas`'s first Clip title at beat 1.5 with `modifiers` held
+/// and drags it `travel` beats, returning where the move puts its start.
+fn moved_start_after_drag(
+    canvas: &TrackClipCanvas,
+    travel: f64,
+    modifiers: Modifiers,
+) -> Option<f64> {
+    let start = Point::new(canvas.beat_to_x(1.5), CLIP_Y + 4.0);
+    let target = Point::new(canvas.beat_to_x(1.5 + travel), start.y);
+    let mut state = ClipInteractionState::default();
+    <TrackClipCanvas as canvas::Program<Message>>::update(
+        canvas,
+        &mut state,
+        canvas::Event::Keyboard(Event::ModifiersChanged(modifiers)),
+        Rectangle::new(Point::ORIGIN, Size::new(800.0, 80.0)),
+        mouse::Cursor::Available(start),
+    );
+    left_event(
+        canvas,
+        &mut state,
+        iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left),
+        start,
+    );
+    match left_event(
+        canvas,
+        &mut state,
+        iced::mouse::Event::CursorMoved { position: target },
+        target,
+    ) {
+        Some(Message::UndoGesture { edit, .. }) => match *edit {
+            Message::Arrangement(ArrangementMsg::MoveSelectedClips {
+                new_position_beats, ..
+            }) => Some(new_position_beats),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+#[test]
+fn dragging_a_clip_locks_its_end_onto_another_lanes_off_grid_clip_start() {
+    let (canvas, _) = canvas_beside_an_off_grid_clip();
+
+    // 4.15 beats of travel ends the 4 beat Clip at 9.25, just short of the
+    // other Clip's start, where the grid alone would end it at 9.1.
+    let start = moved_start_after_drag(&canvas, 4.15, Modifiers::empty()).expect("a move");
+
+    assert!((start + 4.0 - 9.3).abs() < 1e-4, "ended at {}", start + 4.0);
+}
+
+#[test]
+fn resizing_a_clip_locks_its_end_onto_another_lanes_off_grid_clip_start() {
+    let (canvas, _) = canvas_beside_an_off_grid_clip();
+
+    let length = resize_length_after_drag(&canvas, 9.2).expect("a resize");
+
+    assert!(
+        (1.1 + length - 9.3).abs() < 1e-4,
+        "ended at {}",
+        1.1 + length
+    );
+}
+
+#[test]
+fn clicking_near_another_lanes_clip_start_seeks_onto_it() {
+    let (canvas, _) = canvas_beside_an_off_grid_clip();
+
+    let beat =
+        seek_beat_after_click(&canvas, 9.2, CLIP_BODY_Y, Modifiers::empty()).expect("a seek");
+
+    assert!((beat - 9.3).abs() < 1e-9, "seeked to {beat}");
+}
+
+#[test]
+fn an_alt_drag_moves_a_clip_exactly_with_the_pointer() {
+    let (canvas, _) = canvas_beside_an_off_grid_clip();
+
+    let start = moved_start_after_drag(&canvas, 4.15, Modifiers::ALT).expect("a move");
+
+    assert!((start - 5.25).abs() < 1e-3, "moved to {start}");
+}
+
+#[test]
+fn an_alt_resize_ends_a_clip_exactly_under_the_pointer() {
+    let (canvas, _) = canvas_beside_an_off_grid_clip();
+
+    let length = resize_length_after_modified_drag(&canvas, 9.2, Modifiers::ALT).expect("a resize");
+
+    assert!(
+        (1.1 + length - 9.2).abs() < 1e-3,
+        "ended at {}",
+        1.1 + length
+    );
 }

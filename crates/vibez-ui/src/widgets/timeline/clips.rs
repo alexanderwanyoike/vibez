@@ -17,6 +17,7 @@ use crate::state::{
     TrackTimelineContent, UndoGestureId,
 };
 use crate::timeline_geometry::TimelineGeometry;
+use crate::timeline_snap::{SnapContext, SnapTargets};
 use crate::widgets::drag_phase::{past_click_slop, DragPhase};
 use crate::widgets::local_drag::LocalDrag;
 use crate::widgets::timeline::marquee;
@@ -47,7 +48,8 @@ enum VerticalWheelRouting {
 pub struct ClipInteractionState {
     pub drag: Option<ClipDragAction>,
     pub shift_held: bool,
-    /// Bypasses the grid, as Alt does in Ableton.
+    /// Bypasses all snapping, read live through drags, as Alt does in
+    /// Ableton.
     pub alt_held: bool,
 }
 
@@ -106,6 +108,8 @@ pub struct TrackClipCanvas {
     /// project tempo; WARP retains the source's confirmed musical length.
     pub sample_drop_duration_beats: Option<f64>,
     pub sample_drop_detail: Option<String>,
+    /// Clip edges and markers on every lane that drags and clicks lock onto.
+    pub snap_targets: Arc<SnapTargets>,
     /// The track name this canvas was constructed with. Drawn on the drop
     /// indicator so the user can verify which lane will receive the drop.
     pub track_name: String,
@@ -273,6 +277,7 @@ impl TrackClipCanvas {
             sample_drop_active,
             sample_drop_duration_beats,
             sample_drop_detail,
+            snap_targets: Arc::default(),
             track_name: track.name.clone(),
         }
     }
@@ -287,6 +292,11 @@ impl TrackClipCanvas {
     ) -> Self {
         self.row_spans = row_spans;
         self.marquee = marquee;
+        self
+    }
+
+    pub fn with_snap_targets(mut self, snap_targets: Arc<SnapTargets>) -> Self {
+        self.snap_targets = snap_targets;
         self
     }
 
@@ -331,6 +341,10 @@ impl TrackClipCanvas {
 
     pub(super) fn snapped_beat(&self, beat: f64) -> f64 {
         self.grid.snap_beat(beat, self.pixels_per_beat())
+    }
+
+    fn snap_context(&self, free: bool) -> SnapContext {
+        self.grid.snap_context(self.pixels_per_beat(), free)
     }
 
     /// Offset of this lane's row from the top of the column, converting
@@ -464,7 +478,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                         });
                         return (canvas::event::Status::Captured, None);
                     }
-                    if let Some((clip_id, is_note_clip, near_right, pos_beats, _dur_beats)) =
+                    if let Some((clip_id, is_note_clip, near_right, pos_beats, dur_beats)) =
                         self.hit_test(pos.x)
                     {
                         let in_title_bar = pos.y < CLIP_Y + CLIP_TITLE_HEIGHT;
@@ -494,6 +508,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 start_local_x: pos.x,
                                 start_scroll_beats: self.scroll_offset_beats,
                                 original_position_beats: pos_beats,
+                                length_beats: dur_beats,
                                 start_y: pos.y,
                                 collapse_to: (self.selected_clips.contains(&clip_id)
                                     && !state.shift_held)
@@ -661,6 +676,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 start_local_x,
                                 start_scroll_beats,
                                 original_position_beats,
+                                length_beats,
                                 start_y,
                                 phase,
                                 ..
@@ -677,11 +693,16 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                     *start_scroll_beats,
                                     self.scroll_offset_beats,
                                 ) - original_position_beats;
-                                // Snapping the travel rather than the landing
-                                // beat keeps an off-grid Clip's offset from
-                                // the grid, as Ableton does.
-                                let new_pos =
-                                    (original_position_beats + self.snapped_beat(travel)).max(0.0);
+                                let new_pos = self
+                                    .snap_targets
+                                    .moved_span(
+                                        *original_position_beats,
+                                        *length_beats,
+                                        travel,
+                                        self.snap_context(state.alt_held),
+                                    )
+                                    .beat
+                                    .max(0.0);
 
                                 // Resolve against real row geometry when the
                                 // surface supplied it; stepping by a fixed
@@ -722,11 +743,15 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 ) {
                                     return (canvas::event::Status::Captured, None);
                                 }
-                                let snapped = self.grid.length_to_dragged_end(
-                                    *clip_start_beat,
-                                    self.x_to_beat(local_x),
-                                    self.pixels_per_beat(),
-                                );
+                                let snapped = self
+                                    .snap_targets
+                                    .span_end(
+                                        *clip_start_beat,
+                                        self.x_to_beat(local_x),
+                                        self.snap_context(state.alt_held),
+                                    )
+                                    .beat
+                                    - clip_start_beat;
                                 let clip_id = *clip_id;
                                 let anchor = if *is_note_clip {
                                     ArrangementSelection::NoteClip { track_id, clip_id }
@@ -747,11 +772,20 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                 return (canvas::event::Status::Captured, Some(edit));
                             }
                             ClipDragAction::FadeClip(drag) => {
+                                let handle = self
+                                    .snap_targets
+                                    .fade_handle(
+                                        self.x_to_beat(local_x),
+                                        self.snap_context(state.alt_held),
+                                    )
+                                    .beat;
                                 let edit = Message::Arrangement(ArrangementMsg::SetAudioClipFade {
                                     track_id,
                                     clip_id: drag.clip_id,
                                     edge: drag.edge,
-                                    frames: drag.frames_at_x(local_x),
+                                    frames: drag.crossfade_frames(local_x).unwrap_or_else(|| {
+                                        drag.frames_at_x(self.beat_to_x(handle))
+                                    }),
                                 })
                                 .in_undo_gesture(drag.undo_gesture);
                                 return (canvas::event::Status::Captured, Some(edit));
@@ -845,11 +879,10 @@ impl canvas::Program<Message> for TrackClipCanvas {
                     let msg = match drag {
                         ClipDragAction::PendingSeek { beat, .. } => {
                             // Short click → seek + clear selection
-                            let beat = if state.alt_held {
-                                *beat
-                            } else {
-                                self.snapped_beat(*beat)
-                            };
+                            let beat = self
+                                .snap_targets
+                                .click(*beat, self.snap_context(state.alt_held))
+                                .beat;
                             Some(Message::Transport(TransportMsg::SeekToBeat(beat)))
                         }
                         ClipDragAction::RegionSelect { .. } => {

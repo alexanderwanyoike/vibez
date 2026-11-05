@@ -15,6 +15,7 @@ mod theme;
 mod themes;
 mod time_format;
 mod timeline_geometry;
+mod timeline_snap;
 mod typography;
 mod ui_settings;
 mod update_check;

@@ -19,6 +19,7 @@ use crate::message::Message;
 use crate::state::{ArrangementSelection, ContextMenuTarget, TrackTimelineContent};
 use crate::theme as th;
 use crate::timeline_geometry::TimelineGeometry;
+use crate::timeline_snap::SnapTargets;
 use crate::widgets::arrange_corner::{arrange_corner, arrangement_size_labels, song_length_label};
 use crate::widgets::timeline::{
     build_row_spans, ArrangementMinimap, MinimapTrack, RulerWidget, TimeRulerWidget, TimelineClip,
@@ -103,10 +104,16 @@ impl App {
         let geometry = TimelineGeometry::from_zoom(zoom_level, scroll_offset);
         let total_beats = self.state.total_beats();
 
+        let play_start_beats = self.state.transport.play_start_beats;
+        let snap_targets = std::sync::Arc::new(SnapTargets::for_arrangement(
+            timeline,
+            &self.state.transport,
+        ));
+
         // Beat-based ruler, offset by track header width
         let ruler = RulerWidget {
             playhead_beats,
-            play_start_beats: Some(self.state.transport.play_start_beats),
+            play_start_beats: Some(play_start_beats),
             zoom_level,
             grid: self.state.view.arrange_grid,
             scroll_offset_beats: scroll_offset,
@@ -117,6 +124,7 @@ impl App {
             time_selection_active: timeline.time_selection_active,
             selection_start_beats: timeline.selection_start_beats,
             selection_end_beats: timeline.selection_end_beats,
+            snap_targets: snap_targets.clone(),
         };
         let ruler_canvas: Element<'_, Message> = canvas(ruler)
             .width(Length::Fill)
@@ -323,7 +331,8 @@ impl App {
             .with_marquee(
                 row_spans.clone(),
                 timeline.marquee.as_ref().map(|marquee| marquee.rect),
-            );
+            )
+            .with_snap_targets(snap_targets.clone());
             if let Some(preview) = self.state.audio_recording.preview_for_track(track.id) {
                 let name = match preview.source {
                     crate::domains::audio_recording::AudioRecordingSource::HardwareInput => {

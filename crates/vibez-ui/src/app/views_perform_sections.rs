@@ -149,6 +149,11 @@ impl App {
             } else {
                 None
             };
+            let snap_targets = std::sync::Arc::new(crate::timeline_snap::SnapTargets::for_section(
+                editor,
+                self.state.transport.samples_per_beat(),
+                self.state.perform.section_editor.edit_cursor_beats(),
+            ));
             let ruler = RulerWidget {
                 playhead_beats: playback_playhead_beats.unwrap_or(-1.0),
                 play_start_beats: None,
@@ -162,6 +167,7 @@ impl App {
                 time_selection_active: editor.time_selection_active,
                 selection_start_beats: editor.selection_start_beats,
                 selection_end_beats: editor.selection_end_beats,
+                snap_targets: snap_targets.clone(),
             };
             let ruler_canvas: Element<'_, Message> = Element::from(
                 canvas(ruler)
@@ -486,6 +492,7 @@ impl App {
                     row_spans.clone(),
                     editor.marquee.as_ref().map(|marquee| marquee.rect),
                 )
+                .with_snap_targets(snap_targets.clone())
                 .with_vertical_track_scrolling();
                 if let Some(preview) = recording_preview.as_ref().filter(|preview| {
                     preview.target_id == section_id && preview.track_id == track.id

@@ -27,6 +27,7 @@ fn ruler() -> RulerWidget {
         time_selection_active: false,
         selection_start_beats: 0.0,
         selection_end_beats: 0.0,
+        snap_targets: Default::default(),
     }
 }
 
@@ -309,9 +310,86 @@ fn a_ruler_click_seeks_to_the_nearest_grid_line() {
 }
 
 #[test]
+fn a_ruler_click_near_a_clip_edge_seeks_onto_it() {
+    let ruler = RulerWidget {
+        snap_targets: std::sync::Arc::new(
+            SnapTargets::default().with_marker(9.3, crate::timeline_snap::SnapTargetKind::ClipEdge),
+        ),
+        ..ruler()
+    };
+
+    let beat =
+        seek_beat_after_click(&ruler, 9.2, iced::keyboard::Modifiers::empty()).expect("a seek");
+
+    assert!((beat - 9.3).abs() < 1e-9, "seeked to {beat}");
+}
+
+#[test]
 fn an_alt_click_on_the_ruler_seeks_exactly_where_clicked() {
     let beat =
         seek_beat_after_click(&ruler(), 9.2, iced::keyboard::Modifiers::ALT).expect("a seek");
 
     assert!((beat - 9.2).abs() < 1e-3, "seeked to {beat}");
+}
+
+/// The loop after dragging the brace end of `ruler` from its end to
+/// `beat` with `modifiers` held.
+fn brace_end_dragged_to(
+    ruler: &RulerWidget,
+    beat: f64,
+    modifiers: iced::keyboard::Modifiers,
+) -> Option<(f64, f64)> {
+    let geometry = ruler.geometry();
+    let mut state = RulerInteractionState::default();
+    let end = Point::new(geometry.beat_to_x(ruler.loop_end_beats) - 1.0, STRIP_Y);
+    <RulerWidget as canvas::Program<Message>>::update(
+        ruler,
+        &mut state,
+        canvas::Event::Keyboard(iced::keyboard::Event::ModifiersChanged(modifiers)),
+        Rectangle::new(Point::ORIGIN, Size::new(800.0, 36.0)),
+        Cursor::Available(end),
+    );
+    press(ruler, &mut state, end);
+    let to = Point::new(geometry.beat_to_x(beat), STRIP_Y);
+    loop_edit(move_to(ruler, &mut state, to)).map(|(_, start, end)| (start, end))
+}
+
+#[test]
+fn an_alt_drag_moves_a_brace_end_exactly_with_the_pointer() {
+    let (_, end) =
+        brace_end_dragged_to(&ruler(), 35.1, iced::keyboard::Modifiers::ALT).expect("a loop edit");
+
+    assert!((end - 35.1).abs() < 1e-3, "the end landed on {end}");
+}
+
+#[test]
+fn a_brace_end_locks_onto_a_nearby_clip_edge() {
+    let ruler = RulerWidget {
+        snap_targets: std::sync::Arc::new(
+            SnapTargets::default()
+                .with_marker(35.3, crate::timeline_snap::SnapTargetKind::ClipEdge),
+        ),
+        ..ruler()
+    };
+
+    let (_, end) = brace_end_dragged_to(&ruler, 35.2, iced::keyboard::Modifiers::empty())
+        .expect("a loop edit");
+
+    assert!((end - 35.3).abs() < 1e-9, "the end landed on {end}");
+}
+
+#[test]
+fn a_brace_end_is_not_held_back_by_where_it_started() {
+    let ruler = RulerWidget {
+        loop_end_beats: 32.3,
+        snap_targets: std::sync::Arc::new(
+            SnapTargets::default().with_marker(32.3, crate::timeline_snap::SnapTargetKind::LoopEnd),
+        ),
+        ..ruler()
+    };
+
+    let (_, end) = brace_end_dragged_to(&ruler, 32.6, iced::keyboard::Modifiers::empty())
+        .expect("a loop edit");
+
+    assert!((end - 33.0).abs() < 1e-9, "the end landed on {end}");
 }

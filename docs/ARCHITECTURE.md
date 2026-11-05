@@ -486,6 +486,14 @@ viewport at a bounded musical rate. A generic conformance harness currently
 runs against the Arrange adapter and is reusable unchanged by the Section
 adapter.
 
+`SnapTargets` (`timeline_snap.rs`) is the one snap layer above that geometry.
+Each timeline builds its targets once per view (`for_arrangement`,
+`for_section`): the grid, every Clip edge, the time selection, and that
+timeline's markers. Clicks, Clip moves and edge drags, fades and loop brace
+drags all ask it where they land, so a magnet within its radius beats the
+grid everywhere, Alt bypasses every target, and an edge drag never leaves a
+span shorter than `SHORTEST_LENGTH_BEATS`.
+
 ```mermaid
 flowchart LR
     PT["ProjectTracksState<br/>TrackId + channel/devices/mixer"]
