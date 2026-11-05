@@ -292,3 +292,7 @@ impl canvas::Program<Message> for ArrangementMinimap {
         mouse::Interaction::default()
     }
 }
+
+#[cfg(test)]
+#[path = "minimap_tests.rs"]
+mod tests;
