@@ -10,6 +10,7 @@ use crate::icons;
 use crate::message::Message;
 use crate::state::ContextMenuTarget;
 use crate::theme as th;
+use crate::widgets::control_style;
 use crate::widgets::mixer_strip::{view_mixer_strip, MixerStripView, StripRole};
 
 use super::*;
@@ -65,7 +66,7 @@ impl App {
                 .width(Length::Fill)
                 .height(Length::FillPortion(5))
                 .style(|_theme: &Theme| container::Style {
-                    background: Some(th::bg_dark().into()),
+                    background: Some(th::bg_surface().into()),
                     ..Default::default()
                 }),
         )
@@ -93,33 +94,10 @@ impl App {
             let first = bank * SENDS_PER_BANK + 1;
             let active = bank == current;
             bar = bar.push(
-                button(
-                    text(format!("{first}–{}", first + SENDS_PER_BANK - 1))
-                        .size(10)
-                        .color(if active { th::accent() } else { th::text_dim() }),
-                )
-                .on_press(Message::View(ViewMsg::SetMixerSendBank(bank)))
-                .padding([3, 10])
-                .style(move |_: &Theme, status| button::Style {
-                    background: Some(
-                        if active || matches!(status, button::Status::Hovered) {
-                            th::bg_hover()
-                        } else {
-                            th::bg_surface()
-                        }
-                        .into(),
-                    ),
-                    border: iced::Border {
-                        color: if active {
-                            th::accent_dim()
-                        } else {
-                            th::border()
-                        },
-                        width: 1.0,
-                        radius: 2.0.into(),
-                    },
-                    ..Default::default()
-                }),
+                button(text(format!("{first}–{}", first + SENDS_PER_BANK - 1)).size(10))
+                    .on_press(Message::View(ViewMsg::SetMixerSendBank(bank)))
+                    .padding([3, 10])
+                    .style(control_style::style(active.then(th::accent))),
             );
         }
         Some(
@@ -201,31 +179,13 @@ impl App {
 
         // "+ Bus" pillar: between the last return and the master.
         let add_bus_btn = button(
-            column![
-                icons::icon(icons::PLUS).size(12).color(th::text_dim()),
-                text("Bus").size(9).color(th::text_dim())
-            ]
-            .spacing(2)
-            .align_x(iced::Alignment::Center),
+            column![icons::icon(icons::PLUS).size(12), text("Bus").size(9)]
+                .spacing(2)
+                .align_x(iced::Alignment::Center),
         )
         .on_press(Message::add_bus())
         .padding([12, 6])
-        .style(|_theme: &Theme, status| {
-            let bg = match status {
-                button::Status::Hovered | button::Status::Pressed => Some(th::bg_hover().into()),
-                _ => Some(th::bg_surface().into()),
-            };
-            button::Style {
-                background: bg,
-                text_color: th::text_dim(),
-                border: iced::Border {
-                    color: th::border(),
-                    width: 1.0,
-                    radius: 2.0.into(),
-                },
-                ..Default::default()
-            }
-        });
+        .style(control_style::style(None));
         let add_bus = container(add_bus_btn)
             .height(Length::Fixed(height))
             .align_y(iced::Alignment::Center);
