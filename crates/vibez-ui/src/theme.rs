@@ -27,6 +27,10 @@ pub struct ThemePalette {
     pub bg_elevated: Color,
     #[serde(with = "hex")]
     pub bg_hover: Color,
+    /// Button fills. Older `.vzt` files predate it and fill their controls
+    /// with `bg_elevated`, see [`ThemePalette::control`].
+    #[serde(default, with = "hex_option", skip_serializing_if = "Option::is_none")]
+    pub control: Option<Color>,
 
     // ── Text ──
     #[serde(with = "hex")]
@@ -191,7 +195,8 @@ impl Default for ClipStyle {
 #[serde(default)]
 pub struct LaneStyle {
     /// How far the lane is mixed from the background toward the text
-    /// colour. Light themes sink their lanes below the headers.
+    /// colour. Built-in themes author the lane as the background itself;
+    /// older light theme files sink their lanes below it with this.
     pub recess: f32,
     /// How far every other bar band is mixed toward the text colour.
     pub band: f32,
@@ -217,22 +222,22 @@ pub struct GridLineStrengths {
 impl LaneStyle {
     pub const DARK: Self = Self {
         recess: 0.0,
-        band: 0.025,
+        band: 0.015,
         lines: GridLineStrengths {
             label: 0.085,
-            bar: 0.05,
-            fine: 0.028,
+            bar: 0.04,
+            fine: 0.025,
         },
         loop_tint: 0.05,
     };
 
     pub const LIGHT: Self = Self {
-        recess: 0.15,
-        band: 0.05,
+        recess: 0.0,
+        band: 0.015,
         lines: GridLineStrengths {
-            label: 0.13,
-            bar: 0.075,
-            fine: 0.045,
+            label: 0.14,
+            bar: 0.065,
+            fine: 0.04,
         },
         loop_tint: 0.07,
     };
@@ -283,6 +288,22 @@ mod hex {
     }
 }
 
+mod hex_option {
+    use iced::Color;
+    use serde::{Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(c: &Option<Color>, s: S) -> Result<S::Ok, S::Error> {
+        match c {
+            Some(c) => super::hex::serialize(c, s),
+            None => s.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Color>, D::Error> {
+        super::hex::deserialize(d).map(Some)
+    }
+}
+
 mod hex_array {
     use iced::Color;
     use serde::{Deserialize, Deserializer, Serializer};
@@ -308,69 +329,12 @@ mod hex_array {
     }
 }
 
-const fn rgb(r: f32, g: f32, b: f32) -> Color {
-    Color { r, g, b, a: 1.0 }
-}
-
-const fn rgba(r: f32, g: f32, b: f32, a: f32) -> Color {
-    Color { r, g, b, a }
-}
-
 impl ThemePalette {
-    /// The founding vibez look: dark charcoal, orange accent.
-    pub fn charcoal() -> Self {
-        Self {
-            name: "Charcoal".to_string(),
-            bg_dark: rgb(0.102, 0.102, 0.102),
-            bg_surface: rgb(0.141, 0.141, 0.141),
-            bg_elevated: rgb(0.176, 0.176, 0.176),
-            bg_hover: rgb(0.212, 0.212, 0.212),
-            text: rgb(0.878, 0.878, 0.878),
-            text_dim: rgb(0.58, 0.58, 0.58),
-            text_muted: rgb(0.46, 0.46, 0.46),
-            accent: rgb(1.0, 0.549, 0.0),
-            accent_dim: rgb(0.600, 0.329, 0.0),
-            border: rgb(0.227, 0.227, 0.227),
-            border_light: rgb(0.290, 0.290, 0.290),
-            divider: rgb(0.165, 0.165, 0.165),
-            success: rgb(0.290, 0.871, 0.502),
-            danger: rgb(0.973, 0.443, 0.443),
-            playhead: rgba(1.0, 1.0, 1.0, 0.8),
-            meter_green: rgb(0.290, 0.871, 0.502),
-            meter_yellow: rgb(1.0, 0.843, 0.0),
-            meter_red: rgb(0.973, 0.443, 0.443),
-            display_bg: rgb(0.07, 0.07, 0.07),
-            knob_arc: rgb(0.533, 0.533, 0.533),
-            knob_body: rgb(0.12, 0.12, 0.12),
-            knob_body_engaged: rgb(0.16, 0.16, 0.16),
-            knob_track: rgb(0.30, 0.30, 0.30),
-            fader_handle: rgb(0.533, 0.533, 0.533),
-            track_colors: crate::themes::TRACKS_CLASSIC,
-            eq_lf: rgb(0.65, 0.46, 0.28),
-            eq_lmf: rgb(0.36, 0.48, 0.72),
-            eq_hmf: rgb(0.33, 0.62, 0.38),
-            eq_hf: rgb(0.76, 0.33, 0.30),
-            clip_body: rgba(0.300, 0.480, 0.900, 0.6),
-            clip_border: rgba(0.380, 0.565, 1.0, 0.9),
-            waveform: rgba(0.380, 0.565, 1.0, 0.6),
-            ruler_line: rgba(0.227, 0.227, 0.227, 0.5),
-            grid_bar: rgb(0.376, 0.376, 0.376),
-            grid_beat: rgb(0.251, 0.251, 0.251),
-            grid_sub: rgb(0.216, 0.216, 0.216),
-            piano_white_row: rgb(0.145, 0.145, 0.145),
-            piano_black_row: rgb(0.110, 0.110, 0.110),
-            piano_octave_line: rgb(0.227, 0.227, 0.227),
-            piano_grid: rgb(0.165, 0.165, 0.165),
-            piano_white_key: rgb(0.784, 0.784, 0.784),
-            piano_black_key: rgb(0.102, 0.102, 0.102),
-            piano_key_label: rgb(0.35, 0.35, 0.35),
-            clip_style: ClipStyle::DARK,
-            lane_style: LaneStyle::DARK,
-        }
+    /// The fill of buttons and other controls.
+    pub fn control(&self) -> Color {
+        self.control.unwrap_or(self.bg_elevated)
     }
-}
 
-impl ThemePalette {
     /// Background of the timeline lanes behind clips.
     pub fn lane(&self) -> Color {
         blend(self.bg_dark, self.text, self.lane_style.recess)
@@ -390,12 +354,12 @@ impl ThemePalette {
 
 impl Default for ThemePalette {
     fn default() -> Self {
-        Self::charcoal()
+        crate::themes::charcoal()
     }
 }
 
 static CURRENT: LazyLock<RwLock<ThemePalette>> =
-    LazyLock::new(|| RwLock::new(ThemePalette::charcoal()));
+    LazyLock::new(|| RwLock::new(crate::themes::charcoal()));
 
 static EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
@@ -532,15 +496,106 @@ impl Hsl {
     }
 }
 
+/// A colour as OKLCH: perceptual lightness in 0..=1, chroma, and hue in
+/// degrees. Palettes are authored in it because equal steps of its
+/// lightness look equal, which HSL's do not.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Oklch {
+    pub lightness: f32,
+    pub chroma: f32,
+    pub hue: f32,
+}
+
+impl Oklch {
+    pub const fn new(lightness: f32, chroma: f32, hue: f32) -> Self {
+        Self {
+            lightness,
+            chroma,
+            hue,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn of(c: Color) -> Self {
+        let (r, g, b) = (linear(c.r), linear(c.g), linear(c.b));
+        let l = (0.412_221_46 * r + 0.536_332_55 * g + 0.051_445_995 * b).cbrt();
+        let m = (0.211_903_5 * r + 0.680_699_5 * g + 0.107_396_96 * b).cbrt();
+        let s = (0.088_302_46 * r + 0.281_718_85 * g + 0.629_978_7 * b).cbrt();
+        let a = 1.977_998_5 * l - 2.428_592_2 * m + 0.450_593_7 * s;
+        let b = 0.025_904_037 * l + 0.782_771_77 * m - 0.808_675_77 * s;
+        Self {
+            lightness: 0.210_454_26 * l + 0.793_617_8 * m - 0.004_072_047 * s,
+            chroma: a.hypot(b),
+            hue: b.atan2(a).to_degrees().rem_euclid(360.0),
+        }
+    }
+
+    /// The same lightness and hue with chroma reduced as far as sRGB needs.
+    pub fn fitted(self) -> Self {
+        let fits = |chroma: f32| {
+            Self { chroma, ..self }
+                .linear_rgb()
+                .iter()
+                .all(|v| (-1e-4..=1.0 + 1e-4).contains(v))
+        };
+        if fits(self.chroma) {
+            return self;
+        }
+        let (mut inside, mut outside) = (0.0, self.chroma);
+        for _ in 0..24 {
+            let mid = (inside + outside) / 2.0;
+            if fits(mid) {
+                inside = mid;
+            } else {
+                outside = mid;
+            }
+        }
+        Self {
+            chroma: inside,
+            ..self
+        }
+    }
+
+    /// The sRGB colour, each channel clipped into gamut.
+    pub fn color(self) -> Color {
+        let encoded = |v: f32| {
+            let v = v.clamp(0.0, 1.0);
+            if v <= 0.003_130_8 {
+                12.92 * v
+            } else {
+                1.055 * v.powf(1.0 / 2.4) - 0.055
+            }
+        };
+        let [r, g, b] = self.linear_rgb();
+        Color::from_rgb(encoded(r), encoded(g), encoded(b))
+    }
+
+    /// Linear-light sRGB channels, outside 0..=1 when out of gamut.
+    fn linear_rgb(self) -> [f32; 3] {
+        let (sin, cos) = self.hue.to_radians().sin_cos();
+        let (a, b) = (self.chroma * cos, self.chroma * sin);
+        let l = (self.lightness + 0.396_337_78 * a + 0.215_803_76 * b).powi(3);
+        let m = (self.lightness - 0.105_561_35 * a - 0.063_854_17 * b).powi(3);
+        let s = (self.lightness - 0.089_484_18 * a - 1.291_485_5 * b).powi(3);
+        [
+            4.076_741_7 * l - 3.307_711_6 * m + 0.230_969_94 * s,
+            -1.268_438 * l + 2.609_757_4 * m - 0.341_319_38 * s,
+            -0.004_196_086_3 * l - 0.703_418_6 * m + 1.707_614_7 * s,
+        ]
+    }
+}
+
+/// An sRGB channel in linear light.
+fn linear(v: f32) -> f32 {
+    if v <= 0.04045 {
+        v / 12.92
+    } else {
+        ((v + 0.055) / 1.055).powf(2.4)
+    }
+}
+
 /// WCAG 2 relative luminance of an sRGB colour, ignoring alpha.
 pub(crate) fn relative_luminance(c: Color) -> f32 {
-    let linear = |v: f32| {
-        if v <= 0.04045 {
-            v / 12.92
-        } else {
-            ((v + 0.055) / 1.055).powf(2.4)
-        }
-    };
     0.2126 * linear(c.r) + 0.7152 * linear(c.g) + 0.0722 * linear(c.b)
 }
 
@@ -626,6 +681,11 @@ accessors! {
 
 pub fn clip_style() -> ClipStyle {
     colour_strength().clip_style(CURRENT.read().unwrap().clip_style)
+}
+
+#[allow(dead_code)]
+pub fn control() -> Color {
+    CURRENT.read().unwrap().control()
 }
 
 pub fn lane_style() -> LaneStyle {
@@ -775,6 +835,14 @@ pub fn vibez_theme() -> Theme {
 mod tests {
     use super::*;
 
+    const fn rgb(r: f32, g: f32, b: f32) -> Color {
+        Color { r, g, b, a: 1.0 }
+    }
+
+    const fn rgba(r: f32, g: f32, b: f32, a: f32) -> Color {
+        Color { r, g, b, a }
+    }
+
     #[test]
     fn hex_roundtrip() {
         for c in [
@@ -794,18 +862,19 @@ mod tests {
 
     #[test]
     fn palette_serializes_as_vzt_json_and_loads_back() {
-        let p = ThemePalette::charcoal();
+        let p = crate::themes::charcoal();
+        let accent = hex::to_hex(&p.accent);
         let json = serde_json::to_string_pretty(&p).unwrap();
-        assert!(json.contains("\"accent\": \"#ff8c00\""));
+        assert!(json.contains(&format!("\"accent\": \"{accent}\"")));
         let back: ThemePalette = serde_json::from_str(&json).unwrap();
         assert_eq!(back.name, "Charcoal");
-        assert_eq!(hex::to_hex(&back.accent), "#ff8c00");
+        assert_eq!(hex::to_hex(&back.accent), accent);
         assert_eq!(back.track_colors.len(), 8);
     }
 
     #[test]
     fn a_theme_file_without_clip_style_loads_with_the_dark_style() {
-        let mut json = serde_json::to_value(ThemePalette::charcoal()).unwrap();
+        let mut json = serde_json::to_value(crate::themes::charcoal()).unwrap();
         json.as_object_mut().unwrap().remove("clip_style");
 
         let palette: ThemePalette = serde_json::from_value(json).unwrap();
@@ -815,12 +884,33 @@ mod tests {
 
     #[test]
     fn a_theme_file_without_lane_style_loads_with_the_dark_style() {
-        let mut json = serde_json::to_value(ThemePalette::charcoal()).unwrap();
+        let mut json = serde_json::to_value(crate::themes::charcoal()).unwrap();
         json.as_object_mut().unwrap().remove("lane_style");
 
         let palette: ThemePalette = serde_json::from_value(json).unwrap();
 
         assert_eq!(palette.lane_style, LaneStyle::DARK);
+    }
+
+    #[test]
+    fn a_theme_file_without_a_control_fill_fills_controls_with_its_raised_shade() {
+        let mut json = serde_json::to_value(crate::themes::charcoal()).unwrap();
+        json.as_object_mut().unwrap().remove("control");
+
+        let palette: ThemePalette = serde_json::from_value(json).unwrap();
+
+        assert_eq!(palette.control(), palette.bg_elevated);
+    }
+
+    #[test]
+    fn a_theme_file_keeps_its_control_fill() {
+        let mut authored = crate::themes::charcoal();
+        authored.control = Some(Color::from_rgb8(0x32, 0x34, 0x37));
+        let json = serde_json::to_string(&authored).unwrap();
+
+        let palette: ThemePalette = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(hex::to_hex(&palette.control()), "#323437");
     }
 
     fn default_track_colours() -> Vec<Color> {
@@ -875,6 +965,47 @@ mod tests {
             assert!(medium.body_toward_lane < soft.body_toward_lane);
             assert_eq!((soft.ink, vivid.ink), (authored.ink, authored.ink));
         }
+    }
+
+    #[test]
+    fn oklch_converts_to_srgb_as_the_mockup_generator_does() {
+        for (oklch, expected) in [
+            (Oklch::new(0.215, 0.006, 260.0), "#181a1c"),
+            (Oklch::new(0.74, 0.175, 55.0), "#fc871e"),
+            (Oklch::new(0.60, 0.19, 29.0), "#da4336"),
+            (Oklch::new(0.965, 0.004, 85.0), "#f5f3f0"),
+        ] {
+            assert_eq!(hex::to_hex(&oklch.color()), expected, "{oklch:?}");
+        }
+    }
+
+    #[test]
+    fn oklch_reads_back_the_lightness_chroma_and_hue_it_was_built_from() {
+        let authored = Oklch::new(0.72, 0.11, 165.0);
+        let read = Oklch::of(authored.color());
+        assert!((read.lightness - 0.72).abs() < 0.005, "{read:?}");
+        assert!((read.chroma - 0.11).abs() < 0.005, "{read:?}");
+        assert!((read.hue - 165.0).abs() < 1.0, "{read:?}");
+    }
+
+    #[test]
+    fn fitting_oklch_into_srgb_lowers_only_the_chroma() {
+        let wanted = Oklch::new(0.78, 0.25, 246.0);
+
+        let fitted = Oklch::of(wanted.fitted().color());
+
+        assert!(fitted.chroma < wanted.chroma, "{fitted:?}");
+        assert!(
+            fitted.chroma > 0.08,
+            "keeps as much colour as fits: {fitted:?}"
+        );
+        assert!(
+            (fitted.lightness - wanted.lightness).abs() < 0.005,
+            "{fitted:?}"
+        );
+        assert!((fitted.hue - wanted.hue).abs() < 2.0, "{fitted:?}");
+        let inside = Oklch::new(0.6, 0.1, 30.0);
+        assert_eq!(inside.fitted(), inside);
     }
 
     #[test]
