@@ -388,7 +388,7 @@ impl App {
         let grid_toggle = |label: &'static str, active: bool, command: GridCommand| {
             let color = if active { th::accent() } else { th::text_dim() };
             button(text(label).size(9).color(color))
-                .on_press(Message::GridShortcutPressed(command))
+                .on_press(Message::View(ViewMsg::Grid(GridTarget::Arrange, command)))
                 .padding([4, 6])
                 .style(move |_theme: &Theme, _status| button::Style {
                     background: Some(

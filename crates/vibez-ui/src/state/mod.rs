@@ -113,8 +113,8 @@ pub struct ViewState {
     pub viewport: crate::timeline_geometry::TimelineViewport,
     /// The Arrange view a zoom to selection replaced, for zoom back.
     pub zoom_before_selection: Option<crate::timeline_geometry::TimelineViewport>,
-    /// Arrange and Section timelines; the transport bar and grid shortcuts
-    /// edit it.
+    /// Arrange and Section timelines. The transport bar always edits it; the
+    /// grid shortcuts edit it unless a clip editor has focus.
     pub arrange_grid: GridConfig,
     /// Piano roll and audio clip editor, following their own zoom.
     pub clip_grid: GridConfig,
