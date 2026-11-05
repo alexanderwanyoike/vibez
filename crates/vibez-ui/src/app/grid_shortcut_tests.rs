@@ -1,7 +1,9 @@
 //! The grid shortcuts edit the grid of the editor that has focus.
 
 use super::*;
-use crate::state::{GridConfig, ProjectTrack, UiNoteClip};
+use crate::state::{
+    ArrangementSelection, DetailPanelTab, GridConfig, ProjectTrack, UiClip, UiNoteClip,
+};
 use iced::keyboard::{Key, Modifiers};
 use vibez_core::id::TrackId;
 
@@ -32,6 +34,28 @@ fn app_with_note_clip(open: bool) -> App {
     app
 }
 
+/// An app with one audio track whose one clip is selected, which shows it
+/// in the audio editor.
+fn app_with_open_audio_clip() -> (App, vibez_core::id::ClipId) {
+    let mut app = super::test_support::app();
+    app.state.view.workspace = crate::state::Workspace::Arrange;
+    app.state.view.detail_panel_tab = DetailPanelTab::Clip;
+    let track = ProjectTrack::new(TrackId::new(), "Audio".into(), 0);
+    let track_id = track.id;
+    Arc::make_mut(&mut app.state.project_tracks)
+        .tracks
+        .push(track);
+    let clip = UiClip::test_clip(0, 48_000);
+    let clip_id = clip.id;
+    app.state.arrange_content_mut(track_id).clips.push(clip);
+    app.state.arrangement.selected_track = Some(track_id);
+    app.state
+        .arrangement
+        .selected_clips
+        .insert(ArrangementSelection::AudioClip { track_id, clip_id });
+    (app, clip_id)
+}
+
 fn narrow_grid(app: &mut App) {
     let command = if ON_MACOS {
         Modifiers::LOGO
@@ -46,6 +70,16 @@ fn narrow_grid(app: &mut App) {
 #[test]
 fn command_one_with_the_piano_roll_focused_narrows_the_clip_grid() {
     let mut app = app_with_note_clip(true);
+
+    narrow_grid(&mut app);
+
+    assert_eq!(app.state.view.arrange_grid, GridConfig::default());
+    assert_eq!(app.state.view.clip_grid.adaptive_bias, 1);
+}
+
+#[test]
+fn command_one_with_the_audio_editor_open_narrows_the_clip_grid() {
+    let (mut app, _) = app_with_open_audio_clip();
 
     narrow_grid(&mut app);
 
