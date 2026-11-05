@@ -144,6 +144,15 @@ const TRACKS_MUTED: [Color; 8] = [
     rgb8(162, 106, 130),
 ];
 
+/// Contrast floors for the dimmer text tiers on every surface they are
+/// drawn on. Dim text carries 8 to 10 px captions and values, so it keeps
+/// WCAG AA's 4.5:1. Muted text only carries hints, placeholders and
+/// disabled states, so it keeps the 3:1 AA allows for large text.
+#[cfg(test)]
+const TEXT_DIM_CONTRAST: f32 = 4.5;
+#[cfg(test)]
+const TEXT_MUTED_CONTRAST: f32 = 3.0;
+
 struct Seed {
     name: &'static str,
     bg: Color,
@@ -607,6 +616,7 @@ pub fn save_user_theme(palette: &ThemePalette) -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::theme::contrast_ratio;
 
     #[test]
     fn twenty_builtins_with_unique_names() {
@@ -619,17 +629,105 @@ mod tests {
         assert_eq!(themes[0].name, "Charcoal", "default first");
     }
 
+    /// Body text meets WCAG AAA.
+    const TEXT_CONTRAST: f32 = 7.0;
+    /// WCAG's 3:1 for graphics cannot hold for a knob ring, which sits
+    /// between the body inside it, the strip round it and the band colour
+    /// drawn over it: a ring 3:1 off a dark body is brighter than the dimmer
+    /// band colours. 1.4:1 is the smallest step that reads at the ring's
+    /// 2.5 px on every built-in theme.
+    const KNOB_RING_STEP: f32 = 1.4;
+    /// A fader handle is the control itself, so it keeps WCAG's 3:1 for
+    /// graphics.
+    const FADER_HANDLE_CONTRAST: f32 = 3.0;
+
+    fn shortfalls(
+        theme: &ThemePalette,
+        role: &str,
+        colour: Color,
+        backgrounds: &[(&str, Color)],
+        floor: f32,
+    ) -> Vec<String> {
+        backgrounds
+            .iter()
+            .map(|&(name, background)| (name, contrast_ratio(colour, background)))
+            .filter(|&(_, ratio)| ratio < floor)
+            .map(|(name, ratio)| format!("{}: {role} on {name} {ratio:.2} < {floor}", theme.name))
+            .collect()
+    }
+
     #[test]
-    fn builtin_text_contrasts_with_background() {
-        // Cheap luminance gate: every theme's primary text must sit
-        // far from its background, dark or light.
-        fn luma(c: Color) -> f32 {
-            0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
-        }
-        for t in builtins() {
-            let d = (luma(t.text) - luma(t.bg_dark)).abs();
-            assert!(d > 0.45, "theme {} text/bg contrast too low: {d}", t.name);
-        }
+    fn every_builtin_theme_keeps_its_text_tiers_readable_on_every_surface() {
+        let failures: Vec<String> = builtins()
+            .iter()
+            .flat_map(|theme| {
+                let surfaces = theme.text_surfaces();
+                [
+                    ("text", theme.text, TEXT_CONTRAST),
+                    ("text_dim", theme.text_dim, TEXT_DIM_CONTRAST),
+                    ("text_muted", theme.text_muted, TEXT_MUTED_CONTRAST),
+                ]
+                .into_iter()
+                .flat_map(move |(role, colour, floor)| {
+                    shortfalls(theme, role, colour, &surfaces, floor)
+                })
+            })
+            .collect();
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    #[test]
+    fn every_builtin_theme_steps_its_knob_rings_clear_of_body_strip_and_arc() {
+        let failures: Vec<String> = builtins()
+            .iter()
+            .flat_map(|theme| {
+                let around = [
+                    ("knob_body", theme.knob_body),
+                    ("bg_surface", theme.bg_surface),
+                    ("bg_elevated", theme.bg_elevated),
+                ];
+                let ring = [("knob_track", theme.knob_track)];
+                let mut failures = shortfalls(
+                    theme,
+                    "knob_track",
+                    theme.knob_track,
+                    &around,
+                    KNOB_RING_STEP,
+                );
+                for (role, arc) in [
+                    ("accent", theme.accent),
+                    ("eq_lf", theme.eq_lf),
+                    ("eq_lmf", theme.eq_lmf),
+                    ("eq_hmf", theme.eq_hmf),
+                    ("eq_hf", theme.eq_hf),
+                ] {
+                    failures.extend(shortfalls(theme, role, arc, &ring, KNOB_RING_STEP));
+                }
+                failures
+            })
+            .collect();
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    #[test]
+    fn every_builtin_theme_sets_its_fader_handles_clear_of_their_track_and_strip() {
+        let failures: Vec<String> = builtins()
+            .iter()
+            .flat_map(|theme| {
+                let behind = [
+                    ("fader_track", theme.bg_elevated),
+                    ("bg_surface", theme.bg_surface),
+                ];
+                shortfalls(
+                    theme,
+                    "fader_handle",
+                    theme.fader_handle,
+                    &behind,
+                    FADER_HANDLE_CONTRAST,
+                )
+            })
+            .collect();
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
 
     #[test]

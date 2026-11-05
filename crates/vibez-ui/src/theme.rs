@@ -375,6 +375,18 @@ impl ThemePalette {
     pub fn lane(&self) -> Color {
         blend(self.bg_dark, self.text, self.lane_style.recess)
     }
+
+    /// Every background the text tiers are drawn on.
+    #[cfg(test)]
+    pub(crate) fn text_surfaces(&self) -> [(&'static str, Color); 5] {
+        [
+            ("bg_dark", self.bg_dark),
+            ("bg_surface", self.bg_surface),
+            ("bg_elevated", self.bg_elevated),
+            ("display_bg", self.display_bg),
+            ("lane", self.lane()),
+        ]
+    }
 }
 
 impl Default for ThemePalette {
@@ -519,6 +531,26 @@ impl Hsl {
             a: alpha,
         }
     }
+}
+
+/// WCAG 2 relative luminance of an sRGB colour, ignoring alpha.
+#[cfg(test)]
+pub(crate) fn relative_luminance(c: Color) -> f32 {
+    let linear = |v: f32| {
+        if v <= 0.04045 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * linear(c.r) + 0.7152 * linear(c.g) + 0.0722 * linear(c.b)
+}
+
+/// WCAG 2 contrast ratio between two opaque colours, from 1 to 21.
+#[cfg(test)]
+pub(crate) fn contrast_ratio(a: Color, b: Color) -> f32 {
+    let (a, b) = (relative_luminance(a), relative_luminance(b));
+    (a.max(b) + 0.05) / (a.min(b) + 0.05)
 }
 
 static STRENGTH: RwLock<ColourStrength> = RwLock::new(ColourStrength::Vivid);
