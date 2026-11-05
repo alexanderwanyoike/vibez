@@ -30,7 +30,22 @@ pub fn ink(on: Option<Color>, status: button::Status) -> Color {
 /// A pick list filled like a control, its handle lit in `highlight` while
 /// hovered or open.
 pub fn list(highlight: Color) -> impl Fn(&Theme, pick_list::Status) -> pick_list::Style {
-    move |_theme, _status| todo!("{highlight:?}")
+    move |_theme, status| {
+        let lit = matches!(
+            status,
+            pick_list::Status::Hovered | pick_list::Status::Opened
+        );
+        pick_list::Style {
+            text_color: th::text(),
+            placeholder_color: th::text_dim(),
+            handle_color: if lit { highlight } else { th::text_dim() },
+            background: if lit { th::bg_hover() } else { th::control() }.into(),
+            border: Border {
+                radius: RADIUS.into(),
+                ..Default::default()
+            },
+        }
+    }
 }
 
 fn hovered(status: button::Status) -> bool {
