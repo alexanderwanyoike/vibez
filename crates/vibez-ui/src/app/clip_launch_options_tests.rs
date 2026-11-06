@@ -119,7 +119,9 @@ async fn track_launch_quantization_reopens_with_the_project() {
     super::save_project_async(path.clone(), None, project)
         .await
         .unwrap();
-    let loaded = super::load_project_async(path, None).await.unwrap();
+    let loaded = super::load_project_async(path, None, vibez_core::constants::DEFAULT_SAMPLE_RATE)
+        .await
+        .unwrap();
     let mut reopened = super::test_support::app();
     reopened.rebuild_from_loaded_project(loaded);
     let clips = &reopened.state.perform.clips;
@@ -223,7 +225,9 @@ async fn a_clip_launch_quantization_survives_duplicate_save_and_reopen() {
     super::save_project_async(path.clone(), None, app.project_from_state())
         .await
         .unwrap();
-    let loaded = super::load_project_async(path, None).await.unwrap();
+    let loaded = super::load_project_async(path, None, vibez_core::constants::DEFAULT_SAMPLE_RATE)
+        .await
+        .unwrap();
     let mut reopened = super::test_support::app();
     reopened.rebuild_from_loaded_project(loaded);
     for (id, quantization) in copies {
@@ -319,7 +323,9 @@ async fn track_launch_mode_reopens_with_the_project() {
     super::save_project_async(path.clone(), None, project)
         .await
         .unwrap();
-    let loaded = super::load_project_async(path, None).await.unwrap();
+    let loaded = super::load_project_async(path, None, vibez_core::constants::DEFAULT_SAMPLE_RATE)
+        .await
+        .unwrap();
     let mut reopened = super::test_support::app();
     reopened.rebuild_from_loaded_project(loaded);
     let clips = &reopened.state.perform.clips;
@@ -461,7 +467,9 @@ async fn a_clip_launch_mode_survives_duplicate_save_and_reopen() {
     super::save_project_async(path.clone(), None, app.project_from_state())
         .await
         .unwrap();
-    let loaded = super::load_project_async(path, None).await.unwrap();
+    let loaded = super::load_project_async(path, None, vibez_core::constants::DEFAULT_SAMPLE_RATE)
+        .await
+        .unwrap();
     let mut reopened = super::test_support::app();
     reopened.rebuild_from_loaded_project(loaded);
     for id in ids {

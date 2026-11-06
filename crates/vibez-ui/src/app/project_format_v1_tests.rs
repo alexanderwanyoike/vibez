@@ -121,6 +121,7 @@ async fn supported_format_matrix_catalogs_auditions_imports_and_reopens() {
         let project_path = directory.path().join("format-roundtrip.vzp");
         let project = Project {
             reduced_latency_monitoring: false,
+            sample_rate,
             tracks: vec![track.clone()],
             arrange: vibez_project::TimelineInfo {
                 clips: vec![ClipInfo {
@@ -153,7 +154,9 @@ async fn supported_format_matrix_catalogs_auditions_imports_and_reopens() {
         vibez_project::project_format_v1::save_project_v1(&project_path, None, project).unwrap();
         std::fs::remove_file(source_path).unwrap();
 
-        let reopened = load_project_async(project_path, None).await.unwrap();
+        let reopened = load_project_async(project_path, None, sample_rate)
+            .await
+            .unwrap();
         let reopened_audio = Arc::clone(&reopened.clips[0].audio);
         assert_eq!(reopened_audio.num_channels(), channels, "{file_name}");
         assert_eq!(reopened_audio.sample_rate, sample_rate, "{file_name}");
@@ -285,7 +288,13 @@ async fn warp_arrangement_import_reopens_from_project_media_without_local_source
     vibez_project::project_format_v1::save_project_v1(&project_path, None, project).unwrap();
     std::fs::remove_file(source_path).unwrap();
 
-    let loaded = load_project_async(project_path, None).await.unwrap();
+    let loaded = load_project_async(
+        project_path,
+        None,
+        vibez_core::constants::DEFAULT_SAMPLE_RATE,
+    )
+    .await
+    .unwrap();
     assert_eq!(loaded.clips[0].audio.num_frames(), warped.num_frames());
     assert!(matches!(
         loaded.project.arrange.clips[0].source,
@@ -329,7 +338,13 @@ async fn warp_sampler_import_bakes_heard_audio_into_project_media() {
     vibez_project::project_format_v1::save_project_v1(&project_path, None, project).unwrap();
     std::fs::remove_file(source_path).unwrap();
 
-    let loaded = load_project_async(project_path, None).await.unwrap();
+    let loaded = load_project_async(
+        project_path,
+        None,
+        vibez_core::constants::DEFAULT_SAMPLE_RATE,
+    )
+    .await
+    .unwrap();
     assert_eq!(loaded.sampler_samples.len(), 1);
     assert_eq!(
         loaded.sampler_samples[0].audio.num_frames(),
@@ -394,7 +409,13 @@ async fn v1_reopen_decodes_embedded_audio_after_source_removal() {
     vibez_project::project_format_v1::save_project_v1(&project_path, None, project).unwrap();
     std::fs::remove_file(source_path).unwrap();
 
-    let loaded = load_project_async(project_path, None).await.unwrap();
+    let loaded = load_project_async(
+        project_path,
+        None,
+        vibez_core::constants::DEFAULT_SAMPLE_RATE,
+    )
+    .await
+    .unwrap();
     assert_eq!(loaded.clips.len(), 1);
     assert_eq!(loaded.clips[0].audio.num_frames(), audio.num_frames());
     assert!(matches!(
@@ -481,7 +502,13 @@ async fn shortened_section_audio_and_automation_survive_reopen() {
     assert_eq!(saved.observation.media_rows_written, 1);
     std::fs::remove_file(source_path).unwrap();
 
-    let loaded = load_project_async(project_path, None).await.unwrap();
+    let loaded = load_project_async(
+        project_path,
+        None,
+        vibez_core::constants::DEFAULT_SAMPLE_RATE,
+    )
+    .await
+    .unwrap();
     assert!(loaded.warnings.is_empty());
     assert_eq!(loaded.clips.len(), 2);
     assert!(loaded
@@ -529,7 +556,13 @@ async fn legacy_json_reopens_with_an_empty_section_store_and_no_warnings() {
     )
     .unwrap();
 
-    let loaded = load_project_async(project_path, None).await.unwrap();
+    let loaded = load_project_async(
+        project_path,
+        None,
+        vibez_core::constants::DEFAULT_SAMPLE_RATE,
+    )
+    .await
+    .unwrap();
     assert!(loaded.project.sections.is_empty());
     assert!(loaded.warnings.is_empty());
     assert!(loaded.clips.is_empty());
@@ -581,7 +614,13 @@ async fn unavailable_media_clip_is_kept_for_relink_on_reopen() {
     // Without a Dropbox connection the clip cannot hydrate, but its
     // source reference must survive for relink instead of being
     // silently dropped from the next save.
-    let loaded = load_project_async(project_path, None).await.unwrap();
+    let loaded = load_project_async(
+        project_path,
+        None,
+        vibez_core::constants::DEFAULT_SAMPLE_RATE,
+    )
+    .await
+    .unwrap();
     assert!(loaded.clips.is_empty());
     assert_eq!(loaded.unresolved_clips.len(), 1);
     assert_eq!(loaded.unresolved_clips[0].id, clip_id);
@@ -779,9 +818,13 @@ async fn remote_warp_import_reopens_after_cache_clear_without_dropbox() {
     };
     vibez_project::project_format_v1::save_project_v1(&project_path, None, project).unwrap();
 
-    let reopened = load_project_async(project_path.clone(), None)
-        .await
-        .unwrap();
+    let reopened = load_project_async(
+        project_path.clone(),
+        None,
+        vibez_core::constants::DEFAULT_SAMPLE_RATE,
+    )
+    .await
+    .unwrap();
     assert_eq!(reopened.clips[0].audio.num_frames(), warped.num_frames());
     assert_audible(Arc::clone(&reopened.clips[0].audio), "Remote WARP reopen");
     let Some(MediaSourceRef::ProjectMedia {

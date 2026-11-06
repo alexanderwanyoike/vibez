@@ -164,6 +164,7 @@ impl App {
                     provenance,
                 };
                 let container_path = self.state.project.current_path.clone();
+                let sample_rate = self.state.transport.sample_rate;
                 Task::perform(
                     async move {
                         let audio = hydrate_saved_source(
@@ -171,6 +172,7 @@ impl App {
                             None,
                             &retained_source,
                             &name,
+                            sample_rate,
                         )
                         .await?;
                         let analysed = analyse_browser_audio_async(audio, name.clone()).await?;

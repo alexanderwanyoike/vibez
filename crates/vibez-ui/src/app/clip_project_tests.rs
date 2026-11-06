@@ -68,7 +68,13 @@ async fn clip_project_reopens_audio_midi_and_independent_arrange_content() {
         .await
         .unwrap();
     std::fs::remove_file(source).unwrap();
-    let loaded = load_project_async(destination.clone(), None).await.unwrap();
+    let loaded = load_project_async(
+        destination.clone(),
+        None,
+        vibez_core::constants::DEFAULT_SAMPLE_RATE,
+    )
+    .await
+    .unwrap();
     assert_eq!(loaded.project.perform_layout, PerformLayout::Clips);
     assert!(loaded.project.sections.is_empty());
     assert_eq!(loaded.project.launcher_clips.len(), 2);
@@ -157,6 +163,7 @@ async fn recorded_audio_cells_require_container_saves_and_reopen_with_embedded_m
         };
         let project = Project {
             reduced_latency_monitoring: false,
+            sample_rate: 48_000,
             perform_layout: PerformLayout::Clips,
             tracks: vec![track.clone()],
             launcher_clips: vec![LauncherClipInfo {
@@ -185,7 +192,7 @@ async fn recorded_audio_cells_require_container_saves_and_reopen_with_embedded_m
         save_project_async(path.clone(), None, project)
             .await
             .unwrap();
-        let reopened = load_project_async(path, None).await.unwrap();
+        let reopened = load_project_async(path, None, 48_000).await.unwrap();
         assert!(reopened.unresolved_clips.is_empty());
         assert_eq!(reopened.clips.len(), 1);
         assert_eq!(

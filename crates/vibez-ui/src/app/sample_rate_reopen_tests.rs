@@ -64,7 +64,7 @@ async fn an_audio_clip_stays_on_its_bar_when_the_device_rate_differs() {
 
     let mut app = super::test_support::app();
     app.state.transport.sample_rate = DEVICE_RATE;
-    app.rebuild_from_loaded_project(load_project_async(path, None).await.unwrap());
+    app.rebuild_from_loaded_project(load_project_async(path, None, DEVICE_RATE).await.unwrap());
 
     let clip = &app.state.arrange_content(track_id).unwrap().clips[0];
     assert_eq!(clip.position, 2 * DEVICE_RATE as u64);
