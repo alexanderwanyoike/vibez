@@ -48,7 +48,7 @@ const DB_H: f32 = 14.0;
 const METER_W: f32 = 10.0;
 /// The fader's travel at the strip's natural height; a taller Mix card
 /// gives it the extra.
-const MIN_FADER_H: f32 = 180.0;
+const NATURAL_FADER_H: f32 = 180.0;
 
 /// Per-render inputs that are not part of the project-owned channel itself.
 pub struct MixerStripView<'a> {
@@ -91,7 +91,7 @@ pub fn strip_height(buses: usize) -> f32 {
         + GAP
         + BUTTONS_H
         + GAP
-        + MIN_FADER_H
+        + NATURAL_FADER_H
         + DB_H
         + PADDING.bottom
 }
