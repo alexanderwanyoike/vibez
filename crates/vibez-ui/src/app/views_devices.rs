@@ -15,6 +15,10 @@ use super::*;
 const CHAIN_SPACING: f32 = 6.0;
 const PLACEHOLDER_W: f32 = 150.0;
 
+/// Empty room kept after the last card, so a full chain still has somewhere
+/// to right-click for the add menu.
+const CHAIN_END_ROOM: f32 = 120.0;
+
 /// Native devices that lay themselves out from the width they are given.
 #[derive(Clone, Copy, Debug)]
 enum Flexible {
@@ -201,8 +205,8 @@ impl App {
             )));
         }
         let shares = flexible.len() + usize::from(native.is_some());
-        let spacing = CHAIN_SPACING * cards.len().saturating_sub(1) as f32;
-        let mut chain_width = used + spacing;
+        let spacing = CHAIN_SPACING * cards.len() as f32;
+        let mut chain_width = used + spacing + CHAIN_END_ROOM;
         if shares > 0 {
             let share = flexible_share(available_width, used, cards.len(), shares);
             if let Some(native) = native {
@@ -268,6 +272,7 @@ impl App {
             }
         }
         let devices_row = row(cards.into_iter().flatten())
+            .push(iced::widget::Space::with_width(CHAIN_END_ROOM))
             .spacing(CHAIN_SPACING)
             .height(Length::Fill);
 
@@ -728,10 +733,11 @@ impl App {
 }
 
 /// The width each of `shares` flexible cards gets in a section `available`
-/// wide, beside `cards` cards in all whose fixed ones take `used`.
+/// wide, beside `cards` cards in all whose fixed ones take `used`, and the
+/// chain's end room.
 fn flexible_share(available: f32, used: f32, cards: usize, shares: usize) -> f32 {
-    let spacing = CHAIN_SPACING * cards.saturating_sub(1) as f32;
-    (available - used - spacing) / shares as f32
+    let spacing = CHAIN_SPACING * cards as f32;
+    (available - used - spacing - CHAIN_END_ROOM) / shares as f32
 }
 
 #[cfg(test)]
