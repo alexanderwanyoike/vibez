@@ -2,11 +2,13 @@
 
 A free and open source DAW for electronic music, written in Rust.
 
-[Website](https://alexanderwanyoike.github.io/vibez/) · [Download the latest release](https://github.com/alexanderwanyoike/vibez/releases/latest)
+[Website](https://alexanderwanyoike.github.io/vibez/) · [Download the latest release](https://github.com/alexanderwanyoike/vibez/releases/latest) · [Watch it work](https://youtu.be/7NR65r6sl3c)
 
 vibez is built around **Perform**, **Arrange** and **Mix**. Jam out a tune in
 Perform, polish the arrangement in Arrange, then focus on the mix. Capture
 records a live performance into the arrangement so you can edit it afterwards.
+
+[![Watch vibez v0.6.0: under-it-all, built live in the clip launcher, then arranged and mixed](docs/video-thumbnail.png)](https://youtu.be/7NR65r6sl3c)
 
 ![Perform: launching Sections from the pad grid, with the Browser and a Sampler](docs/perform-sections.png)
 
@@ -29,6 +31,9 @@ same editor you use in Arrange, then launch it from a pad grid.
 - **Clips mode** gives every track its own column of clips instead: launch,
   copy, paste and drag them, record a take into the selected cell with F4, and
   Play picks up whatever was playing when you stopped
+- **Launch options** per track, which any clip can override: the boundary a
+  launch waits for, and a mode. Play starts from the top, Legato picks up
+  where the outgoing clip had reached, and At End waits for it to finish
 
 ![The clip launcher: a column of clips per track, with the selected clip's waveform below](docs/perform-clips.png)
 
@@ -52,12 +57,21 @@ Everything Capture writes is material you could have drawn by hand, so the rest
 of Arrange applies to it unchanged:
 
 - **Multi-track editing** for audio and MIDI, with clip
-  drag/resize/split/join, time selection, looping, and an overview minimap
+  drag/resize/split/join, left and right trims, duplicate, time selection, and
+  an overview minimap. A dropped clip overwrites what it lands on, a plain
+  click never nudges a clip, and undo keeps playback running
+- **Snapping** to an adaptive grid that follows the zoom, measured from the
+  edge you drag, with magnetic pull towards nearby clips and markers
+- **Clip loops** set apart from the clip's length, and a looped clip extends
+  backwards as well as forwards
+- A pinned ruler and minimap, zoom to selection, and resizable track heights
 - **Audio recording** from a soundcard input or the output of an instrument
   track, with the waveform drawn while the take is recorded
 - **Soundcard settings** for choosing the audio backend, input/output device,
   sample rate and buffer size. Windows builds support WASAPI and ASIO;
-  macOS uses CoreAudio and Linux uses ALSA
+  macOS uses CoreAudio and Linux uses ALSA. Projects and audio files at
+  another sample rate are converted on load, so clips stay on their bars and
+  play at their pitch
 - **Warping** with automatic BPM detection and high-quality time stretching
   through Signalsmith Stretch. Warped clips follow the project BPM
 - **Audio clip editing** with fades and crossfades on curves, reverse,
@@ -72,7 +86,8 @@ of Arrange applies to it unchanged:
 
 Mix is a real console rather than a row of faders. Every channel has its own
 EQ, the master is an actual channel, and the device rack below follows the
-selected one.
+selected one. Drag the divider between them to give the strips or the rack
+more room.
 
 ![Mix: channel strips with EQ, the master, and the device rack below](docs/mix.png)
 
@@ -92,6 +107,8 @@ selected one.
 
 ## Everything else
 
+- **Themes**: 20 built in, dark and light, from Charcoal to Porcelain, and
+  your own saved alongside them
 - **Sample browser** with local library indexing, Dropbox, RAW and WARP
   audition, automatic tempo sync, looping and a waveform playhead
 - **Project save/load and autosave**, with undo, redo and WAV export from the
