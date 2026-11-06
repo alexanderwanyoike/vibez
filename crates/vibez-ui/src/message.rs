@@ -324,9 +324,10 @@ pub enum Message {
     /// dropped instead of starting playback.
     LocalSamplePreviewReady(MediaSourceRef, u64, Result<AnalysedBrowserAudio, String>),
     BrowserWaveformReady(MediaSourceRef, Result<AnalysedBrowserAudio, String>),
-    BrowserAuditionWarpReady {
+    BrowserAuditionReady {
         source: MediaSourceRef,
         generation: u64,
+        mode: crate::state::AuditionMode,
         project_bpm: f64,
         result: Result<Arc<DecodedAudio>, String>,
     },

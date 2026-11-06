@@ -346,13 +346,20 @@ impl App {
             Message::BrowserWaveformReady(source, Err(err)) => {
                 self.state.browser.fail_waveform_load(&source, err);
             }
-            Message::BrowserAuditionWarpReady {
+            Message::BrowserAuditionReady {
                 source,
                 generation,
+                mode,
                 project_bpm,
                 result,
             } => {
-                return self.on_browser_audition_warp_ready(source, generation, project_bpm, result)
+                return self.on_browser_audition_ready(
+                    source,
+                    generation,
+                    mode,
+                    project_bpm,
+                    result,
+                )
             }
             Message::ImportSelectedBrowserSampleToArrangement => {
                 return self.handle_import_selected_browser_sample_to_arrangement();

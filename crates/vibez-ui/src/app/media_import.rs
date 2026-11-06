@@ -83,7 +83,7 @@ impl App {
                     .unwrap_or_default();
                 self.state.status_text = format!("Dropping {name}...");
                 Task::perform(
-                    decode_analyse_and_stage_local_async(path),
+                    decode_analyse_and_stage_local_async(path, self.state.transport.sample_rate),
                     move |result| match result {
                         Ok((analysed, source)) => Message::BrowserSampleDecoded(
                             target.clone(),
@@ -164,6 +164,7 @@ impl App {
                     provenance,
                 };
                 let container_path = self.state.project.current_path.clone();
+                let sample_rate = self.state.transport.sample_rate;
                 Task::perform(
                     async move {
                         let audio = hydrate_saved_source(
@@ -171,6 +172,7 @@ impl App {
                             None,
                             &retained_source,
                             &name,
+                            sample_rate,
                         )
                         .await?;
                         let analysed = analyse_browser_audio_async(audio, name.clone()).await?;
@@ -539,7 +541,7 @@ impl App {
             self.state.status_text = format!("Loading {file_name}...");
             let clip_id = ClipId::new();
             return Task::perform(
-                decode_and_stage_local_async(path),
+                decode_and_stage_local_async(path, self.state.transport.sample_rate),
                 move |result| match result {
                     Ok((audio, source)) => Message::ClipAudioDecoded(
                         track_id,
@@ -645,7 +647,7 @@ impl App {
                 .unwrap_or_default();
             self.state.status_text = format!("Loading {file_name}...");
             return Task::perform(
-                decode_and_stage_local_async(path),
+                decode_and_stage_local_async(path, self.state.transport.sample_rate),
                 move |result| match result {
                     Ok((audio, source)) => Message::DrumRackPadSampleDecoded(
                         track_id,

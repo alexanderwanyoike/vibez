@@ -156,9 +156,10 @@ fn classify_legacy_project_load_error(
 pub(in crate::app) async fn load_project_async(
     path: PathBuf,
     dropbox: Option<(Arc<DropboxClient>, DropboxCache)>,
+    sample_rate: u32,
 ) -> Result<ProjectLoadResult, crate::message::ProjectLoadError> {
     let load_path = path.clone();
-    let (project, container_path) = tokio::task::spawn_blocking(move || {
+    let (mut project, container_path) = tokio::task::spawn_blocking(move || {
         match vibez_project::project_format_v1::detect_project_format(&load_path)
             .map_err(classify_project_format_load_error)?
         {
@@ -180,6 +181,7 @@ pub(in crate::app) async fn load_project_async(
     })
     .await
     .map_err(|err| crate::message::ProjectLoadError::other(format!("load task failed: {err}")))??;
+    project.convert_sample_rate(sample_rate);
 
     let mut clips = Vec::new();
     let mut unresolved_clips = Vec::new();
@@ -195,6 +197,7 @@ pub(in crate::app) async fn load_project_async(
                     dropbox.as_ref(),
                     &source,
                     &clip.name,
+                    sample_rate,
                 )
                 .await
                 {
@@ -232,6 +235,7 @@ pub(in crate::app) async fn load_project_async(
                     dropbox.as_ref(),
                     source,
                     &track.name,
+                    sample_rate,
                 )
                 .await
                 {
@@ -257,6 +261,7 @@ pub(in crate::app) async fn load_project_async(
                             dropbox.as_ref(),
                             source,
                             &label,
+                            sample_rate,
                         )
                         .await
                         {
@@ -293,8 +298,9 @@ pub(in crate::app) async fn hydrate_saved_source(
     dropbox: Option<&(Arc<DropboxClient>, DropboxCache)>,
     source: &MediaSourceRef,
     label: &str,
+    sample_rate: u32,
 ) -> Result<vibez_core::audio_buffer::DecodedAudio, String> {
-    match source {
+    let audio = match source {
         MediaSourceRef::LocalFile { path }
         | MediaSourceRef::StagedProjectMedia {
             staging_path: path, ..
@@ -327,7 +333,8 @@ pub(in crate::app) async fn hydrate_saved_source(
             .map_err(|error| format!("Project Media decode task failed: {error}"))?
         }
         MediaSourceRef::DropboxFile { .. } => hydrate_dropbox_source(dropbox, source, label).await,
-    }
+    }?;
+    super::at_engine_rate(audio, sample_rate).await
 }
 
 pub(in crate::app) async fn decode_blocking(
@@ -390,7 +397,9 @@ mod project_load_error_tests {
         let directory = tempfile::tempdir().unwrap();
         let missing = directory.path().join("removed.vzp");
 
-        let error = load_project_async(missing, None).await.unwrap_err();
+        let error = load_project_async(missing, None, vibez_core::constants::DEFAULT_SAMPLE_RATE)
+            .await
+            .unwrap_err();
 
         assert!(matches!(
             error,
@@ -404,7 +413,9 @@ mod project_load_error_tests {
         let invalid = directory.path().join("invalid.vzp");
         std::fs::write(&invalid, "not a Vibez project").unwrap();
 
-        let error = load_project_async(invalid, None).await.unwrap_err();
+        let error = load_project_async(invalid, None, vibez_core::constants::DEFAULT_SAMPLE_RATE)
+            .await
+            .unwrap_err();
 
         assert!(matches!(error, crate::message::ProjectLoadError::Other(_)));
     }

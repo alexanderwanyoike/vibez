@@ -7,6 +7,7 @@ use crate::effect::EffectInfo;
 use crate::id::{ClipId, TrackId};
 use crate::midi::{InstrumentKind, TrackKind};
 use crate::perform::SwingOffset;
+use crate::time::frames_at_rate;
 use crate::transient::TransientMarkers;
 use crate::warp_marker::WarpMarkers;
 
@@ -539,6 +540,28 @@ impl ClipInfo {
         self.source.as_ref()
     }
 
+    /// Re-count every frame this clip holds for audio running at `to_rate`
+    /// instead of `from_rate`, so it plays the same sound at the same time.
+    pub fn convert_sample_rate(&mut self, from_rate: u32, to_rate: u32) {
+        if from_rate == to_rate || from_rate == 0 || to_rate == 0 {
+            return;
+        }
+        let at = |frames| frames_at_rate(frames, from_rate, to_rate);
+        let ratio = f64::from(to_rate) / f64::from(from_rate);
+        let old_duration = self.duration;
+        self.position = at(self.position);
+        self.source_offset = at(self.source_offset);
+        self.start_marker = self.start_marker.map(at);
+        self.duration = at(self.duration);
+        self.loop_start = at(self.loop_start);
+        self.loop_end = at(self.loop_end);
+        self.fades = self.fades.scaled(old_duration, self.duration);
+        self.transient_markers.scale_source_frames(ratio, u64::MAX);
+        let warp_timeline_end = at(self.warp_markers.timeline_end(0));
+        self.warp_markers
+            .scale_frames(ratio, ratio, u64::MAX, warp_timeline_end);
+    }
+
     pub fn resolved_local_path(&self) -> Option<&PathBuf> {
         if let Some(MediaSourceRef::LocalFile { path }) = self.source.as_ref() {
             Some(path)
@@ -655,6 +678,44 @@ mod tests {
             warped: false,
             warped_to_bpm: None,
         }
+    }
+
+    #[test]
+    fn a_clip_converted_to_another_sample_rate_keeps_its_timing() {
+        let mut clip = test_clip(88_200, 44_100);
+        clip.source_offset = 4_410;
+        clip.start_marker = Some(8_820);
+        clip.loop_enabled = true;
+        clip.loop_start = 4_410;
+        clip.loop_end = 22_050;
+        clip.fades = ClipFades::new(441, 4_410, 44_100);
+        clip.transient_markers.add_authored(13_230);
+        clip.warp_markers.add(22_050, 17_640, 4_410, 48_510, 44_100);
+
+        clip.convert_sample_rate(44_100, 48_000);
+
+        assert_eq!(
+            (
+                clip.position,
+                clip.duration,
+                clip.source_offset,
+                clip.start_marker
+            ),
+            (96_000, 48_000, 4_800, Some(9_600))
+        );
+        assert_eq!((clip.loop_start, clip.loop_end), (4_800, 24_000));
+        assert_eq!(
+            (clip.fades.fade_in_frames(), clip.fades.fade_out_frames()),
+            (480, 4_800)
+        );
+        assert!(clip.transient_markers.contains(14_400));
+        let warp: Vec<_> = clip
+            .warp_markers
+            .as_slice()
+            .iter()
+            .map(|marker| (marker.source_frame(), marker.timeline_frame()))
+            .collect();
+        assert_eq!(warp, [(4_800, 0), (24_000, 19_200), (52_800, 48_000)]);
     }
 
     #[test]

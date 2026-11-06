@@ -59,7 +59,11 @@ async fn reopen(path: PathBuf, project: Project) -> App {
         .await
         .unwrap();
     let mut app = super::test_support::app();
-    app.rebuild_from_loaded_project(load_project_async(path, None).await.unwrap());
+    app.rebuild_from_loaded_project(
+        load_project_async(path, None, vibez_core::constants::DEFAULT_SAMPLE_RATE)
+            .await
+            .unwrap(),
+    );
     app
 }
 
@@ -93,7 +97,11 @@ async fn opening_another_project_forgets_the_last_ones_heights() {
         .await
         .unwrap();
 
-    app.rebuild_from_loaded_project(load_project_async(path, None).await.unwrap());
+    app.rebuild_from_loaded_project(
+        load_project_async(path, None, vibez_core::constants::DEFAULT_SAMPLE_RATE)
+            .await
+            .unwrap(),
+    );
 
     assert_eq!(app.state.track_heights.height(ids[0]), TrackHeight::DEFAULT);
 }

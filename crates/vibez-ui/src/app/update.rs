@@ -815,7 +815,7 @@ impl App {
             | Message::DropSampleOnSampler { .. }
             | Message::LocalSamplePreviewReady(..)
             | Message::BrowserWaveformReady(..)
-            | Message::BrowserAuditionWarpReady { .. }
+            | Message::BrowserAuditionReady { .. }
             | Message::ImportSelectedBrowserSampleToArrangement
             | Message::SelectAdjacentBrowserResult(..)
             | Message::LoadSelectedBrowserSampleToDevice

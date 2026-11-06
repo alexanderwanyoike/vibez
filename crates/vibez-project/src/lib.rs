@@ -160,6 +160,18 @@ impl From<serde_json::Error> for ProjectError {
 }
 
 impl Project {
+    /// Re-count every audio clip's frames for the engine running at
+    /// `sample_rate`. Notes and automation are in beats and need nothing.
+    pub fn convert_sample_rate(&mut self, sample_rate: u32) {
+        let saved_rate = self.sample_rate;
+        for (_, timeline) in self.timelines_mut() {
+            for clip in &mut timeline.clips {
+                clip.convert_sample_rate(saved_rate, sample_rate);
+            }
+        }
+        self.sample_rate = sample_rate;
+    }
+
     pub fn timelines(&self) -> impl Iterator<Item = (TimelineLocation, &TimelineInfo)> + '_ {
         std::iter::once((TimelineLocation::Arrange, &self.arrange))
             .chain(
@@ -294,6 +306,70 @@ mod tests {
     use vibez_core::id::{ClipId, TrackId};
     use vibez_core::midi::{MidiNote, NoteClipInfo};
     use vibez_core::track::{InstrumentStateInfo, MediaSourceRef};
+
+    fn audio_clip_at(position: u64) -> ClipInfo {
+        ClipInfo {
+            id: ClipId::new(),
+            track_id: TrackId::new(),
+            name: "percs.wav".into(),
+            position,
+            source_offset: 0,
+            start_marker: None,
+            duration: 44_100,
+            source: None,
+            file_path: None,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
+            gain_db: Default::default(),
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            transient_markers: Default::default(),
+            warp_markers: Default::default(),
+            transpose: Default::default(),
+            original_bpm: None,
+            warped: false,
+            warped_to_bpm: None,
+        }
+    }
+
+    #[test]
+    fn every_timeline_s_audio_clips_convert_to_another_sample_rate() {
+        let timeline_at = |position| TimelineInfo {
+            clips: vec![audio_clip_at(position)],
+            ..TimelineInfo::default()
+        };
+        let mut project = Project {
+            sample_rate: 44_100,
+            arrange: timeline_at(88_200),
+            sections: vec![SectionInfo {
+                id: SectionId::new(),
+                slot: 0,
+                name: "Drop".into(),
+                length_beats: 16.0,
+                launch_quantization: SectionLaunchQuantization::default(),
+                looping: true,
+                timeline: timeline_at(44_100),
+            }],
+            launcher_clips: vec![LauncherClipInfo {
+                id: ClipId::new(),
+                track_id: TrackId::new(),
+                row: 0,
+                timeline: timeline_at(22_050),
+                launch: Default::default(),
+            }],
+            ..Project::default()
+        };
+
+        project.convert_sample_rate(48_000);
+
+        assert_eq!(project.sample_rate, 48_000);
+        let positions: Vec<_> = project
+            .timelines()
+            .map(|(_, timeline)| timeline.clips[0].position)
+            .collect();
+        assert_eq!(positions, [96_000, 48_000, 24_000]);
+    }
 
     #[test]
     fn missing_source_identity_is_reserved_after_reopen() {

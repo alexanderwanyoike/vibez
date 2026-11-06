@@ -58,7 +58,11 @@ async fn reopen(path: PathBuf, saved_before: Option<PathBuf>, project: Project) 
         .await
         .unwrap();
     let mut app = super::test_support::app();
-    app.rebuild_from_loaded_project(load_project_async(path, None).await.unwrap());
+    app.rebuild_from_loaded_project(
+        load_project_async(path, None, vibez_core::constants::DEFAULT_SAMPLE_RATE)
+            .await
+            .unwrap(),
+    );
     app
 }
 

@@ -135,12 +135,14 @@ impl App {
                 .dropbox_client
                 .clone()
                 .map(|client| (client, self.dropbox_cache.clone()));
-            return Task::perform(load_project_async(path, dropbox), move |result| {
-                Message::ProjectLoaded {
+            let sample_rate = self.state.transport.sample_rate;
+            return Task::perform(
+                load_project_async(path, dropbox, sample_rate),
+                move |result| Message::ProjectLoaded {
                     path: completed_path.clone(),
                     result: Box::new(result),
-                }
-            });
+                },
+            );
         }
         Task::none()
     }
