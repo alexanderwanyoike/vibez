@@ -510,6 +510,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_long_channel_name_is_cut_with_an_ellipsis_to_fit_the_strip_header() {
+        let shown = |name| crate::typography::fit(name, name_room("04"), NAME_SIZE, PERFORM_LABEL);
+        assert_eq!(shown("Kick"), "Kick");
+        assert!(shown("Deep Chords").ends_with('\u{2026}'));
+    }
+
+    #[test]
     fn a_strip_is_as_wide_as_its_eq_with_the_fader_under_it() {
         assert_eq!(STRIP_W, EQ_W + PADDING.left + PADDING.right);
     }
