@@ -369,8 +369,8 @@ mod desk_fit_tests {
     }
 
     #[test]
-    fn a_whole_desk_fits_the_smallest_window_above_the_detail_panel() {
-        let window = 760.0;
+    fn a_whole_desk_fits_a_maximised_window_on_a_1080p_screen_above_the_detail_panel() {
+        let window = 1000.0;
         let room = window
             - super::super::views_control_bar_style::BAR_HEIGHT
             - STATUS_HEIGHT

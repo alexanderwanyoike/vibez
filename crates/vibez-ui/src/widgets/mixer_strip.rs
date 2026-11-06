@@ -507,6 +507,11 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_strip_is_as_wide_as_its_eq_with_the_fader_under_it() {
+        assert_eq!(STRIP_W, EQ_W + PADDING.left + PADDING.right);
+    }
+
+    #[test]
     fn a_send_bank_shows_four_buses_and_clamps_past_the_last() {
         let buses: Vec<_> = (0..6)
             .map(|index| ProjectTrack::new(TrackId::new(), format!("Bus {index}"), 0))
