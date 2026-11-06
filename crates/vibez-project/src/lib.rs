@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use vibez_core::automation::AutomationLane;
 use vibez_core::id::{ClipId, SectionId, TrackId};
 use vibez_core::midi::NoteClipInfo;
-use vibez_core::track::{ClipInfo, TrackInfo};
+use vibez_core::track::{ClipInfo, InstrumentStateInfo, TrackInfo};
 
 pub use vibez_core::perform::SectionLaunchQuantization;
 use vibez_core::perform::{GrooveProfile, SwingAmount};
@@ -170,6 +170,23 @@ impl Project {
             }
         }
         self.sample_rate = sample_rate;
+    }
+
+    /// Whether any clip or device plays decoded audio, which a change of
+    /// sample rate must convert.
+    pub fn holds_audio(&self) -> bool {
+        self.timelines()
+            .any(|(_, timeline)| !timeline.clips.is_empty())
+            || self
+                .tracks
+                .iter()
+                .any(|track| match &track.native_instrument {
+                    Some(InstrumentStateInfo::Sampler { source, .. }) => source.is_some(),
+                    Some(InstrumentStateInfo::DrumRack { pads }) => {
+                        pads.iter().any(|pad| pad.source.is_some())
+                    }
+                    _ => false,
+                })
     }
 
     pub fn timelines(&self) -> impl Iterator<Item = (TimelineLocation, &TimelineInfo)> + '_ {
@@ -369,6 +386,26 @@ mod tests {
             .map(|(_, timeline)| timeline.clips[0].position)
             .collect();
         assert_eq!(positions, [96_000, 48_000, 24_000]);
+    }
+
+    #[test]
+    fn a_project_holds_audio_through_a_clip_or_a_sampled_device() {
+        let mut project = Project::default();
+        assert!(!project.holds_audio());
+
+        let mut sampler = TrackInfo::new("Keys");
+        sampler.native_instrument = Some(InstrumentStateInfo::Sampler {
+            params: Vec::new(),
+            source: Some(MediaSourceRef::LocalFile {
+                path: PathBuf::from("keys.wav"),
+            }),
+        });
+        project.tracks.push(sampler);
+        assert!(project.holds_audio());
+
+        let mut clip_only = Project::default();
+        clip_only.arrange.clips.push(audio_clip_at(0));
+        assert!(clip_only.holds_audio());
     }
 
     #[test]

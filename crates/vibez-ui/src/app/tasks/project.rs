@@ -159,7 +159,7 @@ pub(in crate::app) async fn load_project_async(
     sample_rate: u32,
 ) -> Result<ProjectLoadResult, crate::message::ProjectLoadError> {
     let load_path = path.clone();
-    let (mut project, container_path) = tokio::task::spawn_blocking(move || {
+    let (project, container_path) = tokio::task::spawn_blocking(move || {
         match vibez_project::project_format_v1::detect_project_format(&load_path)
             .map_err(classify_project_format_load_error)?
         {
@@ -181,6 +181,18 @@ pub(in crate::app) async fn load_project_async(
     })
     .await
     .map_err(|err| crate::message::ProjectLoadError::other(format!("load task failed: {err}")))??;
+    Ok(hydrate_project_async(path, project, container_path, dropbox, sample_rate).await)
+}
+
+/// Converts `project` to `sample_rate` and decodes every clip and device
+/// sample it names, from `container_path` when it has Project Media.
+pub(in crate::app) async fn hydrate_project_async(
+    path: PathBuf,
+    mut project: Project,
+    container_path: Option<PathBuf>,
+    dropbox: Option<(Arc<DropboxClient>, DropboxCache)>,
+    sample_rate: u32,
+) -> ProjectLoadResult {
     project.convert_sample_rate(sample_rate);
 
     let mut clips = Vec::new();
@@ -282,7 +294,7 @@ pub(in crate::app) async fn load_project_async(
         }
     }
 
-    Ok(ProjectLoadResult {
+    ProjectLoadResult {
         path,
         project,
         clips,
@@ -290,7 +302,7 @@ pub(in crate::app) async fn load_project_async(
         sampler_samples,
         drum_rack_pad_samples,
         warnings,
-    })
+    }
 }
 
 pub(in crate::app) async fn hydrate_saved_source(
@@ -386,6 +398,39 @@ pub(in crate::app) async fn hydrate_dropbox_source(
     decode_blocking(local_path)
         .await
         .map_err(|e| format!("Skipped '{label}' ({e})"))
+}
+
+/// The open project, counted at the rate it was playing at, bound for `sample_rate`.
+pub(in crate::app) struct SampleRateConversion {
+    pub(in crate::app) project: Project,
+    pub(in crate::app) path: Option<PathBuf>,
+    pub(in crate::app) dirty: bool,
+    pub(in crate::app) sample_rate: u32,
+}
+
+pub(in crate::app) async fn convert_project_sample_rate_async(
+    conversion: SampleRateConversion,
+    dropbox: Option<(Arc<DropboxClient>, DropboxCache)>,
+) -> crate::message::ConvertedProject {
+    let SampleRateConversion {
+        project,
+        path,
+        dirty,
+        sample_rate,
+    } = conversion;
+    let loaded = hydrate_project_async(
+        path.clone().unwrap_or_default(),
+        project,
+        path.clone(),
+        dropbox,
+        sample_rate,
+    )
+    .await;
+    crate::message::ConvertedProject {
+        loaded,
+        path,
+        dirty,
+    }
 }
 
 #[cfg(test)]

@@ -756,6 +756,9 @@ impl App {
             Message::ProjectSaved(result) => {
                 return self.route_project_saved(*result);
             }
+            Message::ProjectSampleRateConverted(converted) => {
+                self.finish_sample_rate_conversion(*converted);
+            }
 
             // -- About --
             message @ (Message::OpenAbout

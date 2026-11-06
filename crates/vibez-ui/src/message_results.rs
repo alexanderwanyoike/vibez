@@ -314,6 +314,15 @@ pub struct PreparedBrowserImport {
     pub source: MediaSourceRef,
 }
 
+/// The open project reloaded at the device's new sample rate, with the path
+/// and unsaved state it had before.
+#[derive(Debug, Clone)]
+pub struct ConvertedProject {
+    pub loaded: ProjectLoadResult,
+    pub path: Option<PathBuf>,
+    pub dirty: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct ProjectLoadResult {
     pub path: PathBuf,
