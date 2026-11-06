@@ -700,6 +700,27 @@ mod tests {
     }
 
     #[test]
+    fn resampled_audio_keeps_every_sound_at_the_same_time() {
+        let mut channel = vec![0.0f32; 44_100];
+        channel[4_410] = 1.0;
+        let audio = DecodedAudio {
+            channels: vec![channel],
+            sample_rate: 44_100,
+        };
+
+        let resampled = resample_audio(&audio, 48_000).unwrap();
+
+        assert_eq!(resampled.num_frames(), 48_000);
+        let peak = resampled.channels[0]
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.abs().total_cmp(&b.1.abs()))
+            .map(|(frame, _)| frame)
+            .unwrap();
+        assert!(peak.abs_diff(4_800) <= 1, "click landed on frame {peak}");
+    }
+
+    #[test]
     fn resample_empty_audio() {
         let audio = DecodedAudio {
             channels: vec![],
