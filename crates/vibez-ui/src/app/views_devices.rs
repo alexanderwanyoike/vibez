@@ -742,7 +742,9 @@ fn flexible_share(available: f32, used: f32, cards: usize, shares: usize) -> f32
 
 #[cfg(test)]
 mod width_tests {
-    use super::{flexible_share, Flexible, NativeInstrument, CHAIN_END_ROOM, CHAIN_SPACING};
+    use super::{
+        add_hint, flexible_share, Flexible, NativeInstrument, CHAIN_END_ROOM, CHAIN_SPACING,
+    };
     use crate::widgets::device_chrome::CardWidths;
 
     const EFFECTS: [(Flexible, CardWidths); 14] = [
@@ -844,6 +846,12 @@ mod width_tests {
         let share = flexible_share(1_000.0, fixed, 3, 2);
         let cards_end = fixed + 2.0 * share + 2.0 * CHAIN_SPACING;
         assert_eq!(1_000.0 - cards_end, CHAIN_SPACING + CHAIN_END_ROOM);
+    }
+
+    #[test]
+    fn the_end_hint_offers_instruments_only_where_the_add_menu_does() {
+        assert_eq!(add_hint(true), "Right-click to add an instrument or effect");
+        assert_eq!(add_hint(false), "Right-click to add an effect");
     }
 
     #[test]
