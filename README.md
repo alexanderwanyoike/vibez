@@ -8,7 +8,7 @@ vibez is built around **Perform**, **Arrange** and **Mix**. Jam out a tune in
 Perform, polish the arrangement in Arrange, then focus on the mix. Capture
 records a live performance into the arrangement so you can edit it afterwards.
 
-![Perform: launching Sections from the pad grid](docs/perform-sections.png)
+![Perform: launching Sections from the pad grid, with the Browser and a Sampler](docs/perform-sections.png)
 
 ## Perform
 
@@ -30,7 +30,7 @@ same editor you use in Arrange, then launch it from a pad grid.
   copy, paste and drag them, record a take into the selected cell with F4, and
   Play picks up whatever was playing when you stopped
 
-![The clip launcher: a column of clips per track, several playing](docs/perform-clips.png)
+![The clip launcher: a column of clips per track, with the selected clip's waveform below](docs/perform-clips.png)
 
 The pad grid works from the computer keyboard, so you do not need a MIDI
 controller to start. MIDI input can play notes into the selected instrument
@@ -46,7 +46,7 @@ you can edit afterwards. Captured material keeps no reference back to its
 Sections, so editing a Section later never rewrites a take you already
 recorded.
 
-![A captured performance written into the Arrangement, with a channel EQ below](docs/arrange-capture.png)
+![A captured performance written into the Arrangement, with the track's EQ and Echo below](docs/arrange-capture.png)
 
 Everything Capture writes is material you could have drawn by hand, so the rest
 of Arrange applies to it unchanged:
@@ -74,7 +74,7 @@ Mix is a real console rather than a row of faders. Every channel has its own
 EQ, the master is an actual channel, and the device rack below follows the
 selected one.
 
-![Mix: channel strips with EQ and sends, two returns, the master, and the device rack](docs/mix.png)
+![Mix: channel strips with EQ, the master, and the device rack below](docs/mix.png)
 
 - **Channel strips** with a four-band EQ, named sends, pan, a fader with a dB
   scale, LED metering, mute and solo
