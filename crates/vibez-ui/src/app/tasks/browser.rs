@@ -123,7 +123,13 @@ pub(in crate::app) async fn prepare_browser_audition_async(
     audio: Arc<vibez_core::audio_buffer::DecodedAudio>,
     plan: crate::state::BrowserAuditionPlan,
     project_bpm: f64,
+    sample_rate: u32,
 ) -> Result<Arc<vibez_core::audio_buffer::DecodedAudio>, String> {
+    let audio = if audio.sample_rate == sample_rate {
+        audio
+    } else {
+        Arc::new(super::at_engine_rate(Arc::unwrap_or_clone(audio), sample_rate).await?)
+    };
     let crate::state::BrowserAuditionPlan::Warp { source_bpm } = plan else {
         return Ok(audio);
     };

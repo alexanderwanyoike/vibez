@@ -288,9 +288,13 @@ impl App {
         plan: crate::state::BrowserAuditionPlan,
     ) -> Task<Message> {
         let project_bpm = self.state.transport.bpm;
+        let sample_rate = self.state.transport.sample_rate;
         let generation = self.state.browser.begin_audition_preparation(&source);
         let mode = match plan {
-            crate::state::BrowserAuditionPlan::Raw => AuditionMode::Raw,
+            crate::state::BrowserAuditionPlan::Raw => {
+                self.state.status_text = format!("Resampling audition to {sample_rate} Hz...");
+                AuditionMode::Raw
+            }
             crate::state::BrowserAuditionPlan::Warp { source_bpm } => {
                 self.state.status_text =
                     format!("Fitting {source_bpm:.1} BPM loop to project {project_bpm:.1} BPM...");
@@ -298,7 +302,7 @@ impl App {
             }
         };
         Task::perform(
-            prepare_browser_audition_async(raw, plan, project_bpm),
+            prepare_browser_audition_async(raw, plan, project_bpm, sample_rate),
             move |result| Message::BrowserAuditionReady {
                 source: source.clone(),
                 generation,
@@ -315,13 +319,13 @@ impl App {
         raw: Arc<DecodedAudio>,
     ) -> Task<Message> {
         match self.state.browser.audition_playback_plan(&source) {
-            crate::state::BrowserAuditionPlan::Raw => {
+            crate::state::BrowserAuditionPlan::Raw
+                if raw.sample_rate == self.state.transport.sample_rate =>
+            {
                 self.start_browser_audition(raw, AuditionMode::Raw);
                 Task::none()
             }
-            plan @ crate::state::BrowserAuditionPlan::Warp { .. } => {
-                self.prepare_browser_audition(source, raw, plan)
-            }
+            plan => self.prepare_browser_audition(source, raw, plan),
         }
     }
 
