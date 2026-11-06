@@ -254,6 +254,17 @@ fn extension_hint(path: &Path) -> Hint {
 // Resampling
 // ---------------------------------------------------------------------------
 
+/// `audio` at `sample_rate`, moved through untouched when it is already there.
+pub fn into_sample_rate(
+    audio: DecodedAudio,
+    sample_rate: u32,
+) -> Result<DecodedAudio, FileIoError> {
+    if audio.sample_rate == sample_rate || sample_rate == 0 {
+        return Ok(audio);
+    }
+    resample_audio(&audio, sample_rate)
+}
+
 /// Resample `audio` to `target_sample_rate` using a high-quality sinc
 /// interpolation (rubato `SincFixedIn`).
 ///

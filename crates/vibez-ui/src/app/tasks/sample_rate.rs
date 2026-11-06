@@ -8,11 +8,11 @@ pub(in crate::app) async fn at_engine_rate(
     audio: DecodedAudio,
     sample_rate: u32,
 ) -> Result<DecodedAudio, String> {
-    if audio.sample_rate == sample_rate || sample_rate == 0 {
+    if audio.sample_rate == sample_rate {
         return Ok(audio);
     }
     super::run_off_ui_thread("Resample", move || {
-        vibez_audio_io::file_io::resample_audio(&audio, sample_rate)
+        vibez_audio_io::file_io::into_sample_rate(audio, sample_rate)
             .map_err(|error| error.to_string())
     })
     .await?
