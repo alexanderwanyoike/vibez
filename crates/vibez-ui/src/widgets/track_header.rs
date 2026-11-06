@@ -162,6 +162,9 @@ pub struct ChannelNameStyle {
     pub size: u16,
     pub font: iced::Font,
     pub color: iced::Color,
+    /// Cut the name with an ellipsis to this width, where the name's room
+    /// is fixed.
+    pub fit_width: Option<f32>,
 }
 
 /// Inline-editable channel name shared by arrangement headers and
@@ -172,7 +175,12 @@ pub fn view_editable_channel_name<'a>(
     editing: Option<&'a str>,
     style: ChannelNameStyle,
 ) -> Element<'a, Message> {
-    let ChannelNameStyle { size, font, color } = style;
+    let ChannelNameStyle {
+        size,
+        font,
+        color,
+        fit_width,
+    } = style;
     if let Some(edit_text) = editing {
         text_input("Name", edit_text)
             .on_input(|value| Message::View(ViewMsg::EditNameText(value)))
@@ -182,7 +190,11 @@ pub fn view_editable_channel_name<'a>(
             .width(Length::Fill)
             .into()
     } else {
-        button(text(&track.name).size(size).font(font).color(color))
+        let name = match fit_width {
+            Some(width) => crate::typography::fit(&track.name, width, f32::from(size), font),
+            None => track.name.clone(),
+        };
+        button(text(name).size(size).font(font).color(color))
             .on_press(Message::View(ViewMsg::StartEditingTrackName {
                 track_id: track.id,
                 name: track.name.clone(),
@@ -232,6 +244,7 @@ pub fn view_track_header<'a>(
             size: 13,
             font: crate::typography::TRACK_TITLE,
             color: name_color,
+            fit_width: None,
         },
     );
 

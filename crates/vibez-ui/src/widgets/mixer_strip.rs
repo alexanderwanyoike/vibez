@@ -40,6 +40,12 @@ const PADDING: iced::Padding = iced::Padding {
     left: 8.0,
 };
 const HEADER_H: f32 = 20.0;
+const HEADER_SPACING: f32 = 6.0;
+const NAME_SIZE: f32 = 12.0;
+const NUMBER_SIZE: f32 = 9.5;
+const NUMBER_PAD_X: f32 = 5.0;
+/// The remove button: a 9 px icon and its padding.
+const REMOVE_W: f32 = 15.0;
 const GAP: f32 = 6.0;
 const TITLE_H: f32 = 12.0;
 const PAN_H: f32 = 24.0;
@@ -127,10 +133,10 @@ pub fn view_mixer_strip<'a>(
     let number = container(
         text(view.number.clone())
             .font(PERFORM_TECH)
-            .size(9.5)
+            .size(NUMBER_SIZE)
             .color(th::cap_ink()),
     )
-    .padding([1, 5])
+    .padding([1.0, NUMBER_PAD_X])
     .style(move |_: &Theme| container::Style {
         background: Some(track_color.into()),
         border: iced::Border {
@@ -140,7 +146,7 @@ pub fn view_mixer_strip<'a>(
         ..Default::default()
     });
     let header = row![number, channel_name(track, is_master, &view), remove]
-        .spacing(6)
+        .spacing(HEADER_SPACING)
         .height(HEADER_H)
         .align_y(iced::Alignment::Center);
 
@@ -355,9 +361,10 @@ fn channel_name<'a>(
     view: &MixerStripView<'a>,
 ) -> Element<'a, Message> {
     let style = ChannelNameStyle {
-        size: 12,
+        size: NAME_SIZE as u16,
         font: PERFORM_LABEL,
         color: th::text(),
+        fit_width: Some(name_room(&view.number)),
     };
     let name = if is_master {
         text(&track.name)
@@ -374,6 +381,14 @@ fn channel_name<'a>(
         .align_y(iced::alignment::Vertical::Center)
         .clip(true)
         .into()
+}
+
+/// The width the header leaves a channel's name beside its `number` and
+/// remove button.
+fn name_room(number: &str) -> f32 {
+    let number_w = crate::widgets::device_controls::text_width(number, NUMBER_SIZE, PERFORM_TECH)
+        + 2.0 * NUMBER_PAD_X;
+    EQ_W - number_w - REMOVE_W - 2.0 * HEADER_SPACING
 }
 
 /// Send rows on every strip, whatever the number of buses; more buses are

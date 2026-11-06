@@ -528,6 +528,7 @@ impl App {
                         size: 11,
                         font: iced::Font::DEFAULT,
                         color: name_color,
+                        fit_width: None,
                     },
                 )
             };
