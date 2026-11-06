@@ -290,13 +290,7 @@ impl App {
                     .size(12)
                     .font(crate::typography::TRACK_TITLE)
                     .color(th::text()),
-                horizontal_space(),
             ]
-            .push_maybe((tab == DetailPanelTab::Devices).then(|| {
-                text(super::views_devices::add_hint(track.kind.is_midi()))
-                    .size(11)
-                    .color(th::text_muted())
-            }))
             .spacing(10)
             .align_y(iced::Alignment::Center);
 
