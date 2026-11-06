@@ -224,7 +224,7 @@ pub fn view_mixer_strip<'a>(
                 track.mute.then(th::mute_active),
                 Message::set_track_mute(track.id),
             ));
-        foot = foot.push(buttons);
+        foot = foot.push(container(buttons).center_x(Length::Fill));
     }
     let fader = FaderWidget::new(track.id, track.gain, track_color);
     let meter = console::LedMeter {
