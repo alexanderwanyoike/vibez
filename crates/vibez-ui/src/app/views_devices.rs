@@ -204,7 +204,7 @@ impl App {
         let spacing = CHAIN_SPACING * cards.len().saturating_sub(1) as f32;
         let mut chain_width = used + spacing;
         if shares > 0 {
-            let share = (available_width - used - spacing) / shares as f32;
+            let share = flexible_share(available_width, used, cards.len(), shares);
             if let Some(native) = native {
                 let width = native.card_width(share, available_width);
                 chain_width += width;
@@ -725,6 +725,13 @@ impl App {
             .width(Length::Fill);
         crate::widgets::device_chrome::shell(header, body, PLACEHOLDER_W)
     }
+}
+
+/// The width each of `shares` flexible cards gets in a section `available`
+/// wide, beside `cards` cards in all whose fixed ones take `used`.
+fn flexible_share(available: f32, used: f32, cards: usize, shares: usize) -> f32 {
+    let spacing = CHAIN_SPACING * cards.saturating_sub(1) as f32;
+    (available - used - spacing) / shares as f32
 }
 
 #[cfg(test)]
