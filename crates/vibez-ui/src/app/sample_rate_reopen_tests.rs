@@ -36,10 +36,8 @@ fn percs_at_two_seconds(track_id: vibez_core::id::TrackId, source: &Path) -> Cli
     }
 }
 
-#[tokio::test]
-async fn an_audio_clip_stays_on_its_bar_when_the_device_rate_differs() {
-    let directory = tempfile::tempdir().unwrap();
-    let source = directory.path().join("percs.wav");
+async fn saved_percs_project(directory: &Path) -> (PathBuf, vibez_core::id::TrackId) {
+    let source = directory.join("percs.wav");
     std::fs::copy(
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../vibez-audio-io/tests/fixtures/mono-44100-s16.wav"),
@@ -57,10 +55,17 @@ async fn an_audio_clip_stays_on_its_bar_when_the_device_rate_differs() {
         .arrange
         .clips
         .push(percs_at_two_seconds(track_id, &source));
-    let path = directory.path().join("Percs.vzp");
+    let path = directory.join("Percs.vzp");
     save_project_async(path.clone(), None, project)
         .await
         .unwrap();
+    (path, track_id)
+}
+
+#[tokio::test]
+async fn an_audio_clip_stays_on_its_bar_when_the_device_rate_differs() {
+    let directory = tempfile::tempdir().unwrap();
+    let (path, track_id) = saved_percs_project(directory.path()).await;
 
     let mut app = super::test_support::app();
     app.state.transport.sample_rate = DEVICE_RATE;
