@@ -255,6 +255,23 @@ mod tests {
     }
 
     #[test]
+    fn a_kit_s_samples_load_at_the_device_s_sample_rate() {
+        let folder = tempfile::tempdir().unwrap();
+        let mut pads = crate::state::default_drum_rack_pads();
+        pads[0].audio = Some(Arc::new(vibez_core::audio_buffer::DecodedAudio {
+            channels: vec![vec![0.25; 44_100]],
+            sample_rate: 44_100,
+        }));
+        let (kit, samples) = kit_from_rack("Mine", &pads).unwrap();
+        write_kit_folder(folder.path(), &kit, &samples).unwrap();
+
+        let (_, staged) = read_kit_folder(folder.path(), 48_000).unwrap();
+
+        assert_eq!(staged[0].audio.sample_rate, 48_000);
+        assert_eq!(staged[0].audio.num_frames(), 48_000);
+    }
+
+    #[test]
     fn a_kit_naming_a_missing_sample_still_loads_its_other_pads() {
         let folder = tempfile::tempdir().unwrap();
         let kit = FACTORY_KITS[1].kit();
