@@ -381,7 +381,7 @@ pub struct FaderWidget {
     pub track_id: TrackId,
     /// Current gain value (0.0..2.0).
     pub value: f32,
-    /// Fill color (track color).
+    /// The track colour, on the slot's border and the cap's notch.
     pub fill_color: Color,
 }
 
@@ -449,36 +449,20 @@ impl canvas::Program<Message> for FaderWidget {
                 theme::text_dim(),
             );
         }
-        // Glow rail: a slim recessed rail, lit in the track colour from the
-        // handle down, with a soft column of light round the lit part. The
-        // glow is mixed opaque against the strip: the renderer blends alpha
-        // in linear light, which would make a faint alpha glow glare.
-        let glow = |amount: f32| theme::blend(theme::bg_elevated(), self.fill_color, amount);
+        // A recessed slot ringed in the track colour; the handle shows the
+        // level, so the slot is not lit.
         let handle_y = y_of(self.value);
-        let rail_bottom = CAP_H / 2.0 + travel;
-        let lit = (rail_bottom - handle_y).max(0.0);
-        frame.fill_rectangle(
-            iced::Point::new(slot_x - 6.0, handle_y),
-            iced::Size::new(12.0, lit),
-            glow(0.14),
+        let slot = canvas::Path::rounded_rectangle(
+            iced::Point::new(slot_x - 2.5, CAP_H / 2.0 - 2.5),
+            iced::Size::new(5.0, travel + 5.0),
+            2.5.into(),
         );
-        frame.fill(
-            &canvas::Path::rounded_rectangle(
-                iced::Point::new(slot_x - 2.0, CAP_H / 2.0 - 2.0),
-                iced::Size::new(4.0, travel + 4.0),
-                2.0.into(),
-            ),
-            theme::display_bg(),
-        );
-        frame.fill_rectangle(
-            iced::Point::new(slot_x - 2.0, handle_y),
-            iced::Size::new(4.0, lit),
-            canvas::gradient::Linear::new(
-                iced::Point::new(slot_x, rail_bottom),
-                iced::Point::new(slot_x, handle_y),
-            )
-            .add_stop(0.0, glow(0.2))
-            .add_stop(1.0, self.fill_color),
+        frame.fill(&slot, theme::display_bg());
+        frame.stroke(
+            &slot,
+            canvas::Stroke::default()
+                .with_color(self.fill_color)
+                .with_width(1.0),
         );
 
         // A light neutral cap that reads on any strip, with a shadow under
