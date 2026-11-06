@@ -407,13 +407,13 @@ impl FaderWidget {
 /// How dark the shadow under the fader cap is.
 const CAP_SHADOW: f32 = 0.35;
 /// The handle's height; its centre travels the rest.
-pub const CAP_H: f32 = 22.0;
+pub const CAP_H: f32 = 30.0;
 /// Grip grooves either side of the cap's centre line, as offsets from it.
-const CAP_GROOVES: [f32; 4] = [-6.0, -3.5, 3.5, 6.0];
+const CAP_GROOVES: [f32; 4] = [-8.0, -4.5, 4.5, 8.0];
 /// How far the grooves and the centre line sit in from the cap's sides.
 const CAP_INSET: f32 = 3.0;
 /// Room left of the slot for the dB scale.
-const SCALE_W: f32 = 18.0;
+const SCALE_W: f32 = 16.0;
 const SCALE_DB: [f32; 7] = [6.0, 0.0, -5.0, -10.0, -20.0, -40.0, -60.0];
 
 /// The cap's grip grooves: cut darker into a light cap, and lighter into the
@@ -492,7 +492,8 @@ impl canvas::Program<Message> for FaderWidget {
         // A console cap: light and neutral so it reads on any strip, ringed
         // darker, gripped with grooves round a centre line in the track
         // colour.
-        let handle_w = (w - SCALE_W - 8.0).clamp(14.0, 26.0);
+        // As wide as the room right of the slot allows, centred on it.
+        let handle_w = (2.0 * (w - slot_x) - 2.0).clamp(14.0, 30.0);
         let handle = iced::Rectangle::new(
             iced::Point::new(slot_x - handle_w / 2.0, handle_y - CAP_H / 2.0),
             iced::Size::new(handle_w, CAP_H),
