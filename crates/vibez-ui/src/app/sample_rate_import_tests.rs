@@ -89,3 +89,47 @@ async fn a_file_picked_for_a_clip_or_device_decodes_at_the_device_rate() {
     assert_eq!(audio.sample_rate, DEVICE_RATE);
     assert_eq!(audio.num_frames(), DEVICE_RATE as usize);
 }
+
+#[tokio::test]
+async fn a_raw_or_warp_audition_plays_audio_at_the_device_rate() {
+    let raw = prepare_browser_audition_async(
+        one_second_at_file_rate(),
+        crate::state::BrowserAuditionPlan::Raw,
+        120.0,
+        DEVICE_RATE,
+    )
+    .await
+    .unwrap();
+    let warped = prepare_browser_audition_async(
+        one_second_at_file_rate(),
+        crate::state::BrowserAuditionPlan::Warp { source_bpm: 120.0 },
+        60.0,
+        DEVICE_RATE,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        (raw.sample_rate, raw.num_frames()),
+        (DEVICE_RATE, DEVICE_RATE as usize)
+    );
+    assert_eq!(
+        (warped.sample_rate, warped.num_frames()),
+        (DEVICE_RATE, 2 * DEVICE_RATE as usize)
+    );
+}
+
+#[test]
+fn a_raw_audition_at_another_rate_is_prepared_before_it_plays() {
+    let mut app = super::test_support::app();
+    app.state.transport.sample_rate = DEVICE_RATE;
+    let source = MediaSourceRef::LocalFile {
+        path: PathBuf::from("/samples/loop.wav"),
+    };
+    app.state.browser.select_source(source.clone());
+
+    let _ = app.play_browser_mode(source, one_second_at_file_rate());
+
+    assert!(app.state.browser.audition_audio.is_none());
+    assert!(app.state.browser.audition_loading);
+}
