@@ -15,6 +15,10 @@ use super::*;
 const CHAIN_SPACING: f32 = 6.0;
 const PLACEHOLDER_W: f32 = 150.0;
 
+/// Room kept after the last card, so a full chain still has somewhere to
+/// right-click for the add menu.
+const CHAIN_END_ROOM: f32 = 140.0;
+
 /// Native devices that lay themselves out from the width they are given.
 #[derive(Clone, Copy, Debug)]
 enum Flexible {
@@ -201,10 +205,10 @@ impl App {
             )));
         }
         let shares = flexible.len() + usize::from(native.is_some());
-        let spacing = CHAIN_SPACING * cards.len().saturating_sub(1) as f32;
-        let mut chain_width = used + spacing;
+        let spacing = CHAIN_SPACING * cards.len() as f32;
+        let mut chain_width = used + spacing + CHAIN_END_ROOM;
         if shares > 0 {
-            let share = (available_width - used - spacing) / shares as f32;
+            let share = flexible_share(available_width, used, cards.len(), shares);
             if let Some(native) = native {
                 let width = native.card_width(share, available_width);
                 chain_width += width;
@@ -268,6 +272,18 @@ impl App {
             }
         }
         let devices_row = row(cards.into_iter().flatten())
+            .push(
+                container(
+                    text(add_hint(track.kind.is_midi()))
+                        .size(10)
+                        .color(th::text_muted())
+                        .align_x(iced::alignment::Horizontal::Center)
+                        .width(Length::Fill),
+                )
+                .padding([0, 8])
+                .width(CHAIN_END_ROOM)
+                .center_y(Length::Fill),
+            )
             .spacing(CHAIN_SPACING)
             .height(Length::Fill);
 
@@ -727,9 +743,29 @@ impl App {
     }
 }
 
+/// How to add a device to a channel. Instruments are only offered where
+/// the add menu has its Instruments tab.
+fn add_hint(is_midi: bool) -> &'static str {
+    if is_midi {
+        "Right-click to add an instrument or effect"
+    } else {
+        "Right-click to add an effect"
+    }
+}
+
+/// The width each of `shares` flexible cards gets in a section `available`
+/// wide, beside `cards` cards in all whose fixed ones take `used`, and the
+/// chain's end room.
+fn flexible_share(available: f32, used: f32, cards: usize, shares: usize) -> f32 {
+    let spacing = CHAIN_SPACING * cards as f32;
+    (available - used - spacing - CHAIN_END_ROOM) / shares as f32
+}
+
 #[cfg(test)]
 mod width_tests {
-    use super::{Flexible, NativeInstrument};
+    use super::{
+        add_hint, flexible_share, Flexible, NativeInstrument, CHAIN_END_ROOM, CHAIN_SPACING,
+    };
     use crate::widgets::device_chrome::CardWidths;
 
     const EFFECTS: [(Flexible, CardWidths); 14] = [
@@ -823,6 +859,20 @@ mod width_tests {
                 widths.expanded
             );
         }
+    }
+
+    #[test]
+    fn a_full_chain_leaves_room_after_its_last_card_to_right_click() {
+        let fixed = 200.0;
+        let share = flexible_share(1_000.0, fixed, 3, 2);
+        let cards_end = fixed + 2.0 * share + 2.0 * CHAIN_SPACING;
+        assert_eq!(1_000.0 - cards_end, CHAIN_SPACING + CHAIN_END_ROOM);
+    }
+
+    #[test]
+    fn the_end_hint_offers_instruments_only_where_the_add_menu_does() {
+        assert_eq!(add_hint(true), "Right-click to add an instrument or effect");
+        assert_eq!(add_hint(false), "Right-click to add an effect");
     }
 
     #[test]
