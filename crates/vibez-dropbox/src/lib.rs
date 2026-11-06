@@ -11,6 +11,7 @@
 
 pub mod api;
 pub mod cache;
+pub mod catalog;
 pub mod oauth;
 pub mod settings;
 pub mod types;

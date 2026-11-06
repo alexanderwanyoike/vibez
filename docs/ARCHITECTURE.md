@@ -58,6 +58,7 @@ without waiting for that tick.
 | `vibez-project` | Project file format (JSON) |
 | `vibez-dropbox` | Dropbox sample browser backend |
 | `vibez-ui` | The app: iced GUI, domain modules, services |
+| `vibez-mcp` | MCP server: agents build, bounce and save projects with the app's own types |
 
 ## The UI: domains and one router
 
