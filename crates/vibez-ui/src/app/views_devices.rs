@@ -743,9 +743,9 @@ impl App {
     }
 }
 
-/// What the room at the chain's end says. Instruments are only offered where
+/// How to add a device to a channel. Instruments are only offered where
 /// the add menu has its Instruments tab.
-fn add_hint(is_midi: bool) -> &'static str {
+pub(super) fn add_hint(is_midi: bool) -> &'static str {
     if is_midi {
         "Right-click to add an instrument or effect"
     } else {

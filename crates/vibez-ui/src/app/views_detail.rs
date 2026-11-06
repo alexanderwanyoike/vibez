@@ -293,7 +293,7 @@ impl App {
                 horizontal_space(),
             ]
             .push_maybe((tab == DetailPanelTab::Devices).then(|| {
-                text("Right-click to add a device")
+                text(super::views_devices::add_hint(track.kind.is_midi()))
                     .size(11)
                     .color(th::text_muted())
             }))
