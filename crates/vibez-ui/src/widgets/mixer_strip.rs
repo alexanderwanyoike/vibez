@@ -42,7 +42,7 @@ const PADDING: iced::Padding = iced::Padding {
 };
 const HEADER_H: f32 = 20.0;
 const GAP: f32 = 6.0;
-const COLUMN_GAP: f32 = 8.0;
+const COLUMN_GAP: f32 = 4.0;
 const TITLE_H: f32 = 12.0;
 const PAN_H: f32 = 24.0;
 const BUTTONS_H: f32 = 17.0;
@@ -224,7 +224,7 @@ pub fn view_mixer_strip<'a>(
                 .width(Length::Fixed(METER_W))
                 .height(Length::Fill),
         ]
-        .spacing(3)
+        .spacing(2)
         .height(Length::Fill),
         container(
             text(format_gain_db(track.gain))

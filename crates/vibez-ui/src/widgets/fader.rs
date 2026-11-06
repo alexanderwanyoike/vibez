@@ -210,6 +210,15 @@ mod tests {
     use super::*;
     use crate::domains::arrangement::ArrangementMsg;
     use iced::widget::canvas::Program;
+
+    #[test]
+    fn cap_grooves_cut_darker_into_a_light_cap_and_lighter_into_a_dark_one() {
+        let light = Color::from_rgb(0.86, 0.86, 0.86);
+        let dark = Color::from_rgb(0.3, 0.27, 0.22);
+        let lum = crate::theme::relative_luminance;
+        assert!(lum(groove_colour(light)) < lum(light));
+        assert!(lum(groove_colour(dark)) > lum(dark));
+    }
     use iced::{Point, Size};
 
     fn press(cursor_at: Point) -> (canvas::Event, mouse::Cursor) {
@@ -381,7 +390,7 @@ pub struct FaderWidget {
     pub track_id: TrackId,
     /// Current gain value (0.0..2.0).
     pub value: f32,
-    /// Fill color (track color).
+    /// The track colour, on the slot's border and the cap's notch.
     pub fill_color: Color,
 }
 
@@ -398,10 +407,25 @@ impl FaderWidget {
 /// How dark the shadow under the fader cap is.
 const CAP_SHADOW: f32 = 0.35;
 /// The handle's height; its centre travels the rest.
-pub const CAP_H: f32 = 14.0;
+pub const CAP_H: f32 = 30.0;
+/// Grip grooves either side of the cap's centre line, as offsets from it.
+const CAP_GROOVES: [f32; 4] = [-8.0, -4.5, 4.5, 8.0];
+/// How far the grooves and the centre line sit in from the cap's sides.
+const CAP_INSET: f32 = 3.0;
 /// Room left of the slot for the dB scale.
-const SCALE_W: f32 = 18.0;
+const SCALE_W: f32 = 16.0;
 const SCALE_DB: [f32; 7] = [6.0, 0.0, -5.0, -10.0, -20.0, -40.0, -60.0];
+
+/// The cap's grip grooves: cut darker into a light cap, and lighter into the
+/// dark cap light themes use.
+fn groove_colour(cap: Color) -> Color {
+    let ink = if theme::relative_luminance(cap) > 0.18 {
+        Color::BLACK
+    } else {
+        Color::WHITE
+    };
+    theme::blend(cap, ink, 0.4)
+}
 
 /// State for mouse dragging.
 #[derive(Debug, Default)]
@@ -449,41 +473,27 @@ impl canvas::Program<Message> for FaderWidget {
                 theme::text_dim(),
             );
         }
-        // Glow rail: a slim recessed rail, lit in the track colour from the
-        // handle down, with a soft column of light round the lit part. The
-        // glow is mixed opaque against the strip: the renderer blends alpha
-        // in linear light, which would make a faint alpha glow glare.
-        let glow = |amount: f32| theme::blend(theme::bg_elevated(), self.fill_color, amount);
+        // A recessed slot ringed in the track colour; the handle shows the
+        // level, so the slot is not lit.
         let handle_y = y_of(self.value);
-        let rail_bottom = CAP_H / 2.0 + travel;
-        let lit = (rail_bottom - handle_y).max(0.0);
-        frame.fill_rectangle(
-            iced::Point::new(slot_x - 6.0, handle_y),
-            iced::Size::new(12.0, lit),
-            glow(0.14),
+        let slot = canvas::Path::rounded_rectangle(
+            iced::Point::new(slot_x - 2.5, CAP_H / 2.0 - 2.5),
+            iced::Size::new(5.0, travel + 5.0),
+            2.5.into(),
         );
-        frame.fill(
-            &canvas::Path::rounded_rectangle(
-                iced::Point::new(slot_x - 2.0, CAP_H / 2.0 - 2.0),
-                iced::Size::new(4.0, travel + 4.0),
-                2.0.into(),
-            ),
-            theme::display_bg(),
-        );
-        frame.fill_rectangle(
-            iced::Point::new(slot_x - 2.0, handle_y),
-            iced::Size::new(4.0, lit),
-            canvas::gradient::Linear::new(
-                iced::Point::new(slot_x, rail_bottom),
-                iced::Point::new(slot_x, handle_y),
-            )
-            .add_stop(0.0, glow(0.2))
-            .add_stop(1.0, self.fill_color),
+        frame.fill(&slot, theme::display_bg());
+        frame.stroke(
+            &slot,
+            canvas::Stroke::default()
+                .with_color(self.fill_color)
+                .with_width(1.0),
         );
 
-        // A light neutral cap that reads on any strip, with a shadow under
-        // it and the track colour only in its notch.
-        let handle_w = (w - SCALE_W - 8.0).clamp(14.0, 26.0);
+        // A console cap: light and neutral so it reads on any strip, ringed
+        // darker, gripped with grooves round a centre line in the track
+        // colour.
+        // As wide as the room right of the slot allows, centred on it.
+        let handle_w = (2.0 * (w - slot_x) - 2.0).clamp(14.0, 30.0);
         let handle = iced::Rectangle::new(
             iced::Point::new(slot_x - handle_w / 2.0, handle_y - CAP_H / 2.0),
             iced::Size::new(handle_w, CAP_H),
@@ -496,16 +506,26 @@ impl canvas::Program<Message> for FaderWidget {
             ),
             theme::with_alpha(Color::BLACK, CAP_SHADOW),
         );
-        frame.fill(
-            &canvas::Path::rounded_rectangle(handle.position(), handle.size(), 3.0.into()),
-            theme::fader_handle(),
+        let cap = canvas::Path::rounded_rectangle(handle.position(), handle.size(), 3.0.into());
+        frame.fill(&cap, theme::fader_handle());
+        frame.stroke(
+            &cap,
+            canvas::Stroke::default()
+                .with_color(theme::blend(theme::fader_handle(), Color::BLACK, 0.55))
+                .with_width(1.0),
         );
-        frame.fill(
-            &canvas::Path::rounded_rectangle(
-                iced::Point::new(slot_x - handle_w / 2.0 + 4.0, handle_y - 1.0),
-                iced::Size::new(handle_w - 8.0, 2.0),
-                1.0.into(),
-            ),
+        let groove_w = handle_w - 2.0 * CAP_INSET;
+        let groove = groove_colour(theme::fader_handle());
+        for offset in CAP_GROOVES {
+            frame.fill_rectangle(
+                iced::Point::new(handle.x + CAP_INSET, handle_y + offset - 0.5),
+                iced::Size::new(groove_w, 1.0),
+                groove,
+            );
+        }
+        frame.fill_rectangle(
+            iced::Point::new(handle.x + CAP_INSET, handle_y - 1.0),
+            iced::Size::new(groove_w, 2.0),
             self.fill_color,
         );
 
