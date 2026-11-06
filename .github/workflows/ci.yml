@@ -1,10 +1,20 @@
 name: CI
 
+# Nothing under these paths is compiled, and no check is required to merge,
+# so a docs or site only change skips the build instead of leaving it pending.
 on:
   push:
     branches: [main, dev, 'codex/epic-*']
+    paths-ignore:
+      - 'site/**'
+      - 'docs/**'
+      - '**.md'
   pull_request:
     branches: [main, dev, 'feature/**', 'codex/epic-*']
+    paths-ignore:
+      - 'site/**'
+      - 'docs/**'
+      - '**.md'
 
 env:
   CARGO_TERM_COLOR: always
