@@ -9,7 +9,7 @@ introduces a new convention adds it here in the same PR.
 Two ground rules frame everything below:
 
 - The audio callback is lock-free and allocation-free. Anything reachable
-  from `AudioEngine::process` must neither allocate nor block, and every
+  from `AudioEngine::process_block` must neither allocate nor block, and every
   `EngineCommand` variant must be safe to drop on the audio thread.
 - Comments state the why the code cannot express (constraints, invariants,
   rationale). Never what the code does.
