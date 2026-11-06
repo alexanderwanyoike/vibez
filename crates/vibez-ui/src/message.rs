@@ -246,6 +246,7 @@ pub enum Message {
         result: Box<Result<ProjectLoadResult, ProjectLoadError>>,
     },
     ProjectSaved(Box<ProjectSaveCompleted>),
+    ProjectSampleRateConverted(Box<ConvertedProject>),
 
     // Window close protection. The window is configured not to exit on its
     // own close request, so every one of these arrives here first.

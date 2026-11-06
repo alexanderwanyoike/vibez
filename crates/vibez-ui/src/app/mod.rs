@@ -210,6 +210,7 @@ mod plugins;
 mod project_export;
 mod project_io;
 mod project_replay;
+mod project_sample_rate;
 mod project_sections;
 mod project_serialization;
 mod save_runtime;

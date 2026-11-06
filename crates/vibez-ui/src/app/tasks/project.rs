@@ -400,6 +400,39 @@ pub(in crate::app) async fn hydrate_dropbox_source(
         .map_err(|e| format!("Skipped '{label}' ({e})"))
 }
 
+/// The open project, counted at the rate it was playing at, bound for `sample_rate`.
+pub(in crate::app) struct SampleRateConversion {
+    pub(in crate::app) project: Project,
+    pub(in crate::app) path: Option<PathBuf>,
+    pub(in crate::app) dirty: bool,
+    pub(in crate::app) sample_rate: u32,
+}
+
+pub(in crate::app) async fn convert_project_sample_rate_async(
+    conversion: SampleRateConversion,
+    dropbox: Option<(Arc<DropboxClient>, DropboxCache)>,
+) -> crate::message::ConvertedProject {
+    let SampleRateConversion {
+        project,
+        path,
+        dirty,
+        sample_rate,
+    } = conversion;
+    let loaded = hydrate_project_async(
+        path.clone().unwrap_or_default(),
+        project,
+        path.clone(),
+        dropbox,
+        sample_rate,
+    )
+    .await;
+    crate::message::ConvertedProject {
+        loaded,
+        path,
+        dirty,
+    }
+}
+
 #[cfg(test)]
 mod project_load_error_tests {
     use super::*;

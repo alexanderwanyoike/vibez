@@ -449,17 +449,22 @@ impl App {
                 };
                 self.state.audio_settings.active_backend = Some(backend);
                 self.state.audio_settings.active_output_name = active_output_name.clone();
+                let at_previous_rate = (actual_sample_rate != self.state.transport.sample_rate)
+                    .then(|| self.project_for_save());
                 self.state.audio_settings.sample_rate = actual_sample_rate;
                 self.state.audio_settings.buffer_size = buffer_size;
                 self.state.transport.sample_rate = actual_sample_rate;
                 self.state.audio_stream_health = AudioStreamHealth::Running;
                 self.send_command(EngineCommand::SetSampleRate(actual_sample_rate));
+                let conversion = at_previous_rate.map_or_else(Task::none, |project| {
+                    self.convert_project_sample_rate(project)
+                });
                 self.state.audio_settings.remember_current_backend();
                 self.persist_ui_settings();
                 if let Err(error) = self.sync_audio_input_runtime() {
                     self.state.status_text =
                         format!("Audio Output changed, but Audio Input could not reopen — {error}");
-                    return Some(Task::none());
+                    return Some(conversion);
                 }
                 self.state.status_text = if applied_request == 0 {
                     format!(
@@ -473,7 +478,7 @@ impl App {
                         active_output_name.as_deref().unwrap_or("System Default")
                     )
                 };
-                Some(Task::none())
+                Some(conversion)
             }
             Err(error) => {
                 eprintln!("vibez: audio configuration rejected: {error}");
