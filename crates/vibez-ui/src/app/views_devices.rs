@@ -736,7 +736,7 @@ fn flexible_share(available: f32, used: f32, cards: usize, shares: usize) -> f32
 
 #[cfg(test)]
 mod width_tests {
-    use super::{Flexible, NativeInstrument};
+    use super::{flexible_share, Flexible, NativeInstrument, CHAIN_END_ROOM, CHAIN_SPACING};
     use crate::widgets::device_chrome::CardWidths;
 
     const EFFECTS: [(Flexible, CardWidths); 14] = [
@@ -830,6 +830,14 @@ mod width_tests {
                 widths.expanded
             );
         }
+    }
+
+    #[test]
+    fn a_full_chain_leaves_room_after_its_last_card_to_right_click() {
+        let fixed = 200.0;
+        let share = flexible_share(1_000.0, fixed, 3, 2);
+        let cards_end = fixed + 2.0 * share + 2.0 * CHAIN_SPACING;
+        assert_eq!(1_000.0 - cards_end, CHAIN_SPACING + CHAIN_END_ROOM);
     }
 
     #[test]
