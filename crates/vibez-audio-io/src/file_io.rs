@@ -288,44 +288,41 @@ pub fn resample_audio(
     let mut resampler = SincFixedIn::<f32>::new(ratio, 1.1, params, chunk_size, num_channels)?;
 
     let total_input_frames = audio.num_frames();
-    let mut output_channels: Vec<Vec<f32>> = vec![Vec::new(); num_channels];
+    let wanted = vibez_core::time::frames_at_rate(
+        total_input_frames as u64,
+        audio.sample_rate,
+        target_sample_rate,
+    ) as usize;
+    let mut output_channels: Vec<Vec<f32>> =
+        vec![Vec::with_capacity(wanted + chunk_size * 2); num_channels];
     let mut pos = 0;
 
-    while pos < total_input_frames {
-        let frames_needed = resampler.input_frames_next();
-        let end = (pos + frames_needed).min(total_input_frames);
-        let available = end - pos;
-
-        // Build the input chunk for each channel.
-        let input_chunk: Vec<Vec<f32>> = (0..num_channels)
-            .map(|ch| {
-                let src = &audio.channels[ch];
-                let mut chunk = Vec::with_capacity(frames_needed);
-                // Copy available frames.
-                chunk.extend_from_slice(&src[pos..end]);
-                // Zero-pad if we have fewer frames than the resampler needs.
-                chunk.resize(frames_needed, 0.0);
-                chunk
-            })
-            .collect();
-
-        let resampled = resampler.process(&input_chunk, None)?;
-
+    while output_channels[0].len() < wanted {
+        let resampled = if pos < total_input_frames {
+            let frames_needed = resampler.input_frames_next();
+            let end = (pos + frames_needed).min(total_input_frames);
+            let input_chunk: Vec<&[f32]> = audio
+                .channels
+                .iter()
+                .map(|channel| &channel[pos..end])
+                .collect();
+            let full = end - pos == frames_needed;
+            pos = end;
+            if full {
+                resampler.process(&input_chunk, None)?
+            } else {
+                resampler.process_partial(Some(&input_chunk), None)?
+            }
+        } else {
+            resampler.process_partial::<&[f32]>(None, None)?
+        };
         for (ch, resampled_ch) in resampled.iter().enumerate() {
             output_channels[ch].extend_from_slice(resampled_ch);
         }
-
-        pos += available;
-
-        // If we had to zero-pad, we're at the end of the input.
-        if available < frames_needed {
-            break;
-        }
     }
-
-    // Flush any remaining samples from the resampler.
-    // Use process_partial with no input to push out delayed samples.
-    // (SincFixedIn introduces some latency.)
+    for channel in &mut output_channels {
+        channel.truncate(wanted);
+    }
 
     Ok(DecodedAudio {
         channels: output_channels,
