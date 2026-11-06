@@ -180,16 +180,19 @@ pub fn view_mixer_strip<'a>(
     } else {
         let pan = KnobWidget::new(track.id, track.pan, track_color);
         foot = foot.push(
-            row![
-                canvas(pan).width(PAN_H).height(PAN_H),
-                text(format!("PAN {}", format_pan(track.pan)))
-                    .font(PERFORM_LABEL)
-                    .size(8.5)
-                    .color(th::text_dim()),
-            ]
-            .spacing(6)
-            .height(PAN_H)
-            .align_y(iced::Alignment::Center),
+            container(
+                row![
+                    canvas(pan).width(PAN_H).height(PAN_H),
+                    text(format!("PAN {}", format_pan(track.pan)))
+                        .font(PERFORM_LABEL)
+                        .size(8.5)
+                        .color(th::text_dim()),
+                ]
+                .spacing(6)
+                .align_y(iced::Alignment::Center),
+            )
+            .center_x(Length::Fill)
+            .height(PAN_H),
         );
         let mut buttons = row![].spacing(3).height(BUTTONS_H);
         if role == StripRole::Track {
