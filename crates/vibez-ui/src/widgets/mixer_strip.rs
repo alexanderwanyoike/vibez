@@ -47,8 +47,10 @@ const BUTTONS_H: f32 = 17.0;
 const DB_H: f32 = 14.0;
 const METER_W: f32 = 10.0;
 /// The fader's travel at the strip's natural height; a taller Mix card
-/// gives it the extra.
+/// gives it the extra, and a shorter one takes it back down to
+/// [`SHORTEST_FADER_H`].
 const NATURAL_FADER_H: f32 = 180.0;
+const SHORTEST_FADER_H: f32 = 96.0;
 
 /// Per-render inputs that are not part of the project-owned channel itself.
 pub struct MixerStripView<'a> {
@@ -94,6 +96,12 @@ pub fn strip_height(buses: usize) -> f32 {
         + NATURAL_FADER_H
         + DB_H
         + PADDING.bottom
+}
+
+/// The shortest a strip gets before the desk scrolls: everything whole, the
+/// fader at its shortest.
+pub fn shortest_strip_height(buses: usize) -> f32 {
+    strip_height(buses) - (NATURAL_FADER_H - SHORTEST_FADER_H)
 }
 
 /// Render a single mixer channel strip. `buses` drives the send

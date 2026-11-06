@@ -11,7 +11,9 @@ use crate::message::Message;
 use crate::state::ContextMenuTarget;
 use crate::theme as th;
 use crate::widgets::control_style;
-use crate::widgets::mixer_strip::{strip_height, view_mixer_strip, MixerStripView, StripRole};
+use crate::widgets::mixer_strip::{
+    shortest_strip_height, strip_height, view_mixer_strip, MixerStripView, StripRole,
+};
 use crate::widgets::quiet_scroll;
 
 use super::*;
@@ -37,8 +39,9 @@ impl App {
                 .into();
         }
 
-        // On a window too short for the whole desk it scrolls up and down,
-        // so no strip is ever squashed.
+        // Only a window too short for the shortest desk above the detail
+        // card's minimum scrolls it up and down; past that no strip is
+        // squashed.
         let desk = column![]
             .push_maybe(self.view_send_bank_bar())
             .push(self.view_desk());
@@ -57,20 +60,26 @@ impl App {
 
     /// The whole desk's height: the bank switch when shown, then the strips.
     pub(super) fn mix_desk_height(&self) -> f32 {
-        let buses = self.state.project_tracks.buses.len();
-        let bank_bar = if crate::widgets::mixer_strip::send_banks(buses) > 1 {
-            BANK_BAR_H
-        } else {
-            0.0
-        };
-        bank_bar + DESK_PADDING + strip_height(buses)
+        self.mix_desk_chrome() + strip_height(self.state.project_tracks.buses.len())
     }
 
-    /// Every strip's height on the desk, stretched to fill a Mix card
-    /// taller than the desk.
+    /// The desk with every strip at its shortest.
+    fn mix_shortest_desk_height(&self) -> f32 {
+        self.mix_desk_chrome() + shortest_strip_height(self.state.project_tracks.buses.len())
+    }
+
+    /// The desk round its strips: the bank switch when shown, and padding.
+    fn mix_desk_chrome(&self) -> f32 {
+        let banks = crate::widgets::mixer_strip::send_banks(self.state.project_tracks.buses.len());
+        let bank_bar = if banks > 1 { BANK_BAR_H } else { 0.0 };
+        bank_bar + DESK_PADDING
+    }
+
+    /// Every strip's height on the desk, filling the Mix card down to the
+    /// strips' shortest.
     pub(super) fn mix_strip_height(&self) -> f32 {
-        let spare = self.mix_workspace_height() - self.mix_desk_height();
-        strip_height(self.state.project_tracks.buses.len()) + spare.max(0.0)
+        let buses = self.state.project_tracks.buses.len();
+        (self.mix_workspace_height() - self.mix_desk_chrome()).max(shortest_strip_height(buses))
     }
 
     /// The work column under the chrome row, down to the gap above the
@@ -92,10 +101,17 @@ impl App {
         let column = self.mix_column_height();
         let detail = crate::shell_layout::mix_detail_height(
             column,
-            self.mix_desk_height(),
+            self.mix_desk_heights(),
             self.state.view.mix_detail_panel_height,
         );
         (column - crate::shell_layout::PANE_GAP - detail).max(0.0)
+    }
+
+    fn mix_desk_heights(&self) -> crate::shell_layout::DeskHeights {
+        crate::shell_layout::DeskHeights {
+            natural: self.mix_desk_height(),
+            shortest: self.mix_shortest_desk_height(),
+        }
     }
 
     /// The Mix detail card height a drag on the divider asks for with the
@@ -103,7 +119,7 @@ impl App {
     pub(super) fn mix_detail_drag_height(&self, cursor_y: f32) -> f32 {
         crate::shell_layout::mix_detail_height(
             self.mix_column_height(),
-            self.mix_desk_height(),
+            self.mix_desk_heights(),
             Some(crate::shell_layout::detail_height_at(
                 cursor_y,
                 self.state.view.window_height,
