@@ -1,6 +1,5 @@
-//! A mix desk channel strip folded into two columns: the V250 EQ, the sends,
-//! pan and SEL/S/M stacked on the left, and the fader with its meter running
-//! the strip's whole height beside them.
+//! A mix desk channel strip in one column: the V250 EQ, the sends, pan and
+//! SEL/S/M, then the fader with its meter at the foot.
 
 use iced::widget::{button, canvas, column, container, row, text, Space};
 use iced::{Color, Element, Length, Theme};
@@ -29,7 +28,7 @@ pub enum StripRole {
     Master,
 }
 
-pub const STRIP_W: f32 = 172.0;
+pub const STRIP_W: f32 = EQ_W + PADDING.left + PADDING.right;
 const CARD_RADIUS: f32 = 8.0;
 const SELECTION_LINE_H: f32 = 2.0;
 /// How far a selected strip's card leans toward the text colour.
@@ -42,12 +41,14 @@ const PADDING: iced::Padding = iced::Padding {
 };
 const HEADER_H: f32 = 20.0;
 const GAP: f32 = 6.0;
-const COLUMN_GAP: f32 = 8.0;
 const TITLE_H: f32 = 12.0;
 const PAN_H: f32 = 24.0;
 const BUTTONS_H: f32 = 17.0;
 const DB_H: f32 = 14.0;
 const METER_W: f32 = 10.0;
+/// The fader's travel at the strip's natural height; a taller Mix card
+/// gives it the extra.
+const MIN_FADER_H: f32 = 180.0;
 
 /// Per-render inputs that are not part of the project-owned channel itself.
 pub struct MixerStripView<'a> {
@@ -75,8 +76,7 @@ const SEND_KNOB: f32 = 20.0;
 /// master leave the same room so every strip is the same height.
 const SENDS_H: f32 = TITLE_H + SENDS_PER_BANK as f32 * SEND_ROW_H;
 
-/// A strip's height with `buses` send knobs on each track strip. The fader
-/// runs beside everything else, so this is the left column's height.
+/// A strip's natural height with `buses` send knobs on each track strip.
 pub fn strip_height(buses: usize) -> f32 {
     let sends = if buses == 0 { 0.0 } else { SENDS_H + GAP };
     PADDING.top
@@ -90,6 +90,9 @@ pub fn strip_height(buses: usize) -> f32 {
         + PAN_H
         + GAP
         + BUTTONS_H
+        + GAP
+        + MIN_FADER_H
+        + DB_H
         + PADDING.bottom
 }
 
@@ -133,15 +136,15 @@ pub fn view_mixer_strip<'a>(
         .height(HEADER_H)
         .align_y(iced::Alignment::Center);
 
-    let mut left = column![
+    let mut strip = column![
+        header,
         container(legend("EQ")).height(TITLE_H),
         strip_eq::view_strip_eq(track)
     ]
-    .spacing(GAP)
-    .width(EQ_W);
+    .spacing(GAP);
     match role {
         StripRole::Track if !buses.is_empty() => {
-            left = left.push(view_sends(
+            strip = strip.push(view_sends(
                 track,
                 buses,
                 view.send_bank,
@@ -155,7 +158,7 @@ pub fn view_mixer_strip<'a>(
             } else {
                 "OUTPUT"
             };
-            left = left.push(container(legend(label)).height(SENDS_H));
+            strip = strip.push(container(legend(label)).height(SENDS_H));
         }
         StripRole::Track | StripRole::Bus | StripRole::Master => {}
     }
@@ -206,18 +209,12 @@ pub fn view_mixer_strip<'a>(
             ));
         foot = foot.push(buttons);
     }
-    let left = left.push(
-        container(foot)
-            .height(Length::Fill)
-            .align_y(iced::alignment::Vertical::Bottom),
-    );
-
     let fader = FaderWidget::new(track.id, track.gain, track_color);
     let meter = console::LedMeter {
         peak_l: view.peaks.0,
         peak_r: view.peaks.1,
     };
-    let fader_column = column![
+    let fader_block = column![
         row![
             canvas(fader).width(Length::Fill).height(Length::Fill),
             canvas(meter)
@@ -237,23 +234,18 @@ pub fn view_mixer_strip<'a>(
     ]
     .width(Length::Fill)
     .height(Length::Fill);
+    let strip = strip.push(foot).push(fader_block);
 
     let selected = view.selected;
     let body = container(
         column![
             selection_line(selected.then_some(track_color)),
-            column![
-                header,
-                row![left, fader_column]
-                    .spacing(COLUMN_GAP)
-                    .height(Length::Fill)
-            ]
-            .spacing(GAP)
-            .padding(iced::Padding {
-                top: PADDING.top - SELECTION_LINE_H,
-                ..PADDING
-            })
-            .height(Length::Fill),
+            strip
+                .padding(iced::Padding {
+                    top: PADDING.top - SELECTION_LINE_H,
+                    ..PADDING
+                })
+                .height(Length::Fill),
         ]
         .width(Length::Fixed(STRIP_W))
         .height(Length::Fill),
