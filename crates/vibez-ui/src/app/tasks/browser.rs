@@ -77,20 +77,22 @@ pub(in crate::app) async fn decode_and_analyse_async(
 
 pub(in crate::app) async fn decode_analyse_and_stage_local_async(
     path: PathBuf,
+    sample_rate: u32,
 ) -> Result<(crate::message::AnalysedBrowserAudio, MediaSourceRef), String> {
     let name = path
         .file_name()
         .map(|value| value.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let (audio, source) = decode_and_stage_local_async(path).await?;
+    let (audio, source) = decode_and_stage_local_async(path, sample_rate).await?;
     let analysed = analyse_browser_audio_async(audio, name).await?;
     Ok((analysed, source))
 }
 
 pub(in crate::app) async fn decode_and_stage_local_async(
     path: PathBuf,
+    sample_rate: u32,
 ) -> Result<(vibez_core::audio_buffer::DecodedAudio, MediaSourceRef), String> {
-    tokio::task::spawn_blocking(move || {
+    let (audio, source) = tokio::task::spawn_blocking(move || {
         // One read feeds both the decoder and the staging copy, so the
         // engine can never play different bytes than the project commits
         // (the file could be replaced between two independent reads).
@@ -110,10 +112,11 @@ pub(in crate::app) async fn decode_and_stage_local_async(
         let source =
             vibez_project::project_format_v1::stage_local_content(&path, &file_name, &content)
                 .map_err(|error| error.to_string())?;
-        Ok((audio, source))
+        Ok::<_, String>((audio, source))
     })
     .await
-    .map_err(|error| format!("decode/stage task failed: {error}"))?
+    .map_err(|error| format!("decode/stage task failed: {error}"))??;
+    Ok((super::at_engine_rate(audio, sample_rate).await?, source))
 }
 
 pub(in crate::app) async fn warp_browser_audition_async(
@@ -135,6 +138,7 @@ pub(in crate::app) async fn prepare_browser_import_audio_async(
     raw: Arc<vibez_core::audio_buffer::DecodedAudio>,
     source: MediaSourceRef,
     project_bpm: f64,
+    sample_rate: u32,
 ) -> Result<
     (
         Arc<vibez_core::audio_buffer::DecodedAudio>,
@@ -143,6 +147,11 @@ pub(in crate::app) async fn prepare_browser_import_audio_async(
     ),
     String,
 > {
+    let raw = if raw.sample_rate == sample_rate {
+        raw
+    } else {
+        Arc::new(super::at_engine_rate(Arc::unwrap_or_clone(raw), sample_rate).await?)
+    };
     if treatment.mode == crate::state::AuditionMode::Raw {
         return Ok((raw, None, source));
     }

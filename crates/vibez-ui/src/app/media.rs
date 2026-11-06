@@ -439,6 +439,7 @@ impl App {
         source: MediaSourceRef,
     ) -> Task<Message> {
         let project_bpm = self.state.transport.bpm;
+        let sample_rate = self.state.transport.sample_rate;
         let treatment = match treatment.resolve_for_analysis(&analysed) {
             Ok(treatment) => treatment,
             Err(error) => {
@@ -454,7 +455,14 @@ impl App {
         let generation = self.browser_import_request.begin();
         let raw = analysed.audio;
         let task = Task::perform(
-            prepare_browser_import_audio_async(target, treatment, raw, source, project_bpm),
+            prepare_browser_import_audio_async(
+                target,
+                treatment,
+                raw,
+                source,
+                project_bpm,
+                sample_rate,
+            ),
             move |result| match result {
                 Ok((audio, original_audio, source)) => Message::BrowserImportPrepared {
                     target: retained_target.clone(),

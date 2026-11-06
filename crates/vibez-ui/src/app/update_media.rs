@@ -152,7 +152,7 @@ impl App {
                 .unwrap_or_default();
             self.state.status_text = format!("Loading {file_name}...");
             return Task::perform(
-                decode_and_stage_local_async(path),
+                decode_and_stage_local_async(path, self.state.transport.sample_rate),
                 move |result| match result {
                     Ok((audio, source)) => Message::SamplerSampleDecoded(
                         track_id,

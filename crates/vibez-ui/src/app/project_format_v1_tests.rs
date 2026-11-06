@@ -94,7 +94,7 @@ async fn supported_format_matrix_catalogs_auditions_imports_and_reopens() {
             .duration_seconds
             .is_some_and(|duration| duration > 0.0));
 
-        let (imported, staged) = decode_and_stage_local_async(source_path.clone())
+        let (imported, staged) = decode_and_stage_local_async(source_path.clone(), sample_rate)
             .await
             .unwrap();
         assert_eq!(
@@ -222,7 +222,9 @@ async fn corrupt_advertised_local_source_never_reaches_staging() {
     let preview_error = decode_local_for_preview_async(source_path.clone())
         .await
         .unwrap_err();
-    let import_error = decode_and_stage_local_async(source_path).await.unwrap_err();
+    let import_error = decode_and_stage_local_async(source_path, 44_100)
+        .await
+        .unwrap_err();
     assert!(!preview_error.is_empty());
     assert!(!import_error.is_empty());
 }
@@ -247,6 +249,7 @@ async fn warp_arrangement_import_reopens_from_project_media_without_local_source
         Arc::clone(&raw),
         source,
         60.0,
+        44_100,
     )
     .await
     .unwrap();
@@ -322,6 +325,7 @@ async fn warp_sampler_import_bakes_heard_audio_into_project_media() {
         raw,
         source,
         60.0,
+        44_100,
     )
     .await
     .unwrap();
@@ -776,6 +780,7 @@ async fn remote_warp_import_reopens_after_cache_clear_without_dropbox() {
         analysed.audio,
         staged,
         60.0,
+        44_100,
     )
     .await
     .unwrap();

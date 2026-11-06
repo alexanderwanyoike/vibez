@@ -83,7 +83,7 @@ impl App {
                     .unwrap_or_default();
                 self.state.status_text = format!("Dropping {name}...");
                 Task::perform(
-                    decode_analyse_and_stage_local_async(path),
+                    decode_analyse_and_stage_local_async(path, self.state.transport.sample_rate),
                     move |result| match result {
                         Ok((analysed, source)) => Message::BrowserSampleDecoded(
                             target.clone(),
@@ -541,7 +541,7 @@ impl App {
             self.state.status_text = format!("Loading {file_name}...");
             let clip_id = ClipId::new();
             return Task::perform(
-                decode_and_stage_local_async(path),
+                decode_and_stage_local_async(path, self.state.transport.sample_rate),
                 move |result| match result {
                     Ok((audio, source)) => Message::ClipAudioDecoded(
                         track_id,
@@ -647,7 +647,7 @@ impl App {
                 .unwrap_or_default();
             self.state.status_text = format!("Loading {file_name}...");
             return Task::perform(
-                decode_and_stage_local_async(path),
+                decode_and_stage_local_async(path, self.state.transport.sample_rate),
                 move |result| match result {
                     Ok((audio, source)) => Message::DrumRackPadSampleDecoded(
                         track_id,
