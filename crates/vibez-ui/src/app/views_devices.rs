@@ -17,7 +17,7 @@ const PLACEHOLDER_W: f32 = 150.0;
 
 /// Room kept after the last card, so a full chain still has somewhere to
 /// right-click for the add menu.
-const CHAIN_END_ROOM: f32 = 120.0;
+const CHAIN_END_ROOM: f32 = 140.0;
 
 /// Native devices that lay themselves out from the width they are given.
 #[derive(Clone, Copy, Debug)]
