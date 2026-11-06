@@ -119,11 +119,14 @@ pub(in crate::app) async fn decode_and_stage_local_async(
     Ok((super::at_engine_rate(audio, sample_rate).await?, source))
 }
 
-pub(in crate::app) async fn warp_browser_audition_async(
+pub(in crate::app) async fn prepare_browser_audition_async(
     audio: Arc<vibez_core::audio_buffer::DecodedAudio>,
-    source_bpm: f64,
+    plan: crate::state::BrowserAuditionPlan,
     project_bpm: f64,
 ) -> Result<Arc<vibez_core::audio_buffer::DecodedAudio>, String> {
+    let crate::state::BrowserAuditionPlan::Warp { source_bpm } = plan else {
+        return Ok(audio);
+    };
     tokio::task::spawn_blocking(move || {
         crate::warp::rewarp_for_load(&audio, source_bpm, project_bpm, 0)
             .ok_or_else(|| "Could not create pitch-preserving WARP Audition".to_string())
