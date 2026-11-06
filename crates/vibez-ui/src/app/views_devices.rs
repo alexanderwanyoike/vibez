@@ -15,8 +15,8 @@ use super::*;
 const CHAIN_SPACING: f32 = 6.0;
 const PLACEHOLDER_W: f32 = 150.0;
 
-/// Empty room kept after the last card, so a full chain still has somewhere
-/// to right-click for the add menu.
+/// Room kept after the last card, so a full chain still has somewhere to
+/// right-click for the add menu.
 const CHAIN_END_ROOM: f32 = 120.0;
 
 /// Native devices that lay themselves out from the width they are given.
@@ -272,7 +272,18 @@ impl App {
             }
         }
         let devices_row = row(cards.into_iter().flatten())
-            .push(iced::widget::Space::with_width(CHAIN_END_ROOM))
+            .push(
+                container(
+                    text(add_hint(track.kind.is_midi()))
+                        .size(10)
+                        .color(th::text_muted())
+                        .align_x(iced::alignment::Horizontal::Center)
+                        .width(Length::Fill),
+                )
+                .padding([0, 8])
+                .width(CHAIN_END_ROOM)
+                .center_y(Length::Fill),
+            )
             .spacing(CHAIN_SPACING)
             .height(Length::Fill);
 
@@ -729,6 +740,16 @@ impl App {
             .padding([8, 12])
             .width(Length::Fill);
         crate::widgets::device_chrome::shell(header, body, PLACEHOLDER_W)
+    }
+}
+
+/// What the room at the chain's end says. Instruments are only offered where
+/// the add menu has its Instruments tab.
+fn add_hint(is_midi: bool) -> &'static str {
+    if is_midi {
+        "Right-click to add an instrument or effect"
+    } else {
+        "Right-click to add an effect"
     }
 }
 
