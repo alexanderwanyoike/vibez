@@ -14,6 +14,15 @@ impl SampleTime {
     }
 }
 
+/// The same instant counted at another sample rate, to the nearest frame.
+pub fn frames_at_rate(frames: u64, from_rate: u32, to_rate: u32) -> u64 {
+    if from_rate == to_rate || from_rate == 0 {
+        return frames;
+    }
+    let (from, to) = (u128::from(from_rate), u128::from(to_rate));
+    ((u128::from(frames) * to + from / 2) / from) as u64
+}
+
 /// Every bar is 4/4 until the Project gains a time signature.
 pub const BEATS_PER_BAR: f64 = 4.0;
 
@@ -123,6 +132,14 @@ mod tests {
         let st = SampleTime::from_seconds(2.5, sr);
         let secs = st.to_seconds(sr);
         assert!((secs - 2.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn frames_at_rate_keeps_the_instant_to_the_nearest_frame() {
+        assert_eq!(frames_at_rate(88_200, 44_100, 48_000), 96_000);
+        assert_eq!(frames_at_rate(96_000, 48_000, 44_100), 88_200);
+        assert_eq!(frames_at_rate(1, 44_100, 48_000), 1);
+        assert_eq!(frames_at_rate(u64::MAX / 2, 48_000, 48_000), u64::MAX / 2);
     }
 
     #[test]
