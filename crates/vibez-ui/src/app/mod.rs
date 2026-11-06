@@ -281,6 +281,8 @@ mod loop_region_persistence_tests;
 #[cfg(test)]
 mod project_format_v1_tests;
 #[cfg(test)]
+mod sample_rate_reopen_tests;
+#[cfg(test)]
 mod track_height_tests;
 
 impl Drop for App {
