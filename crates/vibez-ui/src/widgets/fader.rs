@@ -210,6 +210,15 @@ mod tests {
     use super::*;
     use crate::domains::arrangement::ArrangementMsg;
     use iced::widget::canvas::Program;
+
+    #[test]
+    fn cap_grooves_cut_darker_into_a_light_cap_and_lighter_into_a_dark_one() {
+        let light = Color::from_rgb(0.86, 0.86, 0.86);
+        let dark = Color::from_rgb(0.3, 0.27, 0.22);
+        let lum = crate::theme::relative_luminance;
+        assert!(lum(groove_colour(light)) < lum(light));
+        assert!(lum(groove_colour(dark)) > lum(dark));
+    }
     use iced::{Point, Size};
 
     fn press(cursor_at: Point) -> (canvas::Event, mouse::Cursor) {
