@@ -382,6 +382,7 @@ mod desk_fit_tests {
 
 #[cfg(test)]
 mod divider_tests {
+    use super::{strip_height, DESK_PADDING};
     use crate::domains::view::ViewMsg;
     use crate::message::Message;
     use crate::shell_layout::DETAIL_PANEL_MIN_HEIGHT;
@@ -415,10 +416,17 @@ mod divider_tests {
     }
 
     #[test]
-    fn the_divider_stops_where_the_mixer_still_shows_its_strip_headers() {
+    fn the_divider_stops_where_every_strip_still_shows_whole() {
         let mut app = dragging_in_mix();
         drag_to(&mut app, 60.0);
-        assert_eq!(app.mix_workspace_height(), 120.0);
+        assert_eq!(
+            app.mix_workspace_height(),
+            DESK_PADDING + app.mix_strip_height()
+        );
+        assert!(
+            app.mix_strip_height() < strip_height(0),
+            "the fader gives up its room first"
+        );
     }
 
     #[test]
@@ -435,11 +443,11 @@ mod divider_tests {
     fn both_limits_hold_when_the_window_shrinks_after_a_drag() {
         let mut app = dragging_in_mix();
         drag_to(&mut app, 600.0);
-        app.state.view.window_height = 450.0;
+        app.state.view.window_height = 820.0;
         assert_eq!(
             app.mix_workspace_height(),
-            120.0,
-            "the detail card gives way"
+            DESK_PADDING + app.mix_strip_height(),
+            "the detail card gives way to the shortest whole desk"
         );
         app.state.view.window_height = 300.0;
         assert_eq!(
@@ -458,12 +466,16 @@ mod divider_tests {
             app.mix_strip_height(),
             natural + app.mix_workspace_height() - app.mix_desk_height()
         );
+    }
 
-        drag_to(&mut app, 200.0);
+    #[test]
+    fn a_mix_card_shorter_than_its_desk_shortens_the_fader_instead_of_scrolling() {
+        let mut app = dragging_in_mix();
+        drag_to(&mut app, 600.0);
+        assert!(app.mix_workspace_height() < app.mix_desk_height());
         assert_eq!(
-            app.mix_strip_height(),
-            natural,
-            "a shorter card scrolls the desk instead"
+            DESK_PADDING + app.mix_strip_height(),
+            app.mix_workspace_height()
         );
     }
 }
