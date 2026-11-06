@@ -71,7 +71,10 @@ fn failed_restart_invalidates_cached_latency_without_removing_the_insert() {
         .tracks
         .push(track);
     let (producer, mut consumer) = rtrb::RingBuffer::new(8);
-    app.cmd_tx = crate::domains::EngineCommandQueue::new(producer);
+    app.cmd_tx = crate::domains::EngineCommandQueue::new(
+        producer,
+        vibez_engine::transport_ring::transport_ring().0,
+    );
     app.send_command(EngineCommand::InsertEffect {
         track_id,
         effect_id: id,
@@ -143,7 +146,9 @@ async fn project_save_and_hydration_services_preserve_monitoring_and_bypass() {
             .await
             .unwrap();
         assert!(saved.project.reduced_latency_monitoring);
-        let loaded = load_project_async(path, None).await.unwrap();
+        let loaded = load_project_async(path, None, vibez_core::constants::DEFAULT_SAMPLE_RATE)
+            .await
+            .unwrap();
         assert!(loaded.project.reduced_latency_monitoring);
         assert_eq!(loaded.project.tracks[0].effects[0].id, effect);
         assert!(loaded.project.tracks[0].effects[0].bypass);
@@ -155,6 +160,8 @@ async fn project_save_and_hydration_services_preserve_monitoring_and_bypass() {
         r#"{"name":"Legacy","bpm":120,"sample_rate":48000,"tracks":[],"clips":[],"note_clips":[]}"#,
     )
     .unwrap();
-    let incoming = load_project_async(legacy, None).await.unwrap();
+    let incoming = load_project_async(legacy, None, vibez_core::constants::DEFAULT_SAMPLE_RATE)
+        .await
+        .unwrap();
     assert!(!incoming.project.reduced_latency_monitoring);
 }

@@ -126,7 +126,7 @@ impl canvas::Program<Message> for EchoPlot<'_> {
             frame.fill_text(canvas::Text {
                 content: text,
                 position: at,
-                color: th::text_muted(),
+                color: th::text_dim(),
                 size: 9.0.into(),
                 horizontal_alignment: if right {
                     iced::alignment::Horizontal::Right

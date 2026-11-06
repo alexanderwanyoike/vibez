@@ -129,7 +129,7 @@ impl App {
             self.state.view.workspace,
             self.state.perform.has_selected_timeline(),
             self.state.perform.editor_focus,
-            self.state.position_beats(),
+            self.state.transport.position_beats(),
             self.state.perform.section_editor.edit_cursor_beats(),
         )
     }

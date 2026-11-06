@@ -25,7 +25,7 @@ impl App {
         msg: crate::domains::perform::PerformMsg,
     ) -> Task<Message> {
         self.state.perform.section_record.sync_clock(
-            self.state.transport.playing,
+            self.state.transport.is_playing(),
             self.state.transport.bpm,
             self.state.transport.sample_rate,
         );

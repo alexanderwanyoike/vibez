@@ -4,7 +4,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use vibez_core::id::{ClipId, TrackId};
-use vibez_project::PerformLayout;
+use vibez_core::perform::{ClipLaunchMode, MusicalBoundary};
+use vibez_project::{ClipLaunchOverrides, PerformLayout};
 
 use crate::state::{
     ArrangementSelection, ArrangementTimeline, TimelineEditorState, UiClip, UiNoteClip,
@@ -12,12 +13,17 @@ use crate::state::{
 
 use super::{PerformAction, PerformCtx, PerformEditorFocus, PerformState};
 
+#[path = "clip_launch_options.rs"]
+mod launch_options;
+pub(crate) use launch_options::TrackLaunchOptions;
+
 #[derive(Debug, Clone)]
 pub struct LauncherClip {
     pub id: ClipId,
     pub track_id: TrackId,
     pub row: u32,
     pub timeline: Arc<ArrangementTimeline>,
+    pub launch: ClipLaunchOverrides,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -61,6 +67,9 @@ impl LauncherClip {
 #[derive(Debug, Clone, Default)]
 pub struct ClipStore {
     pub clips: Vec<LauncherClip>,
+    /// Holds only tracks off the defaults, so a saved Project lists exactly
+    /// the tracks someone changed.
+    track_options: HashMap<TrackId, TrackLaunchOptions>,
 }
 
 impl ClipStore {
@@ -239,6 +248,22 @@ pub enum ClipMsg {
         tracks: i32,
         rows: i32,
     },
+    SetLaunchQuantization {
+        track_id: TrackId,
+        quantization: MusicalBoundary,
+    },
+    SetClipLaunchQuantization {
+        clip_id: ClipId,
+        quantization: Option<MusicalBoundary>,
+    },
+    SetLaunchMode {
+        track_id: TrackId,
+        mode: ClipLaunchMode,
+    },
+    SetClipLaunchMode {
+        clip_id: ClipId,
+        mode: Option<ClipLaunchMode>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -258,9 +283,19 @@ impl ClipMsg {
     }
 
     /// Edits that may change nothing: an empty clipboard, an empty cell, a
-    /// track of the other kind. The app records them only once they have.
+    /// track of the other kind, a picker choosing its current value. The app
+    /// records them only once they have.
     pub const fn defers_project_edit(&self) -> bool {
-        matches!(self, Self::Cut | Self::Paste | Self::Drop { .. })
+        matches!(
+            self,
+            Self::Cut
+                | Self::Paste
+                | Self::Drop { .. }
+                | Self::SetLaunchQuantization { .. }
+                | Self::SetClipLaunchQuantization { .. }
+                | Self::SetLaunchMode { .. }
+                | Self::SetClipLaunchMode { .. }
+        )
     }
 }
 
@@ -427,10 +462,10 @@ impl PerformState {
                     let content = Arc::make_mut(&mut clip.timeline).ensure(clip.track_id);
                     if audio {
                         if let Some(part) = content.clips.first_mut() {
-                            part.loop_enabled = !looping;
+                            part.set_loop_enabled(!looping);
                         }
                     } else if let Some(part) = content.note_clips.first_mut() {
-                        part.loop_enabled = !looping;
+                        part.set_loop_enabled(!looping);
                     }
                 }
                 if self.clip_editor.selected == Some(id) {
@@ -573,6 +608,20 @@ impl PerformState {
                 }
             }
             ClipMsg::Delete(id) => clip_launch = self.remove_launcher_clip(id),
+            ClipMsg::SetLaunchQuantization {
+                track_id,
+                quantization,
+            } => self.edit_track_launch(track_id, |options| options.quantization = quantization),
+            ClipMsg::SetClipLaunchQuantization {
+                clip_id,
+                quantization,
+            } => self.edit_clip_launch(clip_id, |launch| launch.quantization = quantization),
+            ClipMsg::SetLaunchMode { track_id, mode } => {
+                self.edit_track_launch(track_id, |options| options.mode = mode)
+            }
+            ClipMsg::SetClipLaunchMode { clip_id, mode } => {
+                self.edit_clip_launch(clip_id, |launch| launch.mode = mode)
+            }
             ClipMsg::MoveWindow { tracks, rows } => {
                 self.clip_editor.first_track = self
                     .clip_editor
@@ -627,6 +676,7 @@ impl LauncherClip {
             track_id,
             row,
             timeline: Arc::new(timeline),
+            launch: self.launch,
         }
     }
 
@@ -664,6 +714,8 @@ impl LauncherClip {
             request_id,
             length_samples,
             looping,
+            launch_mode: Default::default(),
+            start_position: 0,
             source: Box::new(super::sections::prepare_track_source(
                 self.timeline.get(self.track_id),
             )),

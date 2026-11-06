@@ -14,6 +14,7 @@ use crate::domains::param_entry::ValueEntry;
 use crate::message::Message;
 use crate::state::UiEffect;
 use crate::theme as th;
+use crate::widgets::control_style;
 use crate::widgets::device_controls::{heading, rule, vertical_rule, Param};
 use crate::widgets::effect_knob::KnobTarget;
 use crate::widgets::level_meter::{self, LevelMeter};
@@ -25,8 +26,11 @@ const METER_COLUMN_W: f32 = 118.0;
 const HISTORY_MIN_W: f32 = 210.0;
 /// Below this the history is too short to read and is left out.
 const HISTORY_MIN_H: f32 = 64.0;
-/// Input, Gain and Output side by side.
-pub const COMPACT_W: f32 = METER_COLUMN_W * 2.0 + COLUMN_W + 2.0 + PAD * 2.0;
+/// Input, Gain and Output side by side, or the card's header where that
+/// is wider.
+pub const COMPACT_W: f32 = (METER_COLUMN_W * 2.0 + COLUMN_W + 2.0 + PAD * 2.0).max(
+    crate::widgets::device_chrome::header_min_w(crate::widgets::device_chrome::MOST_ACTIONS),
+);
 /// Adds the output level history.
 pub const MEDIUM_W: f32 = COMPACT_W + 1.0 + HISTORY_MIN_W;
 pub const MAX_W: f32 = 820.0;
@@ -34,8 +38,6 @@ pub const MAX_W: f32 = 820.0;
 /// more width before it fits beside the meters of a short card.
 const SHORT_BESIDE_W: f32 = COMPACT_W + 1.0 + 270.0;
 
-const PRESET_ROW_H: f32 = 28.0;
-const FOOTER_H: f32 = 22.0;
 const MAIN_MAX_H: f32 = 150.0;
 const MAIN_MIN_H: f32 = 92.0;
 const ADVANCED_H: f32 = 76.0;
@@ -52,7 +54,7 @@ pub const WIDTHS: crate::widgets::device_chrome::CardWidths =
 /// the main controls or takes their place; the body never scrolls.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Arrangement {
-    /// Advanced and its toggle share the preset row.
+    /// Too short for the main controls' full height.
     Short {
         main: f32,
     },
@@ -72,44 +74,45 @@ pub enum Arrangement {
 }
 
 pub fn arrange(size: Size, advanced: bool) -> Arrangement {
-    let below_preset = (size.height - PRESET_ROW_H - 1.0).max(0.0);
+    let height = size.height.max(0.0);
     let beside = size.width >= MEDIUM_W;
-    if below_preset < MAIN_MIN_H + 1.0 + FOOTER_H {
-        let main = below_preset;
+    if height < MAIN_MIN_H {
+        let main = height;
         return match (advanced, size.width >= SHORT_BESIDE_W) {
             (false, _) => Arrangement::Short { main },
             (true, true) => Arrangement::AdvancedBeside { main },
             (true, false) => Arrangement::AdvancedOnly { main },
         };
     }
-    let main_area = below_preset - FOOTER_H - 1.0;
     if !advanced {
         return Arrangement::Normal {
-            main: main_area.min(MAIN_MAX_H),
+            main: height.min(MAIN_MAX_H),
         };
     }
-    if main_area >= MAIN_MIN_H + 1.0 + ADVANCED_H {
+    if height >= MAIN_MIN_H + 1.0 + ADVANCED_H {
         Arrangement::WithAdvanced {
-            main: (main_area - 1.0 - ADVANCED_H).min(MAIN_MAX_H),
+            main: (height - 1.0 - ADVANCED_H).min(MAIN_MAX_H),
         }
     } else if beside {
         Arrangement::AdvancedBeside {
-            main: main_area.min(MAIN_MAX_H),
+            main: height.min(MAIN_MAX_H),
         }
     } else {
-        Arrangement::AdvancedOnly { main: main_area }
+        Arrangement::AdvancedOnly { main: height }
     }
 }
 
-/// Whether the body is too short for a footer, so Advanced joins the preset row.
-fn footer_fits(height: f32) -> bool {
-    height - PRESET_ROW_H - 1.0 >= MAIN_MIN_H + 1.0 + FOOTER_H
-}
-
-/// Width left for the preset bar in a body of this size.
-pub fn preset_bar_width(size: Size) -> f32 {
-    let disclosure = if footer_fits(size.height) { 0.0 } else { 86.0 };
-    size.width - PAD * 2.0 - disclosure
+/// The card header's Advanced switch.
+pub fn advanced(
+    effect: &UiEffect,
+    open: bool,
+    accent: Color,
+) -> crate::widgets::device_chrome::Action {
+    crate::widgets::device_chrome::advanced(
+        open,
+        Message::GainControl(GainMsg::ToggleAdvanced(effect.id)),
+        accent,
+    )
 }
 
 pub fn view<'a>(
@@ -118,7 +121,6 @@ pub fn view<'a>(
     accent: Color,
     state: &'a GainPanelState,
     entry: Option<&'a ValueEntry>,
-    preset_bar: Element<'a, Message>,
     size: Size,
 ) -> Element<'a, Message> {
     let control_accent = if effect.bypass {
@@ -126,20 +128,7 @@ pub fn view<'a>(
     } else {
         accent
     };
-    let with_footer = footer_fits(size.height);
-    let mut top = row![preset_bar].spacing(6).align_y(Alignment::Center);
-    if !with_footer {
-        top = top
-            .push(Space::with_width(Length::Fill))
-            .push(disclosure(effect, state.advanced));
-    }
-    let mut body = column![
-        container(top)
-            .padding([0.0, PAD])
-            .height(PRESET_ROW_H)
-            .align_y(Alignment::Center),
-        rule(),
-    ];
+    let body = column![];
     let main =
         |height, side| main_controls(track_id, effect, state, entry, control_accent, side, height);
     let advanced =
@@ -149,7 +138,7 @@ pub fn view<'a>(
     } else {
         Side::Empty
     };
-    body = match arrange(size, state.advanced) {
+    let body = match arrange(size, state.advanced) {
         Arrangement::Short { main: height } | Arrangement::Normal { main: height } => {
             body.push(main(height, history))
         }
@@ -160,17 +149,6 @@ pub fn view<'a>(
             .push(advanced(ADVANCED_H)),
         Arrangement::AdvancedOnly { main: height } => body.push(advanced(height)),
     };
-    if with_footer {
-        body = body
-            .push(Space::with_height(Length::Fill))
-            .push(rule())
-            .push(
-                container(disclosure(effect, state.advanced))
-                    .padding([0.0, PAD - 4.0])
-                    .height(FOOTER_H)
-                    .align_y(Alignment::Center),
-            );
-    }
     body.width(Length::Fill).height(Length::Fill).into()
 }
 
@@ -449,31 +427,6 @@ fn phase_toggle<'a>(
     )
 }
 
-fn disclosure<'a>(effect: &UiEffect, open: bool) -> Element<'a, Message> {
-    button(
-        row![
-            text(if open { "\u{25BE}" } else { "\u{25B8}" })
-                .size(9)
-                .color(th::text_dim()),
-            text("Advanced").size(10).color(th::text()),
-        ]
-        .spacing(4)
-        .align_y(Alignment::Center),
-    )
-    .on_press(Message::GainControl(GainMsg::ToggleAdvanced(effect.id)))
-    .padding([2, 4])
-    .style(|_theme: &Theme, status| button::Style {
-        background: matches!(status, button::Status::Hovered | button::Status::Pressed)
-            .then(|| th::bg_hover().into()),
-        border: iced::Border {
-            radius: 3.0.into(),
-            ..Default::default()
-        },
-        ..Default::default()
-    })
-    .into()
-}
-
 fn small_button<'a>(
     label: &'static str,
     message: Message,
@@ -483,22 +436,7 @@ fn small_button<'a>(
     button(text(label).size(9))
         .on_press(message)
         .padding([2, 8])
-        .style(move |_theme: &Theme, status| button::Style {
-            background: Some(
-                if matches!(status, button::Status::Hovered | button::Status::Pressed) {
-                    th::bg_hover().into()
-                } else {
-                    th::bg_dark().into()
-                },
-            ),
-            text_color: if active { accent } else { th::text() },
-            border: iced::Border {
-                color: if active { accent } else { th::border() },
-                width: 1.0,
-                radius: 3.0.into(),
-            },
-            ..Default::default()
-        })
+        .style(control_style::style(active.then_some(accent)))
         .into()
 }
 
@@ -631,20 +569,13 @@ mod tests {
     fn every_supported_size_fits_its_controls_without_scrolling() {
         for width in [COMPACT_W, MEDIUM_W] {
             for height in (60..=400).step_by(4).map(|height| height as f32) {
-                let footer = if footer_fits(height) {
-                    1.0 + FOOTER_H
-                } else {
-                    0.0
-                };
                 for advanced in [false, true] {
                     let used = match arrange(Size::new(width, height), advanced) {
-                        Arrangement::Short { main } => PRESET_ROW_H + 1.0 + main,
-                        Arrangement::Normal { main }
+                        Arrangement::Short { main }
+                        | Arrangement::Normal { main }
                         | Arrangement::AdvancedBeside { main }
-                        | Arrangement::AdvancedOnly { main } => PRESET_ROW_H + 1.0 + main + footer,
-                        Arrangement::WithAdvanced { main } => {
-                            PRESET_ROW_H + 1.0 + main + 1.0 + ADVANCED_H + footer
-                        }
+                        | Arrangement::AdvancedOnly { main } => main,
+                        Arrangement::WithAdvanced { main } => main + 1.0 + ADVANCED_H,
                     };
                     assert!(used <= height + 0.01, "{width}x{height} {advanced}: {used}");
                 }
@@ -661,22 +592,22 @@ mod tests {
             Arrangement::WithAdvanced { main } if main == MAIN_MAX_H
         ));
         assert!(matches!(
-            arrange(medium(200.0), true),
+            arrange(medium(150.0), true),
             Arrangement::AdvancedBeside { .. }
         ));
         assert!(
             matches!(
-                arrange(medium(100.0), true),
+                arrange(medium(80.0), true),
                 Arrangement::AdvancedOnly { .. }
             ),
             "short trims are too wide to sit beside the meters of a medium card"
         );
         assert!(matches!(
-            arrange(Size::new(SHORT_BESIDE_W, 100.0), true),
+            arrange(Size::new(SHORT_BESIDE_W, 80.0), true),
             Arrangement::AdvancedBeside { .. }
         ));
         assert!(matches!(
-            arrange(compact(200.0), true),
+            arrange(compact(150.0), true),
             Arrangement::AdvancedOnly { .. }
         ));
         assert!(matches!(
@@ -684,7 +615,7 @@ mod tests {
             Arrangement::Normal { .. }
         ));
         assert!(matches!(
-            arrange(compact(100.0), false),
+            arrange(compact(80.0), false),
             Arrangement::Short { .. }
         ));
     }

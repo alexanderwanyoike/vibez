@@ -1,15 +1,56 @@
-//! Routes View messages and their Browser/Perform resize side effects.
+//! Routes View messages and their Browser, Perform and track height resize
+//! side effects.
 
 use crate::domains::browser::BrowserMsg;
 use crate::domains::perform::PerformEditorFocus;
 use crate::domains::timeline_editor::TimelineEditorAdapter;
-use crate::domains::view::ViewMsg;
-use crate::state::Workspace;
-use crate::timeline_geometry::{TimelineGeometry, BASE_PIXELS_PER_BEAT};
+use crate::domains::track_heights::{TrackHeightCtx, TrackHeightMsg};
+use crate::domains::view::{GridTarget, ViewCtx, ViewMsg};
+use crate::state::{GridCommand, Workspace};
 
 use super::*;
 
 impl App {
+    fn view_ctx(&self) -> ViewCtx {
+        ViewCtx {
+            total_beats: self.state.total_beats(),
+            song_beats: self.state.song_beats(),
+            lane_width: self.arrange_lane_width(),
+            samples_per_beat: self.state.transport.samples_per_beat(),
+        }
+    }
+
+    pub(super) fn on_grid_shortcut_pressed(&mut self, command: GridCommand) -> Task<Message> {
+        if !self.editor_shortcuts_have_focus() {
+            return Task::none();
+        }
+        let target = if self.focused_clip_editor().is_some() {
+            GridTarget::Clip
+        } else {
+            GridTarget::Arrange
+        };
+        self.update(Message::View(ViewMsg::Grid(target, command)))
+    }
+
+    /// Z and X reach an open clip editor before the Arrange view, as the
+    /// grid shortcuts do.
+    fn clip_editor_zoom(&self, msg: &ViewMsg) -> Option<ViewMsg> {
+        let frame_loop = match msg {
+            ViewMsg::ZoomToSelection => true,
+            ViewMsg::ZoomBack => false,
+            _ => return None,
+        };
+        if !self.editor_shortcuts_have_focus() {
+            return None;
+        }
+        let clip_id = self.focused_clip_editor()?;
+        Some(if frame_loop {
+            ViewMsg::FrameClipEditorLoop(clip_id)
+        } else {
+            ViewMsg::ClipEditorZoomBack(clip_id)
+        })
+    }
+
     fn route_section_timeline_navigation(&mut self, msg: &ViewMsg) -> bool {
         if self.state.view.workspace != Workspace::Perform
             || self.state.perform.editor_focus != PerformEditorFocus::TimelineEditor
@@ -27,36 +68,31 @@ impl App {
         };
         let viewport_width = self.section_timeline_viewport_width();
         let viewport = self.state.perform.section_editor.viewport_mut();
-        match msg {
-            ViewMsg::ZoomIn => {
-                viewport.zoom_around(1.25, viewport_width / 2.0, total_beats, viewport_width)
-            }
-            ViewMsg::ZoomOut => viewport.zoom_around(
-                1.0 / 1.25,
-                viewport_width / 2.0,
-                total_beats,
-                viewport_width,
-            ),
-            ViewMsg::SetZoom(level) => {
-                let factor = level.clamp(0.01, 16.0) / viewport.zoom_level;
-                viewport.zoom_around(factor, viewport_width / 2.0, total_beats, viewport_width);
-            }
-            ViewMsg::ZoomAround { factor, anchor_x } => {
-                viewport.zoom_around(*factor, *anchor_x, total_beats, viewport_width);
-            }
-            ViewMsg::ZoomToFit => {
-                let target_ppb =
-                    TimelineGeometry::fitted(total_beats, viewport_width, 0.0).pixels_per_beat();
-                viewport.zoom_level = (target_ppb / BASE_PIXELS_PER_BEAT).clamp(0.01, 16.0);
-                viewport.scroll_offset_beats = 0.0;
-                viewport.clamp(total_beats, viewport_width);
-            }
-            ViewMsg::ScrollArrangement(delta) => {
-                viewport.scroll_by(*delta, total_beats, viewport_width);
-            }
-            _ => return false,
+        if let ViewMsg::ZoomToFit = msg {
+            viewport.frame(0.0, total_beats, viewport_width);
+            return true;
         }
-        true
+        msg.navigate(viewport, total_beats, viewport_width)
+    }
+
+    /// `cursor_y` is the pointer's window y, which a pointer move reports
+    /// before the view records it.
+    pub(super) fn route_track_height_message(&mut self, msg: TrackHeightMsg, cursor_y: f32) {
+        let track_ids: Vec<_> = self
+            .state
+            .project_tracks
+            .tracks
+            .iter()
+            .map(|track| track.id)
+            .collect();
+        let ctx = TrackHeightCtx {
+            cursor_y,
+            all_tracks: self.state.view.held_modifiers.alt(),
+            track_ids: &track_ids,
+        };
+        if self.state.track_heights.update(msg, ctx).mark_dirty {
+            self.mark_project_dirty();
+        }
     }
 
     pub(super) fn route_view_message(&mut self, msg: ViewMsg) -> Task<Message> {
@@ -84,7 +120,11 @@ impl App {
         }
         let detail_panel_resize = match &msg {
             ViewMsg::CursorMoved(_, y) if self.state.view.detail_panel_resize_active => Some(
-                ViewMsg::ResizeDetailPanel(self.detail_panel_drag_height(*y)),
+                ViewMsg::ResizeDetailPanel(if self.state.view.workspace == Workspace::Mix {
+                    self.mix_detail_drag_height(*y)
+                } else {
+                    self.detail_panel_drag_height(*y)
+                }),
             ),
             ViewMsg::MouseReleased if self.state.view.detail_panel_resize_active => {
                 Some(ViewMsg::EndDetailPanelResize)
@@ -92,9 +132,7 @@ impl App {
             _ => None,
         };
         if let Some(resize_msg) = detail_panel_resize {
-            let ctx = crate::domains::view::ViewCtx {
-                total_beats: self.state.total_beats(),
-            };
+            let ctx = self.view_ctx();
             let action = self.state.view.update(
                 resize_msg,
                 self.state.arrangement.resolve_timeline().editor,
@@ -102,6 +140,20 @@ impl App {
             );
             if action.persist_settings {
                 self.persist_ui_settings();
+            }
+        }
+        if self.state.track_heights.resizing().is_some() {
+            match &msg {
+                ViewMsg::CursorMoved(_, y) => {
+                    self.route_track_height_message(TrackHeightMsg::PointerMoved, *y);
+                }
+                ViewMsg::MouseReleased => {
+                    self.route_track_height_message(
+                        TrackHeightMsg::EndResize,
+                        self.state.view.cursor_y,
+                    );
+                }
+                _ => {}
             }
         }
         let perform_surface_resize = match &msg {
@@ -114,9 +166,7 @@ impl App {
             _ => None,
         };
         if let Some(resize_msg) = perform_surface_resize {
-            let ctx = crate::domains::view::ViewCtx {
-                total_beats: self.state.total_beats(),
-            };
+            let ctx = self.view_ctx();
             let action = self.state.view.update(
                 resize_msg,
                 self.state.arrangement.resolve_timeline().editor,
@@ -144,12 +194,17 @@ impl App {
                 self.state.status_text = status;
             }
         }
+        let msg = self.clip_editor_zoom(&msg).unwrap_or(msg);
         if self.route_section_timeline_navigation(&msg) {
             return Task::none();
         }
-        let ctx = crate::domains::view::ViewCtx {
-            total_beats: self.state.total_beats(),
-        };
+        // Zoom to selection frames the Arrange view, which Perform hides.
+        if self.state.view.workspace == Workspace::Perform
+            && matches!(msg, ViewMsg::ZoomToSelection | ViewMsg::ZoomBack)
+        {
+            return Task::none();
+        }
+        let ctx = self.view_ctx();
         let editor = if self.state.view.workspace == Workspace::Perform
             && (self.state.perform.has_selected_timeline()
                 || self.state.perform.layout == vibez_project::PerformLayout::Clips)
@@ -178,5 +233,67 @@ impl App {
         } else {
             task
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domains::perform::Section;
+    use crate::timeline_geometry::FRAME_MARGIN_PIXELS;
+
+    /// An app showing one Section's timeline in Perform, with the timeline
+    /// focused.
+    fn app_in_a_section() -> App {
+        let mut app = super::super::test_support::app();
+        app.state.view.workspace = Workspace::Perform;
+        let section = Section::new(0);
+        app.state.perform.selected_section = Some(section.id);
+        std::sync::Arc::make_mut(&mut app.state.perform.sections).insert(section);
+        app.state.perform.editor_focus = PerformEditorFocus::TimelineEditor;
+        app
+    }
+
+    #[test]
+    fn section_fit_frames_the_section_inside_the_lane_margin() {
+        let mut app = app_in_a_section();
+        let section_beats = app
+            .state
+            .perform
+            .selected_section
+            .and_then(|id| app.state.perform.sections.by_id(id))
+            .map(|section| section.length_beats)
+            .unwrap();
+
+        let _ = app.update(Message::View(ViewMsg::ZoomToFit));
+
+        let width = app.section_timeline_viewport_width();
+        let end_x = app
+            .state
+            .perform
+            .section_editor
+            .viewport()
+            .geometry()
+            .beat_to_x(section_beats);
+        assert!(
+            end_x <= width - 2.0 * FRAME_MARGIN_PIXELS + 0.01,
+            "the section ends at {end_x} of {width}"
+        );
+        assert!(end_x > width - 4.0 * FRAME_MARGIN_PIXELS, "ends at {end_x}");
+    }
+
+    #[test]
+    fn z_and_x_in_a_section_leave_the_hidden_arrange_view_alone() {
+        let mut app = app_in_a_section();
+        let editor = app.state.perform.section_editor.editor_mut();
+        editor.time_selection_active = true;
+        editor.selection_start_beats = 4.0;
+        editor.selection_end_beats = 8.0;
+        let arrange = app.state.view.viewport;
+
+        let _ = app.update(Message::View(ViewMsg::ZoomToSelection));
+        assert_eq!(app.state.view.viewport, arrange);
+        let _ = app.update(Message::View(ViewMsg::ZoomBack));
+        assert_eq!(app.state.view.viewport, arrange);
     }
 }

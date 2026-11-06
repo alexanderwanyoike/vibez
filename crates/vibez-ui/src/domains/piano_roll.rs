@@ -56,6 +56,13 @@ pub enum PianoRollMsg {
         clip_id: ClipId,
         velocities: Vec<(usize, u8)>,
     },
+    /// Set the length of one or more MIDI Notes as one project edit.
+    /// Invalid note indices are ignored.
+    SetNoteDurations {
+        track_id: TrackId,
+        clip_id: ClipId,
+        durations: Vec<(usize, f64)>,
+    },
     SelectNote(TrackId, ClipId, Option<usize>, bool),
     SelectAllNotes(TrackId, ClipId),
     /// Rubber-band selection: catch every note overlapping the beat span
@@ -164,6 +171,33 @@ fn find_note_clip_mut(
         .note_clips
         .iter_mut()
         .find(|clip| clip.id == clip_id)
+}
+
+/// Apply `edit` to each indexed note of a clip with its value, and send
+/// every note it reached to the engine.
+fn edit_notes<T>(
+    tracks: &mut TimelineContent,
+    engine: &mut impl EngineHandle,
+    track_id: TrackId,
+    clip_id: ClipId,
+    values: impl IntoIterator<Item = (usize, T)>,
+    edit: impl Fn(&mut MidiNote, T),
+) {
+    let Some(clip) = find_note_clip_mut(tracks, track_id, clip_id) else {
+        return;
+    };
+    for (note_index, value) in values {
+        let Some(note) = clip.notes.get_mut(note_index) else {
+            continue;
+        };
+        edit(note, value);
+        engine.send(EngineCommand::EditNote {
+            track_id,
+            clip_id,
+            note_index,
+            note: *note,
+        });
+    }
 }
 
 /// Snap every note start to the grid and sync changed notes to the
@@ -358,26 +392,30 @@ impl PianoRollState {
                 track_id,
                 clip_id,
                 velocities,
-            } => {
-                let mut updates: Vec<(usize, MidiNote)> = Vec::new();
-                if let Some(clip) = find_note_clip_mut(tracks, track_id, clip_id) {
-                    for (note_index, velocity) in velocities {
-                        let Some(note) = clip.notes.get_mut(note_index) else {
-                            continue;
-                        };
-                        note.velocity = velocity.clamp(1, 127);
-                        updates.push((note_index, *note));
-                    }
-                }
-                for (note_index, note) in updates {
-                    engine.send(EngineCommand::EditNote {
-                        track_id,
-                        clip_id,
-                        note_index,
-                        note,
-                    });
-                }
-            }
+            } => edit_notes(
+                tracks,
+                engine,
+                track_id,
+                clip_id,
+                velocities,
+                |note, velocity| {
+                    note.velocity = velocity.clamp(1, 127);
+                },
+            ),
+            PianoRollMsg::SetNoteDurations {
+                track_id,
+                clip_id,
+                durations,
+            } => edit_notes(
+                tracks,
+                engine,
+                track_id,
+                clip_id,
+                durations,
+                |note, duration| {
+                    note.duration_beats = duration;
+                },
+            ),
             PianoRollMsg::SelectNote(track_id, clip_id, note_index, shift_held) => {
                 if let Some(track) = find_track_mut(tracks, track_id) {
                     if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
@@ -535,6 +573,7 @@ impl PianoRollState {
                 }
             }
             PianoRollMsg::DoubleNoteClip(track_id, clip_id) => {
+                let mut sync_data = None;
                 if let Some(track) = find_track_mut(tracks, track_id) {
                     if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
                         let orig_dur = clip.duration_beats;
@@ -554,39 +593,12 @@ impl PianoRollState {
                         if was_full_clip_loop {
                             clip.loop_end_beats = clip.duration_beats;
                         }
-                        let new_duration = clip.duration_beats;
-                        let loop_sync = (
-                            clip.loop_enabled,
-                            clip.loop_start_beats,
-                            clip.loop_end_beats,
-                        );
-
-                        // Send new notes to engine
-                        for note in &cloned_notes {
-                            engine.send(EngineCommand::AddNote {
-                                track_id,
-                                clip_id,
-                                insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(
-                                    *note,
-                                ),
-                            });
-                        }
-                        // The engine clip must grow too, or playback
-                        // still ends at the old boundary and the
-                        // duplicated notes never sound.
-                        engine.send(EngineCommand::SetNoteClipDuration {
-                            track_id,
-                            clip_id,
-                            duration_beats: new_duration,
-                        });
-                        engine.send(EngineCommand::SetNoteClipLoop {
-                            track_id,
-                            clip_id,
-                            enabled: loop_sync.0,
-                            loop_start_beats: loop_sync.1,
-                            loop_end_beats: loop_sync.2,
-                        });
+                        sync_data = Some(clip.clone());
                     }
+                }
+                if let Some(clip) = sync_data {
+                    engine.send(EngineCommand::RemoveNoteClip(track_id, clip_id));
+                    engine.send(clip.add_command(track_id));
                 }
                 action.status = Some("Doubled clip length".to_string());
             }
@@ -617,40 +629,14 @@ impl PianoRollState {
                             clip.loop_start_beats = 0.0;
                             clip.loop_end_beats = 0.0;
 
-                            sync_data = Some((
-                                clip.position_beats,
-                                clip.duration_beats,
-                                clip.notes.clone(),
-                                clip.groove_grid,
-                            ));
+                            sync_data = Some(clip.clone());
                         }
                     }
                 }
                 // Sync to engine outside the mutable borrow
-                if let Some((pos, dur, notes, groove_grid)) = sync_data {
+                if let Some(clip) = sync_data {
                     engine.send(EngineCommand::RemoveNoteClip(track_id, clip_id));
-                    engine.send(EngineCommand::AddNoteClip {
-                        track_id,
-                        insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
-                            clip_id,
-                            pos,
-                            dur,
-                            0.0,
-                            false,
-                            0.0,
-                            0.0,
-                            groove_grid,
-                        ),
-                    });
-                    for note in &notes {
-                        engine.send(EngineCommand::AddNote {
-                            track_id,
-                            clip_id,
-                            insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(
-                                *note,
-                            ),
-                        });
-                    }
+                    engine.send(clip.add_command(track_id));
                 }
                 action.status = Some("Cropped clip to content".to_string());
             }
@@ -662,69 +648,12 @@ impl PianoRollState {
                 clip_id,
                 new_duration_beats,
             } => {
-                let mut sync_data = None;
                 let mut clip_end_beat = None;
                 if let Some(track) = find_track_mut(tracks, track_id) {
                     if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
-                        clip.duration_beats = new_duration_beats;
-                        clip.clamp_start_to_duration();
-
-                        // Keep the loop region inside the clip when
-                        // shrinking. Extending leaves the region
-                        // untouched so the looped pattern repeats to
-                        // fill the new length (the whole point of
-                        // stretching a looped clip).
-                        if clip.loop_enabled {
-                            clip.clamp_loop_to_duration();
-                        }
-
+                        clip.resize(new_duration_beats);
                         clip_end_beat = Some(clip.position_beats + clip.duration_beats);
-                        sync_data = Some((
-                            clip.position_beats,
-                            clip.duration_beats,
-                            clip.notes.clone(),
-                            clip.start_marker_beats,
-                            clip.loop_enabled,
-                            clip.loop_start_beats,
-                            clip.loop_end_beats,
-                            clip.groove_grid,
-                        ));
-                    }
-                }
-                // Sync to engine via Remove+Add+re-add-notes (loop state included atomically)
-                if let Some((
-                    pos,
-                    dur,
-                    notes,
-                    start_marker_beats,
-                    loop_enabled,
-                    loop_start_beats,
-                    loop_end_beats,
-                    groove_grid,
-                )) = sync_data
-                {
-                    engine.send(EngineCommand::RemoveNoteClip(track_id, clip_id));
-                    engine.send(EngineCommand::AddNoteClip {
-                        track_id,
-                        insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
-                            clip_id,
-                            pos,
-                            dur,
-                            start_marker_beats,
-                            loop_enabled,
-                            loop_start_beats,
-                            loop_end_beats,
-                            groove_grid,
-                        ),
-                    });
-                    for note in &notes {
-                        engine.send(EngineCommand::AddNote {
-                            track_id,
-                            clip_id,
-                            insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(
-                                *note,
-                            ),
-                        });
+                        engine.send(clip.bounds_command(track_id));
                     }
                 }
                 if let Some(end_beat) = clip_end_beat {
@@ -733,43 +662,11 @@ impl PianoRollState {
                 action.drag_resize_active = true;
             }
             PianoRollMsg::HalveNoteClip(track_id, clip_id) => {
-                let mut marker_sync = None;
-                if let Some(track) = find_track_mut(tracks, track_id) {
-                    if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
-                        let new_dur = (clip.duration_beats / 2.0).max(0.25);
-                        clip.duration_beats = new_dur;
-                        clip.clamp_start_to_duration();
-                        if clip.loop_enabled {
-                            clip.clamp_loop_to_duration();
-                        }
-                        engine.send(EngineCommand::SetNoteClipDuration {
-                            track_id,
-                            clip_id,
-                            duration_beats: new_dur,
-                        });
-                        marker_sync = Some((
-                            clip.start_marker_beats,
-                            clip.loop_enabled,
-                            clip.loop_start_beats,
-                            clip.loop_end_beats,
-                        ));
-                    }
-                }
-                if let Some((start_marker_beats, enabled, loop_start_beats, loop_end_beats)) =
-                    marker_sync
+                if let Some(clip) = find_track_mut(tracks, track_id)
+                    .and_then(|track| track.note_clips.iter_mut().find(|c| c.id == clip_id))
                 {
-                    engine.send(EngineCommand::SetNoteClipStartMarker {
-                        track_id,
-                        clip_id,
-                        start_marker_beats,
-                    });
-                    engine.send(EngineCommand::SetNoteClipLoop {
-                        track_id,
-                        clip_id,
-                        enabled,
-                        loop_start_beats,
-                        loop_end_beats,
-                    });
+                    clip.resize((clip.duration_beats / 2.0).max(0.25));
+                    engine.send(clip.bounds_command(track_id));
                 }
                 action.status = Some("Halved clip duration".to_string());
             }

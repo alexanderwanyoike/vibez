@@ -264,7 +264,7 @@ fn slice_to_drum_rack_without_markers_leaves_no_partial_track() {
 }
 
 #[test]
-fn audio_loop_region_must_be_ordered_and_inside_the_visible_clip() {
+fn audio_loop_region_must_be_ordered_and_inside_the_source_not_the_clip() {
     let mut arrangement = arrangement_with_tracks(1);
     let (track_id, clip_id) = add_audio_clip(&mut arrangement, 0, 0, 1_000);
     arrangement.tracks[0].clips[0].duration = 400;
@@ -275,7 +275,7 @@ fn audio_loop_region_must_be_ordered_and_inside_the_visible_clip() {
             track_id,
             clip_id,
             loop_start: 200,
-            loop_end: 800,
+            loop_end: 1_200,
         },
         &mut engine,
         ArrangementCtx::default(),
@@ -294,7 +294,7 @@ fn audio_loop_region_must_be_ordered_and_inside_the_visible_clip() {
             track_id,
             clip_id,
             loop_start: 200,
-            loop_end: 400,
+            loop_end: 800,
         },
         &mut engine,
         ArrangementCtx::default(),
@@ -304,7 +304,7 @@ fn audio_loop_region_must_be_ordered_and_inside_the_visible_clip() {
             arrangement.tracks[0].clips[0].loop_start,
             arrangement.tracks[0].clips[0].loop_end
         ),
-        (200, 400)
+        (200, 800)
     );
     assert!(matches!(
         engine.0.as_slice(),
@@ -317,7 +317,7 @@ fn audio_loop_region_must_be_ordered_and_inside_the_visible_clip() {
             track_id,
             clip_id,
             loop_start: 200,
-            loop_end: 400,
+            loop_end: 800,
         },
         &mut engine,
         ArrangementCtx::default(),

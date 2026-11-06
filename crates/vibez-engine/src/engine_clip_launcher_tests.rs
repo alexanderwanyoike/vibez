@@ -19,6 +19,8 @@ fn clip(
         request_id,
         length_samples: samples.len() as u64,
         looping,
+        launch_mode: Default::default(),
+        start_position: 0,
         source: Box::new(PreparedPlaybackSource::new(
             vec![EngineClip {
                 id,
@@ -50,6 +52,8 @@ fn stop(track_id: TrackId) -> Box<PreparedClipPlayback> {
         request_id: 99,
         length_samples: 1,
         looping: false,
+        launch_mode: Default::default(),
+        start_position: 0,
         source: Box::default(),
     })
 }
@@ -926,6 +930,7 @@ fn record_source_start_precedes_its_same_boundary_transition_and_keeps_real_audi
                 clip_id: Some(clip_id),
                 request_id: 11,
                 effective_at_samples: 16,
+                start_position: 0,
                 retired: Some(retired),
             } if *track_id == record_track && *clip_id == id => {
                 assert_eq!(std::ptr::from_ref(retired.as_ref()) as usize, original);
@@ -976,4 +981,271 @@ fn record_source_start_precedes_its_same_boundary_transition_and_keeps_real_audi
     assert_eq!(audio.strong_count(), 1);
     drop(returned);
     assert_eq!(audio.strong_count(), 0);
+}
+#[test]
+fn split_launches_that_start_the_performance_all_begin_together() {
+    let (mut engine, mut commands, _events, a, b) = setup();
+    launch(
+        &mut commands,
+        vec![clip(a, 1, &[0.1; 32], true)],
+        MusicalBoundary::Eighth,
+    );
+    launch(
+        &mut commands,
+        vec![clip(b, 2, &[0.2; 32], true)],
+        MusicalBoundary::OneBar,
+    );
+    let mut output = [0.0; 3];
+    engine.process(&mut output, 1);
+    for got in output {
+        assert!((got - 0.3).abs() < 1e-5, "{output:?}");
+    }
+}
+#[test]
+fn a_running_launch_on_an_eighth_lands_before_the_next_bar() {
+    let (mut engine, mut commands, _events, a, b) = setup();
+    launch(
+        &mut commands,
+        vec![clip(a, 1, &[0.1; 32], true)],
+        MusicalBoundary::OneBar,
+    );
+    engine.process(&mut [0.0; 5], 1);
+    launch(
+        &mut commands,
+        vec![clip(b, 2, &[0.2; 32], true)],
+        MusicalBoundary::Eighth,
+    );
+    let mut output = [0.0; 3];
+    engine.process(&mut output, 1);
+    // 4 samples per beat puts eighth-note boundaries every 2 samples.
+    assert!((output[0] - 0.1).abs() < 1e-5, "{output:?}");
+    assert!((output[1] - 0.3).abs() < 1e-5, "{output:?}");
+}
+fn legato(mut clip: Box<PreparedClipPlayback>) -> Box<PreparedClipPlayback> {
+    clip.launch_mode = vibez_core::perform::ClipLaunchMode::Legato;
+    clip
+}
+fn ramp(base: f32, len: usize) -> Vec<f32> {
+    (0..len).map(|i| base + i as f32 * 0.01).collect()
+}
+fn assert_samples(output: &[f32], expected: &[f32]) {
+    for (got, want) in output.iter().zip(expected) {
+        assert!((got - want).abs() < 1e-5, "{output:?} != {expected:?}");
+    }
+}
+#[test]
+fn a_legato_launch_starts_at_the_outgoing_clips_position() {
+    let (mut engine, mut commands, mut events, a, _b) = setup();
+    launch(
+        &mut commands,
+        vec![clip(a, 1, &ramp(0.0, 16), true)],
+        MusicalBoundary::OneBar,
+    );
+    engine.process(&mut [0.0; 6], 1);
+    launch(
+        &mut commands,
+        vec![legato(clip(a, 2, &ramp(1.0, 16), true))],
+        MusicalBoundary::OneBeat,
+    );
+    let mut output = [0.0; 4];
+    engine.process(&mut output, 1);
+    assert_samples(&output, &[0.06, 0.07, 1.08, 1.09]);
+    assert!(
+        std::iter::from_fn(|| events.pop().ok()).any(|event| matches!(
+            event,
+            EngineEvent::ClipTransitioned {
+                request_id: 2,
+                effective_at_samples: 8,
+                start_position: 8,
+                ..
+            }
+        ))
+    );
+}
+#[test]
+fn a_legato_launch_wraps_the_position_into_a_shorter_clip() {
+    let (mut engine, mut commands, _events, a, _b) = setup();
+    launch(
+        &mut commands,
+        vec![clip(a, 1, &ramp(0.0, 16), true)],
+        MusicalBoundary::OneBar,
+    );
+    engine.process(&mut [0.0; 9], 1);
+    launch(
+        &mut commands,
+        vec![legato(clip(a, 2, &ramp(1.0, 8), true))],
+        MusicalBoundary::OneBeat,
+    );
+    let mut output = [0.0; 4];
+    engine.process(&mut output, 1);
+    assert_samples(&output, &[0.09, 0.10, 0.11, 1.04]);
+}
+#[test]
+fn a_legato_launch_on_a_silent_track_starts_from_the_beginning() {
+    let (mut engine, mut commands, _events, a, b) = setup();
+    launch(
+        &mut commands,
+        vec![clip(b, 1, &[0.0; 16], true)],
+        MusicalBoundary::OneBar,
+    );
+    engine.process(&mut [0.0; 6], 1);
+    launch(
+        &mut commands,
+        vec![legato(clip(a, 2, &ramp(1.0, 16), true))],
+        MusicalBoundary::OneBeat,
+    );
+    let mut output = [0.0; 4];
+    engine.process(&mut output, 1);
+    assert_samples(&output, &[0.0, 0.0, 1.0, 1.01]);
+}
+#[test]
+fn an_immediate_legato_swap_dips_across_small_callbacks() {
+    let a = TrackId::new();
+    let (mut engine, mut commands, _events) =
+        graph_engine(&[routing_channel(a), routing_channel(TrackId::MASTER)]);
+    for command in [
+        EngineCommand::SetSampleRate(48_000),
+        EngineCommand::SetBpm(120.0),
+        EngineCommand::add_track(a),
+    ] {
+        commands.push(command).unwrap();
+    }
+    engine.process(&mut [], 1);
+    launch(
+        &mut commands,
+        vec![clip(a, 1, &[0.5; 48_000], true)],
+        MusicalBoundary::OneBar,
+    );
+    let mut output = vec![0.0; 1_000];
+    engine.process(&mut output, 1);
+    launch(
+        &mut commands,
+        vec![legato(clip(a, 2, &[-0.5; 48_000], true))],
+        MusicalBoundary::Immediate,
+    );
+    for _ in 0..20 {
+        let mut block = [0.0; 16];
+        engine.process(&mut block, 1);
+        output.extend_from_slice(&block);
+    }
+    assert!(
+        (output.last().unwrap() + 0.5).abs() < 1e-5,
+        "the new clip plays"
+    );
+    let step = output
+        .windows(2)
+        .map(|pair| (pair[1] - pair[0]).abs())
+        .fold(0.0, f32::max);
+    assert!(step < 0.05, "{step} step at the swap");
+}
+
+#[test]
+fn a_legato_swap_dips_the_audio_around_the_boundary_instead_of_clicking() {
+    let a = TrackId::new();
+    let (mut engine, mut commands, _events) =
+        graph_engine(&[routing_channel(a), routing_channel(TrackId::MASTER)]);
+    for command in [
+        EngineCommand::SetSampleRate(48_000),
+        EngineCommand::SetBpm(120.0),
+        EngineCommand::add_track(a),
+    ] {
+        commands.push(command).unwrap();
+    }
+    engine.process(&mut [], 1);
+    launch(
+        &mut commands,
+        vec![clip(a, 1, &[0.5; 48_000], true)],
+        MusicalBoundary::OneBar,
+    );
+    engine.process(&mut vec![0.0; 1_000], 1);
+    launch(
+        &mut commands,
+        vec![legato(clip(a, 2, &[0.5; 48_000], true))],
+        MusicalBoundary::OneBeat,
+    );
+    // One beat at 120 BPM and 48 kHz is 24 000 samples.
+    let boundary = 24_000 - 1_000;
+    let mut output = vec![0.0; boundary + 200];
+    engine.process(&mut output, 1);
+    assert!((output[boundary - 200] - 0.5).abs() < 1e-5);
+    assert!(output[boundary - 1] < 0.05, "{}", output[boundary - 1]);
+    assert!(output[boundary] < 0.05, "{}", output[boundary]);
+    assert!((output[boundary + 100] - 0.5).abs() < 1e-5);
+    let dipped = output.iter().filter(|sample| **sample < 0.49).count();
+    assert!((2..=100).contains(&dipped), "{dipped} dipped samples");
+}
+fn at_end(mut clip: Box<PreparedClipPlayback>) -> Box<PreparedClipPlayback> {
+    clip.launch_mode = vibez_core::perform::ClipLaunchMode::AtEnd;
+    clip
+}
+#[test]
+fn an_at_end_launch_waits_for_the_playing_clip_to_finish_its_loop() {
+    let (mut engine, mut commands, mut events, a, _b) = setup();
+    launch(
+        &mut commands,
+        vec![clip(a, 1, &ramp(0.0, 16), true)],
+        MusicalBoundary::OneBar,
+    );
+    engine.process(&mut [0.0; 3], 1);
+    launch(
+        &mut commands,
+        vec![at_end(clip(a, 2, &ramp(1.0, 16), true))],
+        MusicalBoundary::OneBeat,
+    );
+    let mut output = [0.0; 15];
+    engine.process(&mut output, 1);
+    assert_samples(&output[..2], &[0.03, 0.04]);
+    assert_samples(&output[12..], &[0.15, 1.0, 1.01]);
+    assert!(
+        std::iter::from_fn(|| events.pop().ok()).any(|event| matches!(
+            event,
+            EngineEvent::ClipTransitioned {
+                request_id: 2,
+                effective_at_samples: 16,
+                start_position: 0,
+                ..
+            }
+        ))
+    );
+}
+#[test]
+fn an_at_end_launch_on_a_silent_track_uses_its_quantization() {
+    let (mut engine, mut commands, _events, a, b) = setup();
+    launch(
+        &mut commands,
+        vec![clip(b, 1, &[0.0; 16], true)],
+        MusicalBoundary::OneBar,
+    );
+    engine.process(&mut [0.0; 6], 1);
+    launch(
+        &mut commands,
+        vec![at_end(clip(a, 2, &ramp(1.0, 16), true))],
+        MusicalBoundary::OneBeat,
+    );
+    let mut output = [0.0; 4];
+    engine.process(&mut output, 1);
+    assert_samples(&output, &[0.0, 0.0, 1.0, 1.01]);
+}
+#[test]
+fn a_row_launch_lands_play_clips_on_the_boundary_and_at_end_clips_at_their_end() {
+    let (mut engine, mut commands, _events, a, b) = setup();
+    launch(
+        &mut commands,
+        vec![clip(a, 1, &[0.0; 32], true), clip(b, 2, &[0.0; 32], true)],
+        MusicalBoundary::OneBar,
+    );
+    engine.process(&mut [0.0; 3], 1);
+    launch(
+        &mut commands,
+        vec![
+            at_end(clip(a, 3, &[0.5; 32], true)),
+            clip(b, 4, &[0.25; 32], true),
+        ],
+        MusicalBoundary::OneBeat,
+    );
+    let mut output = [0.0; 30];
+    engine.process(&mut output, 1);
+    assert_samples(&output[..1], &[0.0]);
+    assert_samples(&output[1..29], &[0.25; 28]);
+    assert_samples(&output[29..], &[0.75]);
 }

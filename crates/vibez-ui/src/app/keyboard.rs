@@ -11,6 +11,7 @@ use crate::domains::transport::TransportMsg;
 use crate::domains::view::ViewMsg;
 
 use crate::message::Message;
+use crate::state::GridCommand;
 
 #[derive(Default)]
 pub(crate) struct EdgeShortcutState {
@@ -33,6 +34,7 @@ impl EdgeShortcutState {
                         | crate::domains::perform::ClipMsg::StopTrack(_)
                 ))
                 | Message::Perform(PerformMsg::Capture(CaptureMsg::Toggle))
+                | Message::View(ViewMsg::ZoomToSelection | ViewMsg::ZoomBack)
         );
         if !edge_triggered {
             return true;
@@ -400,12 +402,19 @@ pub(crate) fn global_key_handler(
 ) -> Option<Message> {
     use iced::keyboard::key::Named;
 
-    // Space: toggle playback (no modifiers required)
     if matches!(key, iced::keyboard::Key::Named(Named::Space)) {
-        return Some(Message::Transport(TransportMsg::TogglePlayback));
+        let toggle = if modifiers.shift() {
+            TransportMsg::ContinuePlayback
+        } else {
+            TransportMsg::TogglePlayback
+        };
+        return Some(Message::Transport(toggle));
     }
 
     if modifiers.is_empty() {
+        if matches!(key, iced::keyboard::Key::Named(Named::Home)) {
+            return Some(Message::Transport(TransportMsg::SeekToBeat(0.0)));
+        }
         let mode = match key {
             iced::keyboard::Key::Named(Named::F1) => Some(PerformMode::Sections),
             iced::keyboard::Key::Named(Named::F2) => Some(PerformMode::TrackMutes),
@@ -423,6 +432,15 @@ pub(crate) fn global_key_handler(
             };
             if let Some(bank) = bank {
                 return Some(Message::Perform(bank));
+            }
+            // Reached only when no Perform pad claimed the key.
+            let zoom = match character.as_str() {
+                "z" => Some(ViewMsg::ZoomToSelection),
+                "x" => Some(ViewMsg::ZoomBack),
+                _ => None,
+            };
+            if let Some(zoom) = zoom {
+                return Some(Message::View(zoom));
             }
         }
     }
@@ -494,16 +512,16 @@ pub(crate) fn global_key_handler(
 
     if command_held(modifiers, ON_MACOS) {
         if let iced::keyboard::Key::Character(ref c) = key {
-            let grid_message = match c.as_str() {
-                "1" => Some(ViewMsg::NarrowGrid),
-                "2" => Some(ViewMsg::WidenGrid),
-                "3" => Some(ViewMsg::ToggleTripletGrid),
-                "4" => Some(ViewMsg::ToggleSnapToGrid),
-                "5" => Some(ViewMsg::ToggleAdaptiveGrid),
+            let grid_command = match c.as_str() {
+                "1" => Some(GridCommand::Narrow),
+                "2" => Some(GridCommand::Widen),
+                "3" => Some(GridCommand::ToggleTriplet),
+                "4" => Some(GridCommand::ToggleSnap),
+                "5" => Some(GridCommand::ToggleAdaptive),
                 _ => None,
             };
-            if let Some(message) = grid_message {
-                return Some(Message::View(message));
+            if let Some(command) = grid_command {
+                return Some(Message::GridShortcutPressed(command));
             }
         }
     }
@@ -534,6 +552,7 @@ pub(crate) fn global_key_handler(
                 }
             }
             "m" | "M" => Some(Message::create_clip_from_selection()),
+            "d" => Some(Message::Arrangement(ArrangementMsg::DuplicateSelectedClip)),
             "e" => Some(Message::split_selected_at_playhead()),
             "j" => Some(Message::join_selected_clips()),
             "l" | "L" => {
@@ -643,7 +662,7 @@ mod tests {
 
         assert!(matches!(
             global_key_handler(Key::Character("1".into()), command),
-            Some(Message::View(ViewMsg::NarrowGrid))
+            Some(Message::GridShortcutPressed(GridCommand::Narrow))
         ));
         assert!(matches!(
             global_key_handler(Key::Character("v".into()), command),
@@ -699,39 +718,24 @@ mod tests {
     }
 
     #[test]
-    fn command_number_shortcuts_control_the_shared_grid() {
+    fn command_number_shortcuts_control_the_focused_grid() {
         use iced::keyboard::Key;
 
         let command = command_modifier();
 
         let expected = [
-            ViewMsg::NarrowGrid,
-            ViewMsg::WidenGrid,
-            ViewMsg::ToggleTripletGrid,
-            ViewMsg::ToggleSnapToGrid,
-            ViewMsg::ToggleAdaptiveGrid,
+            GridCommand::Narrow,
+            GridCommand::Widen,
+            GridCommand::ToggleTriplet,
+            GridCommand::ToggleSnap,
+            GridCommand::ToggleAdaptive,
         ];
         for (number, expected) in ["1", "2", "3", "4", "5"].into_iter().zip(expected) {
             let message = global_key_handler(Key::Character(number.into()), command);
-            assert!(matches!(
-                (message, expected),
-                (
-                    Some(Message::View(ViewMsg::NarrowGrid)),
-                    ViewMsg::NarrowGrid
-                ) | (Some(Message::View(ViewMsg::WidenGrid)), ViewMsg::WidenGrid)
-                    | (
-                        Some(Message::View(ViewMsg::ToggleTripletGrid)),
-                        ViewMsg::ToggleTripletGrid
-                    )
-                    | (
-                        Some(Message::View(ViewMsg::ToggleSnapToGrid)),
-                        ViewMsg::ToggleSnapToGrid
-                    )
-                    | (
-                        Some(Message::View(ViewMsg::ToggleAdaptiveGrid)),
-                        ViewMsg::ToggleAdaptiveGrid
-                    )
-            ));
+            assert!(
+                matches!(message, Some(Message::GridShortcutPressed(sent)) if sent == expected),
+                "Command+{number} should send {expected:?}"
+            );
         }
     }
 
@@ -834,6 +838,14 @@ mod tests {
         assert!(matches!(
             global_key_handler(Key::Named(Named::Space), Modifiers::empty()),
             Some(Message::Transport(TransportMsg::TogglePlayback))
+        ));
+        assert!(matches!(
+            global_key_handler(Key::Named(Named::Space), Modifiers::SHIFT),
+            Some(Message::Transport(TransportMsg::ContinuePlayback))
+        ));
+        assert!(matches!(
+            global_key_handler(Key::Named(Named::Home), Modifiers::empty()),
+            Some(Message::Transport(TransportMsg::SeekToBeat(beat))) if beat == 0.0
         ));
         assert!(matches!(
             global_key_handler(Key::Named(Named::Escape), Modifiers::empty()),
@@ -976,6 +988,98 @@ mod tests {
                 "Character(\"t\")",
                 pressed_at + std::time::Duration::from_millis(100),
             );
+        }
+    }
+
+    #[test]
+    fn bare_z_and_x_zoom_to_the_selection_and_back() {
+        use iced::keyboard::{Key, Modifiers};
+
+        assert!(matches!(
+            global_key_handler(Key::Character("z".into()), Modifiers::empty()),
+            Some(Message::View(ViewMsg::ZoomToSelection))
+        ));
+        assert!(matches!(
+            global_key_handler(Key::Character("x".into()), Modifiers::empty()),
+            Some(Message::View(ViewMsg::ZoomBack))
+        ));
+        assert!(matches!(
+            global_key_handler(Key::Character("z".into()), command_modifier()),
+            Some(Message::Project(ProjectMsg::Undo))
+        ));
+        assert!(matches!(
+            global_key_handler(Key::Character("x".into()), command_modifier()),
+            Some(Message::Arrangement(ArrangementMsg::CutSelectedClips))
+        ));
+        assert!(global_key_handler(Key::Character("Z".into()), Modifiers::SHIFT).is_none());
+    }
+
+    #[test]
+    fn held_z_and_x_zoom_once_each() {
+        let mut state = EdgeShortcutState::default();
+        let started = std::time::Instant::now();
+
+        for (key_id, message) in [
+            ("Character(\"z\")", ViewMsg::ZoomToSelection),
+            ("Character(\"x\")", ViewMsg::ZoomBack),
+        ] {
+            let message = Message::View(message);
+            assert!(state.should_dispatch(key_id, &message, started));
+            assert!(!state.should_dispatch(
+                key_id,
+                &message,
+                started + std::time::Duration::from_millis(500),
+            ));
+        }
+    }
+
+    #[test]
+    fn perform_pad_keys_keep_z_and_x_in_perform() {
+        use crate::domains::perform::ComputerKey;
+        use crate::state::Workspace;
+        use iced::keyboard::key::{Code, Physical};
+        use iced::keyboard::{Event, Key, Location, Modifiers};
+
+        let mut app = super::super::test_support::app();
+        for (character, code, computer_key) in [
+            ("z", Code::KeyZ, ComputerKey::Z),
+            ("x", Code::KeyX, ComputerKey::X),
+        ] {
+            let pad = app
+                .state
+                .perform
+                .input_mapping
+                .position_for(computer_key)
+                .expect("a default pad key");
+            for (workspace, plays_the_pad) in
+                [(Workspace::Perform, true), (Workspace::Arrange, false)]
+            {
+                app.state.view.workspace = workspace;
+                let _ = app.handle_keyboard_input(
+                    Event::KeyPressed {
+                        key: Key::Character(character.into()),
+                        modified_key: Key::Character(character.into()),
+                        physical_key: Physical::Code(code),
+                        location: Location::Standard,
+                        modifiers: Modifiers::empty(),
+                        text: Some(character.into()),
+                    },
+                    std::time::Instant::now(),
+                );
+                assert_eq!(
+                    app.state.perform.is_pad_pressed(pad),
+                    plays_the_pad,
+                    "{character} in {workspace:?}"
+                );
+                let _ = app.handle_keyboard_input(
+                    Event::KeyReleased {
+                        key: Key::Character(character.into()),
+                        location: Location::Standard,
+                        modifiers: Modifiers::empty(),
+                    },
+                    std::time::Instant::now(),
+                );
+            }
         }
     }
 }

@@ -10,6 +10,8 @@ use crate::icons;
 use crate::message::Message;
 use crate::state::{AuditionMode, SampleBrowserMode};
 use crate::theme as th;
+use crate::widgets::control_style;
+use crate::widgets::device_chrome::tiny_button;
 
 impl App {
     pub(super) fn view_browser_audition_footer(&self) -> Element<'_, Message> {
@@ -34,40 +36,43 @@ impl App {
                 .filter(|entry| entry.is_supported_audio())
                 .map(|entry| Message::DropboxPreview(entry.clone())),
         };
-        let mut play = button(icons::icon(icons::PLAY).size(12).color(th::text_dim()))
-            .padding([6, 8])
-            .style(browser_transport_button_style);
-        if let Some(message) = preview_message {
-            play = play.on_press(message);
-        }
-        let stop = button(icons::icon(icons::STOP).size(11).color(th::text_dim()))
-            .on_press(Message::StopBrowserPreview)
-            .padding([6, 8])
-            .style(browser_transport_button_style);
+        let accent = th::accent();
+        let play = tiny_button(icons::PLAY, "Preview", preview_message, None, accent);
+        let stop = tiny_button(
+            icons::STOP,
+            "Stop preview",
+            Some(Message::StopBrowserPreview),
+            None,
+            accent,
+        );
+        let switch = |label: &'static str, on: bool, message: Message| {
+            button(text(label).size(10))
+                .on_press(message)
+                .padding([3, 8])
+                .style(move |_theme: &Theme, status| button::Style {
+                    border: iced::Border {
+                        radius: 6.0.into(),
+                        ..Default::default()
+                    },
+                    ..control_style::styled(on.then_some(accent), status)
+                })
+        };
         let enabled = self.state.browser.audition_enabled;
-        let follow_toggle = button(
-            text(if enabled { "ENABLED ON" } else { "ENABLED OFF" })
-                .size(9)
-                .color(if enabled {
-                    th::accent()
-                } else {
-                    th::text_dim()
-                }),
-        )
-        .on_press(Message::ToggleAuditionEnabled)
-        .padding([2, 4])
-        .style(browser_utility_action_style);
-
-        let raw_active = self.state.browser.audition_mode == AuditionMode::Raw;
-        let raw = button(text("RAW").size(9))
-            .on_press(Message::SetAuditionMode(AuditionMode::Raw))
-            .padding([2, 5])
-            .style(move |_theme: &Theme, status| browser_place_button_style(raw_active, status));
-        let warp_active = self.state.browser.audition_mode == AuditionMode::Warp;
-        let warp = button(text("WARP").size(9))
-            .on_press(Message::SetAuditionMode(AuditionMode::Warp))
-            .padding([2, 5])
-            .style(move |_theme: &Theme, status| browser_place_button_style(warp_active, status));
+        let follow_toggle = switch(
+            if enabled { "On" } else { "Off" },
+            enabled,
+            Message::ToggleAuditionEnabled,
+        );
+        let raw = switch(
+            "Raw",
+            self.state.browser.audition_mode == AuditionMode::Raw,
+            Message::SetAuditionMode(AuditionMode::Raw),
+        );
+        let warp = switch(
+            "Warp",
+            self.state.browser.audition_mode == AuditionMode::Warp,
+            Message::SetAuditionMode(AuditionMode::Warp),
+        );
 
         let waveform: Element<'_, Message> = container(
             canvas(crate::widgets::browser_waveform::BrowserWaveform {
@@ -78,11 +83,12 @@ impl App {
             .height(Length::Fixed(26.0)),
         )
         .width(Length::Fill)
+        .padding([0, 4])
         .style(|_theme: &Theme| container::Style {
+            background: Some(th::display_bg().into()),
             border: iced::Border {
-                color: th::divider(),
-                width: 1.0,
-                radius: 0.0.into(),
+                radius: 6.0.into(),
+                ..Default::default()
             },
             ..Default::default()
         })
@@ -131,26 +137,26 @@ impl App {
             .width(Length::Fill)
             .style(|_theme: &Theme, status| iced::widget::slider::Style {
                 rail: iced::widget::slider::Rail {
-                    backgrounds: (th::accent_dim().into(), th::divider().into()),
-                    width: 2.0,
-                    border: iced::Border::default(),
+                    backgrounds: (th::text_dim().into(), th::control().into()),
+                    width: 4.0,
+                    border: iced::Border {
+                        radius: 2.0.into(),
+                        ..Default::default()
+                    },
                 },
                 handle: iced::widget::slider::Handle {
-                    shape: iced::widget::slider::HandleShape::Rectangle {
-                        width: 6,
-                        border_radius: 0.0.into(),
-                    },
+                    shape: iced::widget::slider::HandleShape::Circle { radius: 6.0 },
                     background: if matches!(status, iced::widget::slider::Status::Dragged) {
                         th::accent().into()
                     } else {
-                        th::text_dim().into()
+                        th::text().into()
                     },
                     border_width: 0.0,
                     border_color: iced::Color::TRANSPARENT,
                 },
             });
         let gain_row = row![
-            text("GAIN").size(9).color(th::text_muted()),
+            text("Gain").size(10).color(th::text_muted()),
             gain_slider,
             text(audition_gain_label(gain))
                 .size(9)
@@ -161,7 +167,13 @@ impl App {
         .align_y(iced::Alignment::Center);
         let contents: Element<'_, Message> = column![
             row![
-                text("AUDITION").size(9).color(th::text_muted()),
+                text("AUDITION")
+                    .size(9.5)
+                    .font(iced::Font {
+                        weight: iced::font::Weight::Bold,
+                        ..iced::Font::DEFAULT
+                    })
+                    .color(th::text_muted()),
                 follow_toggle,
                 raw,
                 warp,
@@ -177,13 +189,22 @@ impl App {
             controls,
             gain_row
         ]
-        .spacing(5)
+        .spacing(8)
         .into();
 
-        container(contents)
-            .padding([7, 9])
-            .width(Length::Fill)
-            .style(browser_footer_style)
-            .into()
+        container(
+            container(contents)
+                .padding(10)
+                .width(Length::Fill)
+                .style(browser_footer_style),
+        )
+        .padding(iced::Padding {
+            top: 6.0,
+            right: 10.0,
+            bottom: 10.0,
+            left: 10.0,
+        })
+        .width(Length::Fill)
+        .into()
     }
 }

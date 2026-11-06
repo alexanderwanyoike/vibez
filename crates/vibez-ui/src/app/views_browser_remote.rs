@@ -1,10 +1,8 @@
 //! Remote sample-browser view rendering.
 //! Split from views_browser.rs; inherent methods on [`super::App`].
 
-use iced::widget::{
-    button, column, container, horizontal_space, mouse_area, row, scrollable, text,
-};
-use iced::{Element, Length, Theme};
+use iced::widget::{button, column, container, horizontal_space, mouse_area, row, text};
+use iced::{Element, Length};
 
 use crate::domains::browser::BrowserMsg;
 use crate::message::Message;
@@ -131,7 +129,7 @@ impl App {
             .padding([5, 8])
             .into()
         };
-        let mut entries_col = column![].spacing(0);
+        let mut entries_col = column![].spacing(2);
         let catalog_notice = match &remote.catalog_state {
             crate::state::RemoteCatalogState::Stale { error }
             | crate::state::RemoteCatalogState::AuthenticationRequired { error } => {
@@ -146,8 +144,7 @@ impl App {
         };
         if let Some(notice) = catalog_notice {
             entries_col = entries_col
-                .push(container(text(notice).size(9).color(th::danger())).padding([5, 8]))
-                .push(browser_row_divider());
+                .push(container(text(notice).size(9).color(th::danger())).padding([5, 8]));
         }
         for entry in results {
             let selected = remote.selected_path.as_deref() == Some(&entry.provider_item_id);
@@ -270,13 +267,19 @@ impl App {
             } else {
                 Message::ClickRemoteBrowserEntry((*entry).clone())
             };
-            let body = container(cells).padding([6, 8]).width(Length::Fill);
+            let body = container(
+                row![browser_result_icon(entry.is_folder, selected), cells]
+                    .spacing(9)
+                    .align_y(iced::Alignment::Center),
+            )
+            .padding([6, 8])
+            .width(Length::Fill);
             let interactive: Element<'_, Message> = if entry.is_folder {
                 button(body)
                     .on_press(message)
                     .padding(0)
                     .width(Length::Fill)
-                    .style(browser_utility_action_style)
+                    .style(|_theme: &iced::Theme, status| browser_place_button_style(false, status))
                     .into()
             } else {
                 let source = MediaSourceRef::DropboxFile {
@@ -289,23 +292,7 @@ impl App {
                     .on_release(message)
                     .into()
             };
-            let selection_marker = container(text(""))
-                .width(Length::Fixed(2.0))
-                .height(Length::Fixed(43.0))
-                .style(move |_theme: &Theme| container::Style {
-                    background: selected.then(|| th::accent().into()),
-                    ..Default::default()
-                });
-            entries_col = entries_col
-                .push(
-                    container(row![selection_marker, interactive])
-                        .width(Length::Fill)
-                        .style(move |_theme: &Theme| container::Style {
-                            background: selected.then(|| th::accent_dim().into()),
-                            ..Default::default()
-                        }),
-                )
-                .push(browser_row_divider());
+            entries_col = entries_col.push(browser_result_row(interactive, selected));
         }
         for entry in local_everywhere {
             let selected = browser.selected_source.as_ref() == Some(&entry.source);
@@ -365,7 +352,13 @@ impl App {
                 .align_y(iced::Alignment::Center)
                 .into()
             };
-            let body = container(cells).padding([6, 8]).width(Length::Fill);
+            let body = container(
+                row![browser_result_icon(false, selected), cells]
+                    .spacing(9)
+                    .align_y(iced::Alignment::Center),
+            )
+            .padding([6, 8])
+            .width(Length::Fill);
             let interactive: Element<'_, Message> = mouse_area(body)
                 .on_press(Message::BeginPendingBrowserDrag(
                     entry.source.clone(),
@@ -373,23 +366,7 @@ impl App {
                 ))
                 .on_release(Message::ClickLocalBrowserEntry(entry.source.clone()))
                 .into();
-            let selection_marker = container(text(""))
-                .width(Length::Fixed(2.0))
-                .height(Length::Fixed(43.0))
-                .style(move |_theme: &Theme| container::Style {
-                    background: selected.then(|| th::accent().into()),
-                    ..Default::default()
-                });
-            entries_col = entries_col
-                .push(
-                    container(row![selection_marker, interactive])
-                        .width(Length::Fill)
-                        .style(move |_theme: &Theme| container::Style {
-                            background: selected.then(|| th::accent_dim().into()),
-                            ..Default::default()
-                        }),
-                )
-                .push(browser_row_divider());
+            entries_col = entries_col.push(browser_result_row(interactive, selected));
         }
         if total_results == 0 {
             let empty = if remote.catalog_state == crate::state::RemoteCatalogState::Loading {
@@ -431,7 +408,7 @@ impl App {
         container(
             column![
                 row![
-                    text("RESULTS").size(9).color(th::text_muted()),
+                    browser_caption("RESULTS"),
                     horizontal_space(),
                     text(format!(
                         "{} · {visible_results}/{total_results}",
@@ -444,11 +421,11 @@ impl App {
                 .spacing(5)
                 .align_y(iced::Alignment::Center),
                 table_header,
-                scrollable(
+                crate::widgets::quiet_scroll::vertical(
                     container(entries_col)
                         .width(Length::Fill)
                         .padding(iced::Padding {
-                            right: 12.0,
+                            right: 8.0,
                             ..Default::default()
                         })
                 )
@@ -456,15 +433,18 @@ impl App {
                     SampleBrowserMode::Remote,
                 ))
                 .height(Length::Fill)
-                .direction(scrollable::Direction::Vertical(browser_vertical_scrollbar()))
             ]
             .spacing(0)
-            .padding(8)
+            .padding(iced::Padding {
+                top: 0.0,
+                right: 8.0,
+                bottom: 8.0,
+                left: 8.0,
+            })
             .height(Length::Fill),
         )
         .width(Length::Fill)
         .height(Length::Fill)
-        .style(browser_results_style)
         .into()
     }
 }

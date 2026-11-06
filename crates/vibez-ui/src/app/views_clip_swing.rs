@@ -59,7 +59,7 @@ impl App {
                     .iter()
                     .find(|lane| lane.target == AutomationTarget::TrackSwingOffset)
             })
-            .and_then(|lane| lane.value_at(self.state.position_beats()))
+            .and_then(|lane| lane.value_at(self.state.transport.position_beats()))
             .map(SwingOffset::from_normalized);
         let automated = automation_offset.is_some();
         let controlling_offset = automation_offset.or(manual_offset);
@@ -157,7 +157,7 @@ impl App {
             knob,
             column![
                 row![
-                    text("TRACK SWING").size(7).color(th::text_muted()),
+                    text("TRACK SWING").size(7).color(th::text_dim()),
                     text(track.name.to_uppercase()).size(7).color(track_color),
                 ]
                 .spacing(5),
@@ -234,7 +234,7 @@ impl App {
                         ..Default::default()
                     }),
                 column![
-                    text("APPLY TO THIS CLIP").size(7).color(th::text_muted()),
+                    text("APPLY TO THIS CLIP").size(7).color(th::text_dim()),
                     choices,
                     text(explanation)
                         .size(7)

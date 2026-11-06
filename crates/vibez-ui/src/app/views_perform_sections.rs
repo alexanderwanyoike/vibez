@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use iced::widget::{
-    button, canvas, center, column, container, horizontal_space, mouse_area, row, scrollable, text,
+    button, canvas, center, column, container, horizontal_space, mouse_area, row, text,
 };
 use iced::{Element, Length, Theme};
 
@@ -14,15 +14,17 @@ use crate::icons;
 use crate::message::Message;
 use crate::state::{ArrangementSelection, TrackTimelineContent};
 use crate::theme as th;
-use crate::typography::{PERFORM_DISPLAY, PERFORM_LABEL, PERFORM_TECH, PERFORM_TECH_STRONG};
+use crate::timeline_geometry::TimelineGeometry;
+use crate::typography::{PERFORM_LABEL, PERFORM_TECH};
+use crate::widgets::arrange_corner::{arrange_corner, counted};
 use crate::widgets::timeline::{
-    ArrangementMinimap, MinimapTrack, RulerWidget, TimelineNoteClip, TrackClipCanvas,
+    ArrangementMinimap, MinimapTrack, NoteSummary, RulerWidget, TimelineNoteClip, TrackClipCanvas,
 };
+use crate::widgets::track_header::{color_bar, header_shade, quiet_action_style};
+use vibez_core::time::BEATS_PER_BAR;
 
 use super::views_automation::AutomationLaneLayout;
-use super::views_perform::{
-    SECTION_SCROLLBAR_SPACING, SECTION_SCROLLBAR_WIDTH, SECTION_TRACK_GUTTER_WIDTH,
-};
+use super::views_perform::SECTION_TRACK_GUTTER_WIDTH;
 use super::*;
 
 const SECTION_RULER_HEIGHT: f32 = 28.0;
@@ -44,10 +46,7 @@ impl App {
         let recording_preview = self.state.perform.section_record.live_preview();
         let total_beats = selected.map_or(16.0, |section| section.length_beats);
         let viewport = *self.state.perform.section_editor.viewport();
-        let viewport_width = (section_width
-            - SECTION_TRACK_GUTTER_WIDTH
-            - super::views_perform::SECTION_SCROLLBAR_RESERVATION)
-            .max(1.0);
+        let viewport_width = (section_width - SECTION_TRACK_GUTTER_WIDTH).max(1.0);
         let row_height = if self.state.perform.section_timeline_expanded {
             78.0
         } else {
@@ -112,35 +111,17 @@ impl App {
                 None => unreachable!("empty Section selection is rendered above"),
             };
             let section_id = selected_section.id;
-            let ruler_gutter = container(
-                column![
-                    text("PROJECT TRACK")
-                        .font(PERFORM_TECH)
-                        .size(8)
-                        .color(th::text_dim()),
-                    text(if self.state.perform.section_timeline_expanded {
-                        "EXPANDED TIMELINE"
-                    } else {
-                        "COMPACT OVERVIEW"
-                    })
-                    .font(PERFORM_TECH_STRONG)
-                    .size(7)
-                    .color(th::accent())
-                ]
-                .spacing(3),
-            )
-            .width(Length::Fixed(SECTION_TRACK_GUTTER_WIDTH))
-            .height(Length::Fixed(SECTION_RULER_HEIGHT))
-            .padding([6, 9])
-            .style(|_theme: &Theme| container::Style {
-                background: Some(th::bg_surface().into()),
-                border: iced::Border {
-                    color: th::perform_grid_line(),
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
-            });
+            let ruler_gutter = arrange_corner(
+                counted(self.state.project_tracks.tracks.len(), "track"),
+                if self.state.perform.section_timeline_expanded {
+                    "Expanded"
+                } else {
+                    "Compact"
+                }
+                .into(),
+                SECTION_TRACK_GUTTER_WIDTH,
+                SECTION_RULER_HEIGHT,
+            );
             let playback_playhead_beats = if self.state.perform.playing_section == Some(section_id)
             {
                 let samples_per_beat = self.state.transport.sample_rate.max(1) as f64 * 60.0
@@ -149,19 +130,25 @@ impl App {
             } else {
                 None
             };
+            let snap_targets = std::sync::Arc::new(crate::timeline_snap::SnapTargets::for_section(
+                editor,
+                self.state.transport.samples_per_beat(),
+                self.state.perform.section_editor.edit_cursor_beats(),
+            ));
             let ruler = RulerWidget {
                 playhead_beats: playback_playhead_beats.unwrap_or(-1.0),
-                bpm: self.state.transport.bpm,
+                play_start_beats: None,
                 zoom_level: viewport.zoom_level,
-                grid: self.state.view.grid_config(),
+                grid: self.state.view.arrange_grid,
                 scroll_offset_beats: viewport.scroll_offset_beats,
-                total_beats,
+                loop_brace: false,
                 loop_enabled: selected_section.looping,
                 loop_start_beats: 0.0,
                 loop_end_beats: total_beats,
                 time_selection_active: editor.time_selection_active,
                 selection_start_beats: editor.selection_start_beats,
                 selection_end_beats: editor.selection_end_beats,
+                snap_targets: snap_targets.clone(),
             };
             let ruler_canvas: Element<'_, Message> = Element::from(
                 canvas(ruler)
@@ -213,19 +200,12 @@ impl App {
                     })
                     .collect(),
             };
-            let minimap_gutter = container(text("SECTION OVERVIEW").font(PERFORM_TECH).size(7))
-                .width(Length::Fixed(SECTION_TRACK_GUTTER_WIDTH))
-                .height(Length::Fixed(SECTION_MINIMAP_HEIGHT))
-                .padding([13, 9])
-                .style(|_theme: &Theme| container::Style {
-                    background: Some(th::bg_surface().into()),
-                    border: iced::Border {
-                        color: th::perform_grid_line(),
-                        width: 1.0,
-                        radius: 0.0.into(),
-                    },
-                    ..Default::default()
-                });
+            let minimap_gutter = arrange_corner(
+                "Overview".into(),
+                counted((total_beats / BEATS_PER_BAR).ceil() as usize, "bar"),
+                SECTION_TRACK_GUTTER_WIDTH,
+                SECTION_MINIMAP_HEIGHT,
+            );
             let minimap_canvas: Element<'_, Message> = Element::from(
                 canvas(minimap)
                     .width(Length::Fill)
@@ -241,24 +221,22 @@ impl App {
                 .iter()
                 .map(|track| track.id)
                 .collect();
-            let total_tracks = track_ids.len();
             let empty_content = TrackTimelineContent::default();
             // Real vertical layout of the section column, so a rubber-band
             // maps a y offset back to a track the same way Arrange does.
             let row_spans = crate::widgets::timeline::build_row_spans(
-                row_height,
                 self.state.project_tracks.tracks.iter().map(|track| {
                     let extra_height = if self.state.automation_ui.expanded.contains(&track.id) {
                         self.automation_rows_height(editor, track.id)
                     } else {
                         0.0
                     };
-                    (track.id, extra_height)
+                    (track.id, row_height, extra_height)
                 }),
             );
             let mut track_rows = column![].width(Length::Fill);
 
-            for (index, track) in self.state.project_tracks.tracks.iter().enumerate() {
+            for track in self.state.project_tracks.tracks.iter() {
                 let content = editor.timeline.get(track.id).unwrap_or(&empty_content);
                 let selected_track = editor.selected_track == Some(track.id);
                 let track_color = th::track_color(track.color_index);
@@ -280,169 +258,85 @@ impl App {
                 let hidden_count = hidden_note_count + hidden_audio_count;
                 let has_content = clip_count > 0 || !content.automation.is_empty();
                 let track_id = track.id;
-                let type_label = if track.kind.is_midi() {
-                    "MIDI"
+                let name = text(track.name.clone())
+                    .size(12)
+                    .font(crate::typography::TRACK_TITLE)
+                    .color(if track.mute {
+                        th::text_dim()
+                    } else {
+                        th::text()
+                    })
+                    .wrapping(text::Wrapping::None);
+                let identity = row![
+                    name,
+                    text(track.kind.label()).size(10).color(th::text_dim())
+                ]
+                .spacing(4)
+                .align_y(iced::Alignment::Center);
+                let clips_label = if hidden_count > 0 {
+                    format!("{} · {hidden_count} hidden", counted(clip_count, "clip"))
                 } else {
-                    "AUDIO"
+                    counted(clip_count, "clip")
                 };
-                let marker = container(horizontal_space())
-                    .width(Length::Fixed(3.0))
-                    .height(Length::Fixed(
-                        if self.state.perform.section_timeline_expanded {
-                            28.0
-                        } else {
-                            20.0
-                        },
+                let action = |icon: char, color: iced::Color| {
+                    button(icons::icon(icon).size(10).color(color))
+                        .padding([2, 4])
+                        .style(quiet_action_style)
+                };
+                let add_clip = track.kind.is_midi().then(|| {
+                    action(icons::PLUS, th::text_dim()).on_press(Message::PianoRoll(
+                        PianoRollMsg::AddNoteClipToTrack(track_id),
                     ))
-                    .style(move |_theme: &Theme| container::Style {
-                        background: Some(track_color.into()),
-                        ..Default::default()
-                    });
-                let identity = button(
-                    row![
-                        marker,
-                        column![
-                            text(track.name.clone())
-                                .font(PERFORM_DISPLAY)
-                                .size(11)
-                                .color(if selected_track {
-                                    th::text()
-                                } else {
-                                    th::text_dim()
-                                }),
-                            text(if hidden_count > 0 {
-                                format!("{type_label} · {clip_count} CLIPS · {hidden_count} HIDDEN")
-                            } else {
-                                format!(
-                                    "{type_label} · {clip_count} CLIP{}",
-                                    if clip_count == 1 { "" } else { "S" }
-                                )
-                            })
-                            .font(PERFORM_TECH)
-                            .size(7)
-                            .color(th::text_muted())
-                        ]
-                        .spacing(3)
-                    ]
-                    .spacing(7)
-                    .align_y(iced::Alignment::Center),
-                )
-                .on_press(Message::select_track(track_id))
-                .padding([2, 5])
-                .width(Length::Fill)
-                .style(move |_theme: &Theme, status| button::Style {
-                    background: Some(
-                        if selected_track || matches!(status, button::Status::Hovered) {
-                            th::blend(th::bg_hover(), track_color, 0.12)
-                        } else {
-                            th::bg_surface()
-                        }
-                        .into(),
-                    ),
-                    text_color: th::text(),
-                    border: iced::Border::default(),
-                    ..Default::default()
                 });
-                let add_clip: Element<'_, Message> = if track.kind.is_midi() {
-                    button(icons::icon(icons::PLUS).size(11).color(th::accent()))
-                        .on_press(Message::PianoRoll(PianoRollMsg::AddNoteClipToTrack(
-                            track_id,
-                        )))
-                        .padding([5, 7])
-                        .style(|_theme: &Theme, status| button::Style {
-                            background: Some(
-                                if matches!(status, button::Status::Hovered) {
-                                    th::bg_hover()
-                                } else {
-                                    th::perform_inset()
-                                }
-                                .into(),
-                            ),
-                            text_color: th::accent(),
-                            border: iced::Border {
-                                color: th::border_light(),
-                                width: 1.0,
-                                radius: 2.0.into(),
-                            },
-                            ..Default::default()
-                        })
-                        .into()
-                } else {
-                    container(
-                        icons::icon(icons::AUDIO_WAVEFORM)
-                            .size(10)
-                            .color(th::text_dim()),
-                    )
-                    .padding([5, 7])
-                    .into()
-                };
                 let automation_open = self.state.automation_ui.expanded.contains(&track.id);
-                let automation_toggle = button(
-                    icons::icon(icons::SLIDERS_VERTICAL)
-                        .size(10)
-                        .color(if automation_open {
-                            th::accent()
-                        } else {
-                            th::text_dim()
-                        }),
+                let automation_toggle = action(
+                    icons::SLIDERS_VERTICAL,
+                    if automation_open {
+                        th::accent()
+                    } else {
+                        th::text_dim()
+                    },
                 )
                 .on_press(Message::Automation(AutomationMsg::ToggleTrackLanes(
                     track_id,
-                )))
-                .padding([2, 5])
-                .style(|_theme: &Theme, status| button::Style {
-                    background: matches!(status, button::Status::Hovered | button::Status::Pressed)
-                        .then(|| th::bg_hover().into()),
-                    text_color: th::text_dim(),
-                    border: iced::Border::default(),
-                    ..Default::default()
-                });
-                let remove_content: Element<'_, Message> = if has_content {
-                    button(icons::icon(icons::X).size(9).color(th::text_dim()))
-                        .on_press(Message::Perform(PerformMsg::RemoveTrackContent {
+                )));
+                let remove_content = has_content.then(|| {
+                    action(icons::X, th::text_dim()).on_press(Message::Perform(
+                        PerformMsg::RemoveTrackContent {
                             section_id,
                             track_id,
-                        }))
-                        .padding([2, 5])
-                        .style(|_theme: &Theme, status| button::Style {
-                            background: matches!(
-                                status,
-                                button::Status::Hovered | button::Status::Pressed
-                            )
-                            .then(|| th::with_alpha(th::danger(), 0.16).into()),
-                            text_color: th::text_dim(),
-                            border: iced::Border::default(),
-                            ..Default::default()
-                        })
-                        .into()
-                } else {
-                    horizontal_space().width(Length::Shrink).into()
-                };
+                        },
+                    ))
+                });
                 let controls = row![
+                    text(clips_label)
+                        .size(10)
+                        .color(th::text_muted())
+                        .wrapping(text::Wrapping::None),
                     horizontal_space(),
-                    add_clip,
-                    automation_toggle,
-                    remove_content
                 ]
+                .push_maybe(add_clip)
+                .push(automation_toggle)
+                .push_maybe(remove_content)
                 .spacing(1)
                 .align_y(iced::Alignment::Center);
-                let gutter = container(column![identity, controls].spacing(0))
+                let gutter = mouse_area(
+                    container(row![
+                        color_bar(track_color),
+                        column![identity, controls]
+                            .spacing(4)
+                            .padding([5, 6])
+                            .width(Length::Fill)
+                    ])
                     .width(Length::Fixed(SECTION_TRACK_GUTTER_WIDTH))
                     .height(Length::Fixed(row_height))
-                    .padding([2, 3])
+                    .clip(true)
                     .style(move |_theme: &Theme| container::Style {
-                        background: Some(th::bg_surface().into()),
-                        border: iced::Border {
-                            color: if selected_track {
-                                th::blend(th::accent_dim(), track_color, 0.35)
-                            } else {
-                                th::perform_grid_line()
-                            },
-                            width: 1.0,
-                            radius: 0.0.into(),
-                        },
+                        background: Some(header_shade(selected_track, false).into()),
                         ..Default::default()
-                    });
+                    }),
+                )
+                .on_press(Message::select_track(track_id));
 
                 let selected_clips: HashSet<_> = editor
                     .selected_clips
@@ -462,7 +356,7 @@ impl App {
                     content,
                     self.state.perform.section_editor.edit_cursor_beats(),
                     viewport.zoom_level,
-                    self.state.view.grid_config(),
+                    self.state.view.arrange_grid,
                     viewport.scroll_offset_beats,
                     viewport_width,
                     total_beats,
@@ -471,8 +365,6 @@ impl App {
                     track_color,
                     self.state.transport.bpm,
                     track.id,
-                    index,
-                    total_tracks,
                     track_ids.clone(),
                     selected_clips,
                     false,
@@ -490,6 +382,8 @@ impl App {
                     row_spans.clone(),
                     editor.marquee.as_ref().map(|marquee| marquee.rect),
                 )
+                .with_snap_targets(snap_targets.clone())
+                .with_clip_drag(editor.clip_drag.as_ref().map(|drag| drag.preview.clone()))
                 .with_vertical_track_scrolling();
                 if let Some(preview) = recording_preview.as_ref().filter(|preview| {
                     preview.target_id == section_id && preview.track_id == track.id
@@ -499,18 +393,20 @@ impl App {
                         position_beats: preview.position_beats,
                         duration_beats: preview.length_beats,
                         name: "● RECORDING LIVE".into(),
-                        notes: preview
-                            .notes
-                            .iter()
-                            .map(|note| {
+                        notes: Arc::new(NoteSummary::new(
+                            preview.notes.iter().map(|note| {
                                 (
                                     note.pitch,
                                     (note.start_beat - preview.position_beats).max(0.0),
                                     note.duration_beats,
-                                    false,
                                 )
-                            })
-                            .collect(),
+                            }),
+                            TimelineGeometry::from_zoom(
+                                viewport.zoom_level,
+                                viewport.scroll_offset_beats,
+                            )
+                            .pixels_per_beat(),
+                        )),
                         start_marker_beats: 0.0,
                         loop_enabled: false,
                         loop_start_beats: 0.0,
@@ -519,7 +415,7 @@ impl App {
                 }
                 clip_canvas = clip_canvas.with_playback_playhead(playback_playhead_beats);
                 let geometry = viewport.geometry();
-                let grid = self.state.view.grid_config();
+                let grid = self.state.view.arrange_grid;
                 let compatible = !track.kind.is_midi();
                 let focused_clip_canvas: Element<'_, Message> = Element::from(
                     canvas(clip_canvas)
@@ -571,19 +467,13 @@ impl App {
                 }
             }
 
-            let body = scrollable::Scrollable::with_direction(
+            let body = crate::widgets::quiet_scroll::vertical(
                 container(track_rows)
                     .width(Length::Fill)
                     .style(|_theme: &Theme| container::Style {
-                        background: Some(th::display_bg().into()),
+                        background: Some(th::bg_surface().into()),
                         ..Default::default()
                     }),
-                scrollable::Direction::Vertical(
-                    scrollable::Scrollbar::new()
-                        .width(SECTION_SCROLLBAR_WIDTH)
-                        .scroller_width(SECTION_SCROLLBAR_WIDTH)
-                        .spacing(SECTION_SCROLLBAR_SPACING),
-                ),
             )
             .width(Length::Fill)
             .height(Length::Fill);
@@ -596,18 +486,16 @@ impl App {
                 .into()
         };
 
-        let construction = container(column![toolbar, timeline].height(Length::Fill))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .style(|_theme: &Theme| container::Style {
-                background: Some(th::bg_dark().into()),
-                border: iced::Border {
-                    color: th::border(),
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
-            });
+        // The lanes stop short of the card's bottom edge so its rounded
+        // corners only ever cut the card's own shade.
+        let construction = crate::widgets::shell_card::shell_card(
+            column![toolbar, timeline]
+                .height(Length::Fill)
+                .padding(iced::Padding {
+                    bottom: crate::widgets::shell_card::RADIUS,
+                    ..Default::default()
+                }),
+        );
 
         mouse_area(construction)
             .on_press(Message::Perform(PerformMsg::FocusEditor(

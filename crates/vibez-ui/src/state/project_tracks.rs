@@ -43,6 +43,14 @@ impl ProjectTracksState {
             .map(|track| track.id)
     }
 
+    /// Every channel the engine mixes: tracks, the master, then buses.
+    pub fn channels(&self) -> impl Iterator<Item = &ProjectTrack> {
+        self.tracks
+            .iter()
+            .chain(std::iter::once(&self.master))
+            .chain(&self.buses)
+    }
+
     pub fn find_mut(&mut self, id: TrackId) -> Option<&mut ProjectTrack> {
         if id.is_master() {
             return Some(&mut self.master);

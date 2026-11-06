@@ -131,16 +131,14 @@ fn source_refresh_resnapshots_at_the_exact_local_playhead() {
         (clips[0].position, clips[0].source_offset, clips[0].duration),
         (0, 0, 4)
     );
-    assert_eq!(
-        (clips[1].position, clips[1].source_offset, clips[1].duration),
-        (4, 4, 4)
-    );
+    assert_eq!((clips[1].position, clips[1].duration), (4, 4));
+    assert_eq!(clips[1].source_frame_at(0), 4);
     assert!(clips[0].name.contains("Before edit"));
     assert!(clips[1].name.contains("After edit"));
 }
 
 #[test]
-fn looping_section_is_flattened_into_independent_linear_passes() {
+fn looping_section_becomes_one_looped_clip_for_as_long_as_it_played() {
     let mut section = audio_section("Groove A", 1.0, 4);
     section.looping = true;
     let track_id = *section.timeline.by_track.keys().next().unwrap();
@@ -149,16 +147,9 @@ fn looping_section_is_flattened_into_independent_linear_passes() {
     capture.start(0, Some((CapturedTimelineSource::from_section(&section), 0)));
     let clips = &capture.finish(10).unwrap().materialize().by_track[&track_id].clips;
 
-    assert_eq!(clips.len(), 3);
-    assert_eq!(
-        clips.iter().map(|clip| clip.position).collect::<Vec<_>>(),
-        [0, 4, 8]
-    );
-    assert_eq!(
-        clips.iter().map(|clip| clip.duration).collect::<Vec<_>>(),
-        [4, 4, 2]
-    );
-    assert!(clips.windows(2).all(|pair| pair[0].id != pair[1].id));
+    assert_eq!(clips.len(), 1);
+    assert_eq!((clips[0].position, clips[0].duration), (0, 10));
+    assert_eq!((clips[0].loop_start, clips[0].loop_end), (0, 4));
 }
 
 #[test]

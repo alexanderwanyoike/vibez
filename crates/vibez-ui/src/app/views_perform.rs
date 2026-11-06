@@ -1,30 +1,24 @@
 //! Perform workspace shell, Pad Surface, and shared Section Timeline Editor.
 
 use iced::widget::{
-    button, center, column, container, horizontal_space, pick_list, row, text, text_input, tooltip,
+    button, center, column, container, horizontal_space, pick_list, row, text, text_input,
 };
 use iced::{Element, Length, Theme};
 
-use crate::domains::perform::{PerformMode, PerformMsg, Section};
+use crate::domains::perform::{PerformMsg, Section};
 use crate::icons;
 use crate::message::Message;
 use crate::theme as th;
 use crate::typography::{PERFORM_DISPLAY, PERFORM_LABEL, PERFORM_TECH, PERFORM_TECH_STRONG};
+use crate::widgets::hint::with_hint;
+use crate::widgets::timeline::CORNER_RADIUS as TIMELINE_RADIUS;
 
 use super::*;
 
-const MODE_SELECTOR_HEIGHT: f32 = 34.0;
-const MODE_SELECTOR_INSET: f32 = 17.0;
-const MODE_TAB_MIN_WIDTH: f32 = 92.0;
-const MODE_TAB_MAX_WIDTH: f32 = 132.0;
 const PAD_SURFACE_MIN_WIDTH: f32 = 320.0;
 const SECTION_CONSTRUCTION_MIN_WIDTH: f32 = 460.0;
 const SECTION_TOOLBAR_INLINE_MIN_WIDTH: f32 = 640.0;
 pub(super) const SECTION_TRACK_GUTTER_WIDTH: f32 = 112.0;
-pub(super) const SECTION_SCROLLBAR_WIDTH: u16 = 5;
-pub(super) const SECTION_SCROLLBAR_SPACING: u16 = 1;
-pub(super) const SECTION_SCROLLBAR_RESERVATION: f32 =
-    (SECTION_SCROLLBAR_WIDTH + SECTION_SCROLLBAR_SPACING) as f32;
 
 pub(super) fn perform_tool_button(
     icon: char,
@@ -72,38 +66,17 @@ pub(super) fn perform_tool_button(
                     th::border()
                 },
                 width: 1.0,
-                radius: 3.0.into(),
+                radius: TIMELINE_RADIUS.into(),
             },
             ..Default::default()
         }
     });
-    let hint = container(text(tooltip_label).size(10).color(th::text()))
-        .padding([5, 7])
-        .style(|_theme: &Theme| container::Style {
-            background: Some(th::bg_elevated().into()),
-            border: iced::Border {
-                color: th::border_light(),
-                width: 1.0,
-                radius: 3.0.into(),
-            },
-            ..Default::default()
-        });
-    tooltip(control, hint, tooltip::Position::Bottom)
-        .gap(6)
-        .padding(0)
-        .into()
-}
-
-fn perform_mode_tab_width(surface_width: f32) -> f32 {
-    ((surface_width - MODE_SELECTOR_INSET) / PerformMode::ALL.len() as f32)
-        .clamp(MODE_TAB_MIN_WIDTH, MODE_TAB_MAX_WIDTH)
+    with_hint(control, tooltip_label)
 }
 
 pub(super) fn effective_perform_surface_width(preferred_width: f32, workspace_width: f32) -> f32 {
-    let maximum = (workspace_width
-        - SECTION_CONSTRUCTION_MIN_WIDTH
-        - super::views_shell::HORIZONTAL_PANE_SPLITTER_WIDTH)
-        .max(0.0);
+    let maximum =
+        (workspace_width - SECTION_CONSTRUCTION_MIN_WIDTH - crate::shell_layout::PANE_GAP).max(0.0);
     let minimum = PAD_SURFACE_MIN_WIDTH.min(maximum);
     preferred_width.clamp(minimum, maximum)
 }
@@ -121,11 +94,10 @@ impl App {
         if self.state.perform.layout == vibez_project::PerformLayout::Clips {
             return self.view_clip_perform();
         }
-        let workspace_width = self.perform_workspace_width();
+        let workspace_width = self.browser_workspace_width();
         let surface_width =
             effective_perform_surface_width(self.state.view.perform_surface_width, workspace_width);
         let section_width = self.section_construction_width();
-        let mode_selector = self.view_perform_mode_selector(surface_width);
         let pad_surface = self.view_pad_surface(surface_width);
         let section_construction = self.view_section_construction(section_width);
 
@@ -138,179 +110,31 @@ impl App {
         .height(Length::Fill)
         .spacing(0);
 
-        container(
-            column![mode_selector, self.view_section_record_bar(), workspace].height(Length::Fill),
-        )
-        .width(Length::Fill)
-        .height(Length::FillPortion(5))
-        .style(|_theme: &Theme| container::Style {
-            background: Some(th::bg_dark().into()),
-            border: iced::Border {
-                color: th::border(),
-                width: 1.0,
-                radius: 0.0.into(),
-            },
-            ..Default::default()
-        })
-        .into()
-    }
-
-    pub(super) fn perform_workspace_width(&self) -> f32 {
-        let browser_width = if self.state.browser.open {
-            self.state
-                .browser
-                .effective_dock_width(self.state.view.window_width)
-                + super::views_shell::HORIZONTAL_PANE_SPLITTER_WIDTH
-        } else {
-            0.0
-        };
-        (self.state.view.window_width - browser_width).max(0.0)
+        self.perform_cards(self.section_record_group(), workspace)
     }
 
     pub(super) fn section_construction_width(&self) -> f32 {
-        let workspace_width = self.perform_workspace_width();
+        let workspace_width = self.browser_workspace_width();
         let surface_width =
             effective_perform_surface_width(self.state.view.perform_surface_width, workspace_width);
-        (workspace_width - surface_width - super::views_shell::HORIZONTAL_PANE_SPLITTER_WIDTH)
-            .max(0.0)
+        (workspace_width - surface_width - crate::shell_layout::PANE_GAP).max(0.0)
     }
 
     pub(super) fn section_timeline_viewport_width(&self) -> f32 {
-        (self.section_construction_width()
-            - SECTION_TRACK_GUTTER_WIDTH
-            - SECTION_SCROLLBAR_RESERVATION)
-            .max(1.0)
+        (self.section_construction_width() - SECTION_TRACK_GUTTER_WIDTH).max(1.0)
     }
 
     pub(super) fn perform_surface_drag_width(&self, cursor_x: f32) -> f32 {
-        let workspace_width = self.perform_workspace_width();
-        let workspace_left = self.state.view.window_width - workspace_width;
+        let workspace = self.workspace_span();
+        let workspace_width = workspace.width;
         effective_perform_surface_width(
-            cursor_x - workspace_left,
+            cursor_x - workspace.left,
             if self.state.perform.layout == vibez_project::PerformLayout::Clips {
                 workspace_width.max(super::views_clip_launcher::MIN_CLIP_DOCK_WIDTH)
             } else {
                 workspace_width
             },
         )
-    }
-
-    pub(super) fn view_perform_mode_selector(&self, surface_width: f32) -> Element<'_, Message> {
-        let tab_width = perform_mode_tab_width(surface_width);
-        let mut modes = row![].height(Length::Fill).spacing(1);
-        for mode in PerformMode::ALL {
-            let active = self.state.perform.mode == mode;
-            let text_color = if active {
-                th::accent()
-            } else {
-                th::blend(th::text_dim(), th::text(), 0.38)
-            };
-            let label = if mode == PerformMode::Sections {
-                self.state.perform.layout.label()
-            } else {
-                mode.label()
-            }
-            .to_uppercase();
-            let shortcut_color = if active {
-                th::blend(th::accent_dim(), th::accent(), 0.48)
-            } else {
-                th::blend(th::text_dim(), th::text(), 0.18)
-            };
-            let shortcut = container(
-                text(mode.shortcut())
-                    .font(PERFORM_TECH_STRONG)
-                    .size(9)
-                    .color(shortcut_color),
-            )
-            .padding([2, 4])
-            .style(move |_theme: &Theme| container::Style {
-                background: Some(
-                    if active {
-                        th::perform_active_surface()
-                    } else {
-                        th::bg_dark()
-                    }
-                    .into(),
-                ),
-                border: iced::Border {
-                    color: if active {
-                        th::accent_dim()
-                    } else {
-                        th::border_light()
-                    },
-                    width: 1.0,
-                    radius: 2.0.into(),
-                },
-                ..Default::default()
-            });
-            let tab_content = row![
-                text(label).font(PERFORM_LABEL).size(11).color(text_color),
-                shortcut
-            ]
-            .spacing(9)
-            .align_y(iced::Alignment::Center);
-            let tab_button = button(center(tab_content).width(Length::Fill).height(Length::Fill))
-                .on_press(Message::Perform(PerformMsg::SelectMode(mode)))
-                .width(Length::Fill)
-                .height(Length::Fixed(MODE_SELECTOR_HEIGHT - 2.0))
-                .padding(0)
-                .style(move |_theme: &Theme, status| {
-                    let hovered =
-                        matches!(status, button::Status::Hovered | button::Status::Pressed);
-                    let background = if active {
-                        th::perform_active_surface()
-                    } else if hovered {
-                        th::bg_hover()
-                    } else {
-                        iced::Color::TRANSPARENT
-                    };
-                    button::Style {
-                        background: Some(background.into()),
-                        text_color,
-                        border: iced::Border::default(),
-                        ..Default::default()
-                    }
-                });
-
-            let underline_color = if active {
-                th::accent()
-            } else {
-                iced::Color::TRANSPARENT
-            };
-            let underline = container(horizontal_space())
-                .width(Length::Fill)
-                .height(Length::Fixed(2.0))
-                .style(move |_theme: &Theme| container::Style {
-                    background: Some(underline_color.into()),
-                    ..Default::default()
-                });
-
-            modes = modes.push(
-                column![tab_button, underline]
-                    .width(Length::Fixed(tab_width))
-                    .height(Length::Fill),
-            );
-        }
-
-        container(row![modes, horizontal_space()].height(Length::Fill))
-            .width(Length::Fill)
-            .height(Length::Fixed(MODE_SELECTOR_HEIGHT))
-            .padding(iced::Padding {
-                top: 0.0,
-                right: 0.0,
-                bottom: 0.0,
-                left: MODE_SELECTOR_INSET,
-            })
-            .style(|_theme: &Theme| container::Style {
-                background: Some(th::bg_surface().into()),
-                border: iced::Border {
-                    color: th::divider(),
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
-            })
-            .into()
     }
 
     pub(super) fn view_perform_surface_splitter(&self) -> Element<'_, Message> {
@@ -356,15 +180,6 @@ impl App {
             .align_y(iced::Alignment::Center)
             .padding([12, 16])
             .width(Length::Fill)
-            .style(|_theme: &Theme| container::Style {
-                background: Some(th::bg_surface().into()),
-                border: iced::Border {
-                    color: th::border(),
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
-            })
             .into();
         };
 
@@ -479,7 +294,7 @@ impl App {
                         th::border_light()
                     },
                     width: 1.0,
-                    radius: 1.0.into(),
+                    radius: TIMELINE_RADIUS.into(),
                 },
             }
         })
@@ -567,7 +382,7 @@ impl App {
             border: iced::Border {
                 color: th::border_light(),
                 width: 1.0,
-                radius: 3.0.into(),
+                radius: TIMELINE_RADIUS.into(),
             },
             ..Default::default()
         });
@@ -593,36 +408,13 @@ impl App {
                 .into()
         };
 
-        container(toolbar)
-            .width(Length::Fill)
-            .style(|_theme: &Theme| container::Style {
-                background: Some(th::bg_surface().into()),
-                border: iced::Border {
-                    color: th::border(),
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
-            })
-            .into()
+        container(toolbar).width(Length::Fill).into()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn mode_tabs_scale_with_the_pad_surface_then_stop_growing() {
-        let narrow = perform_mode_tab_width(320.0);
-        let default = perform_mode_tab_width(560.0);
-        let wide = perform_mode_tab_width(960.0);
-
-        assert!((MODE_TAB_MIN_WIDTH..MODE_TAB_MAX_WIDTH).contains(&narrow));
-        assert_eq!(default, MODE_TAB_MAX_WIDTH);
-        assert_eq!(wide, MODE_TAB_MAX_WIDTH);
-        assert!(MODE_SELECTOR_INSET + narrow * 3.0 <= 320.0);
-    }
 
     #[test]
     fn pad_grid_height_responds_only_to_window_geometry() {
@@ -635,8 +427,17 @@ mod tests {
     fn perform_surface_width_preserves_both_panes_during_drag() {
         assert_eq!(effective_perform_surface_width(200.0, 1400.0), 320.0);
         assert_eq!(effective_perform_surface_width(640.0, 1400.0), 640.0);
-        assert_eq!(effective_perform_surface_width(1200.0, 1400.0), 933.0);
-        assert_eq!(effective_perform_surface_width(500.0, 820.0), 353.0);
+        assert_eq!(effective_perform_surface_width(1200.0, 1400.0), 932.0);
+        assert_eq!(effective_perform_surface_width(500.0, 820.0), 352.0);
+    }
+
+    #[test]
+    fn the_section_timeline_spans_the_card_beside_its_track_gutter() {
+        let app = super::super::test_support::app();
+        assert_eq!(
+            app.section_timeline_viewport_width(),
+            app.section_construction_width() - SECTION_TRACK_GUTTER_WIDTH
+        );
     }
 
     #[test]

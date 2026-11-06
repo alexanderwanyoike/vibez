@@ -31,7 +31,9 @@ impl EngineTrack {
             queued_mute: None,
             automation_mute: None,
             automation_overrides: AutomationOverrides::default(),
-            mute_ramp: MuteRamp::default(),
+            mute_ramp: GainRamp::default(),
+            launch_declick: GainRamp::default(),
+            pickup_launch_notes: false,
             solo: false,
             swing_offset: None,
             automation_swing_offset: None,
@@ -43,6 +45,7 @@ impl EngineTrack {
             timed_note_offs: Vec::with_capacity(SCHEDULED_NOTES_PER_BLOCK),
             note_repeats: TrackNoteRepeats::default(),
             active_notes: 0,
+            note_owners: [None; 128],
             pending_note_activity: 0,
             suppress_source_notes: false,
         }
@@ -485,11 +488,36 @@ impl EngineTrack {
         }
     }
 
+    /// Send note-offs for the notes `clip_id` started that it no longer
+    /// holds at Arrangement `beat`, after an edit moved or resized it.
+    pub(crate) fn release_notes_left_by(&mut self, clip_id: ClipId, beat: f64) {
+        let clip = self
+            .playback_source
+            .note_clips
+            .iter()
+            .find(|clip| clip.id == clip_id);
+        let mut sounding = self.active_notes;
+        while sounding != 0 {
+            let pitch = sounding.trailing_zeros() as u8;
+            sounding &= sounding - 1;
+            if self.note_owners[pitch as usize] != Some(clip_id)
+                || clip.is_some_and(|clip| clip.holds_note_at(pitch, beat))
+            {
+                continue;
+            }
+            if let Some(instrument) = self.instrument.as_mut() {
+                instrument.note_off(pitch);
+            }
+            self.active_notes &= !(1u128 << pitch);
+        }
+    }
+
     /// Send note-offs for every sounding note. Call whenever the
     /// playhead moves discontinuously; the offs reach the instrument
     /// immediately (built-ins) or on its next render (plugins).
     pub fn flush_notes(&mut self) {
         self.reset_groove_latches();
+        self.pickup_launch_notes = false;
         if self.active_notes == 0 {
             return;
         }
@@ -531,13 +559,15 @@ impl EngineTrack {
     ) -> bool {
         let buf_size = frames * channels;
         self.ensure_buffer(buf_size);
-        self.playback_source.render_audio(
+        let rendered = self.playback_source.render_audio(
             &mut self.mix_buffer[..buf_size],
             pos,
             frames,
             channels,
             loop_region,
-        )
+        );
+        self.apply_launch_declick(frames, channels);
+        rendered
     }
 
     pub fn process_effects(

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use vibez_core::automation::AutomationLane;
 use vibez_core::id::{ClipId, SectionId, TrackId};
 use vibez_core::midi::NoteClipInfo;
-use vibez_core::track::{ClipInfo, TrackInfo};
+use vibez_core::track::{ClipInfo, InstrumentStateInfo, TrackInfo};
 
 pub use vibez_core::perform::SectionLaunchQuantization;
 use vibez_core::perform::{GrooveProfile, SwingAmount};
@@ -14,7 +14,9 @@ use vibez_core::perform::{GrooveProfile, SwingAmount};
 mod clip_launcher;
 pub mod device_preset;
 pub mod project_format_v1;
-pub use clip_launcher::{LauncherClipInfo, PerformLayout};
+mod track_height;
+pub use clip_launcher::{ClipLaunchOverrides, LauncherClipInfo, LauncherTrackInfo, PerformLayout};
+pub use track_height::TrackHeight;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TimelineLocation {
@@ -85,6 +87,11 @@ pub struct Project {
     pub perform_layout: PerformLayout,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub launcher_clips: Vec<LauncherClipInfo>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub launcher_tracks: Vec<LauncherTrackInfo>,
+    /// Arrange lane height of every track resized away from the default.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub track_heights: Vec<(TrackId, TrackHeight)>,
 }
 
 impl Default for Project {
@@ -103,6 +110,8 @@ impl Default for Project {
             sections: Vec::new(),
             perform_layout: PerformLayout::default(),
             launcher_clips: Vec::new(),
+            launcher_tracks: Vec::new(),
+            track_heights: Vec::new(),
         }
     }
 }
@@ -151,6 +160,35 @@ impl From<serde_json::Error> for ProjectError {
 }
 
 impl Project {
+    /// Re-count every audio clip's frames for the engine running at
+    /// `sample_rate`. Notes and automation are in beats and need nothing.
+    pub fn convert_sample_rate(&mut self, sample_rate: u32) {
+        let saved_rate = self.sample_rate;
+        for (_, timeline) in self.timelines_mut() {
+            for clip in &mut timeline.clips {
+                clip.convert_sample_rate(saved_rate, sample_rate);
+            }
+        }
+        self.sample_rate = sample_rate;
+    }
+
+    /// Whether any clip or device plays decoded audio, which a change of
+    /// sample rate must convert.
+    pub fn holds_audio(&self) -> bool {
+        self.timelines()
+            .any(|(_, timeline)| !timeline.clips.is_empty())
+            || self
+                .tracks
+                .iter()
+                .any(|track| match &track.native_instrument {
+                    Some(InstrumentStateInfo::Sampler { source, .. }) => source.is_some(),
+                    Some(InstrumentStateInfo::DrumRack { pads }) => {
+                        pads.iter().any(|pad| pad.source.is_some())
+                    }
+                    _ => false,
+                })
+    }
+
     pub fn timelines(&self) -> impl Iterator<Item = (TimelineLocation, &TimelineInfo)> + '_ {
         std::iter::once((TimelineLocation::Arrange, &self.arrange))
             .chain(
@@ -285,6 +323,90 @@ mod tests {
     use vibez_core::id::{ClipId, TrackId};
     use vibez_core::midi::{MidiNote, NoteClipInfo};
     use vibez_core::track::{InstrumentStateInfo, MediaSourceRef};
+
+    fn audio_clip_at(position: u64) -> ClipInfo {
+        ClipInfo {
+            id: ClipId::new(),
+            track_id: TrackId::new(),
+            name: "percs.wav".into(),
+            position,
+            source_offset: 0,
+            start_marker: None,
+            duration: 44_100,
+            source: None,
+            file_path: None,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
+            gain_db: Default::default(),
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            transient_markers: Default::default(),
+            warp_markers: Default::default(),
+            transpose: Default::default(),
+            original_bpm: None,
+            warped: false,
+            warped_to_bpm: None,
+        }
+    }
+
+    #[test]
+    fn every_timeline_s_audio_clips_convert_to_another_sample_rate() {
+        let timeline_at = |position| TimelineInfo {
+            clips: vec![audio_clip_at(position)],
+            ..TimelineInfo::default()
+        };
+        let mut project = Project {
+            sample_rate: 44_100,
+            arrange: timeline_at(88_200),
+            sections: vec![SectionInfo {
+                id: SectionId::new(),
+                slot: 0,
+                name: "Drop".into(),
+                length_beats: 16.0,
+                launch_quantization: SectionLaunchQuantization::default(),
+                looping: true,
+                timeline: timeline_at(44_100),
+            }],
+            launcher_clips: vec![LauncherClipInfo {
+                id: ClipId::new(),
+                track_id: TrackId::new(),
+                row: 0,
+                timeline: timeline_at(22_050),
+                launch: Default::default(),
+            }],
+            ..Project::default()
+        };
+
+        project.convert_sample_rate(48_000);
+
+        assert_eq!(project.sample_rate, 48_000);
+        let positions: Vec<_> = project
+            .timelines()
+            .map(|(_, timeline)| timeline.clips[0].position)
+            .collect();
+        assert_eq!(positions, [96_000, 48_000, 24_000]);
+    }
+
+    #[test]
+    fn a_project_holds_audio_through_a_clip_or_a_sampled_device() {
+        let mut project = Project::default();
+        assert!(!project.holds_audio());
+
+        let mut sampler = TrackInfo::new("Keys");
+        sampler.native_instrument = Some(InstrumentStateInfo::Sampler {
+            params: Vec::new(),
+            source: Some(MediaSourceRef::LocalFile {
+                path: PathBuf::from("keys.wav"),
+            }),
+        });
+        project.tracks.push(sampler);
+        assert!(project.holds_audio());
+
+        let mut clip_only = Project::default();
+        clip_only.arrange.clips.push(audio_clip_at(0));
+        assert!(clip_only.holds_audio());
+    }
 
     #[test]
     fn missing_source_identity_is_reserved_after_reopen() {
@@ -522,6 +644,8 @@ mod tests {
             sections: Vec::new(),
             perform_layout: Default::default(),
             launcher_clips: Vec::new(),
+            launcher_tracks: Vec::new(),
+            track_heights: Vec::new(),
         };
 
         project.save_to_file(&path).unwrap();
@@ -598,6 +722,8 @@ mod tests {
             sections: Vec::new(),
             perform_layout: Default::default(),
             launcher_clips: Vec::new(),
+            launcher_tracks: Vec::new(),
+            track_heights: Vec::new(),
         };
         let legacy_bytes = serde_json::to_vec_pretty(&project).unwrap();
 
@@ -705,6 +831,8 @@ mod tests {
             sections: Vec::new(),
             perform_layout: Default::default(),
             launcher_clips: Vec::new(),
+            launcher_tracks: Vec::new(),
+            track_heights: Vec::new(),
         };
 
         project.save_to_file(&path).unwrap();
@@ -757,6 +885,8 @@ mod tests {
             sections: Vec::new(),
             perform_layout: Default::default(),
             launcher_clips: Vec::new(),
+            launcher_tracks: Vec::new(),
+            track_heights: Vec::new(),
         };
 
         project.save_to_file(&path).unwrap();

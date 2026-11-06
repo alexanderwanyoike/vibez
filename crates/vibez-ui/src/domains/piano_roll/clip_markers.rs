@@ -12,10 +12,7 @@ pub(super) fn toggle_loop(
     let Some(clip) = find_note_clip_mut(tracks, track_id, clip_id) else {
         return;
     };
-    clip.loop_enabled = !clip.loop_enabled;
-    if clip.loop_enabled {
-        clip.reset_loop_region_to_clip();
-    }
+    clip.set_loop_enabled(!clip.loop_enabled);
     engine.send(EngineCommand::SetNoteClipLoop {
         track_id,
         clip_id,

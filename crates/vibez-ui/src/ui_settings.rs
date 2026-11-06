@@ -26,6 +26,13 @@ pub struct UiSettings {
     pub perform_surface_width: f32,
     #[serde(default = "default_detail_panel_height")]
     pub detail_panel_height: f32,
+    /// None until Mix's divider is first dragged.
+    #[serde(default)]
+    pub mix_detail_panel_height: Option<f32>,
+    #[serde(default)]
+    pub arrange_grid: crate::state::GridConfig,
+    #[serde(default)]
+    pub clip_grid: crate::state::GridConfig,
     #[serde(default = "default_audition_enabled")]
     pub audition_enabled: bool,
     #[serde(default = "default_audition_gain")]
@@ -88,6 +95,8 @@ pub struct UiSettings {
     /// the app.
     #[serde(default = "default_interface_scale")]
     pub interface_scale: f32,
+    #[serde(default)]
+    pub colour_strength: crate::theme::ColourStrength,
     /// Ask GitHub at startup whether a newer release exists. On by
     /// default: the check is one request a day and the result is a
     /// dismissible chip, never a dialog. Off means no network call.
@@ -138,6 +147,9 @@ impl Default for UiSettings {
             sample_browser_width: default_sample_browser_width(),
             perform_surface_width: default_perform_surface_width(),
             detail_panel_height: default_detail_panel_height(),
+            mix_detail_panel_height: None,
+            arrange_grid: crate::state::GridConfig::default(),
+            clip_grid: crate::state::GridConfig::default(),
             audition_enabled: default_audition_enabled(),
             audition_gain: default_audition_gain(),
             auto_warp_on_import: false,
@@ -155,6 +167,7 @@ impl Default for UiSettings {
             confirm_project_track_deletion: false,
             auto_save_enabled: default_auto_save_enabled(),
             interface_scale: default_interface_scale(),
+            colour_strength: crate::theme::ColourStrength::default(),
             check_for_updates: default_check_for_updates(),
             last_update_check_unix: None,
         }
@@ -461,6 +474,51 @@ mod tests {
     }
 
     #[test]
+    fn editor_grids_default_to_zoom_adaptive_and_roundtrip() {
+        use crate::state::{GridConfig, SnapGrid};
+
+        let old: UiSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(old.arrange_grid, GridConfig::default());
+        assert_eq!(old.clip_grid, GridConfig::default());
+
+        let settings = UiSettings {
+            arrange_grid: GridConfig::new(SnapGrid::BAR, false, false, 0),
+            clip_grid: GridConfig::new(SnapGrid::SIXTEENTH.triplet(), true, true, -2),
+            ..UiSettings::default()
+        };
+        let loaded: UiSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(loaded.arrange_grid, settings.arrange_grid);
+        assert_eq!(loaded.clip_grid, settings.clip_grid);
+    }
+
+    #[test]
+    fn an_out_of_range_grid_bias_loads_clamped_to_the_adaptive_steps() {
+        use crate::state::{GridConfig, SnapGrid};
+
+        let settings = UiSettings {
+            arrange_grid: GridConfig::new(SnapGrid::EIGHTH, true, true, 100),
+            clip_grid: GridConfig::new(SnapGrid::EIGHTH, true, true, -100),
+            ..UiSettings::default()
+        };
+        let loaded: UiSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+
+        assert_eq!(loaded.arrange_grid.adaptive_bias, 7);
+        assert_eq!(loaded.clip_grid.adaptive_bias, -7);
+    }
+
+    #[test]
+    fn the_mix_split_is_unset_in_an_old_file_and_roundtrips() {
+        let mix_split = |json: &str| {
+            let settings: UiSettings = serde_json::from_str(json).unwrap();
+            serde_json::to_value(settings).unwrap()["mix_detail_panel_height"].clone()
+        };
+        assert_eq!(mix_split("{}"), serde_json::Value::Null);
+        assert_eq!(mix_split(r#"{"mix_detail_panel_height": 312.0}"#), 312.0);
+    }
+
+    #[test]
     fn detail_panel_height_defaults_and_roundtrips() {
         let old: UiSettings = serde_json::from_str("{}").unwrap();
         assert_eq!(
@@ -542,6 +600,23 @@ mod tests {
             serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
         assert_eq!(loaded.interface_scale, 1.25);
         assert_eq!(loaded.clamped_interface_scale(), 1.25);
+    }
+
+    #[test]
+    fn settings_written_before_colour_strength_show_vivid_colours() {
+        let loaded: UiSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(loaded.colour_strength, crate::theme::ColourStrength::Vivid);
+    }
+
+    #[test]
+    fn colour_strength_roundtrips() {
+        let settings = UiSettings {
+            colour_strength: crate::theme::ColourStrength::Soft,
+            ..Default::default()
+        };
+        let loaded: UiSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(loaded.colour_strength, crate::theme::ColourStrength::Soft);
     }
 
     #[test]

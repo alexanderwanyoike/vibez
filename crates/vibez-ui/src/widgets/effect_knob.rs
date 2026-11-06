@@ -60,6 +60,17 @@ pub struct EffectKnobWidget {
     /// Tints the unlit part of the ring, so a knob at zero still shows
     /// what it belongs to.
     pub ring_tint: Option<Color>,
+    /// Lights the ring from its top centre, for values that cut and boost.
+    pub bipolar: bool,
+    /// Paints the body like a console knob's coloured cap.
+    pub cap: Option<KnobCap>,
+}
+
+/// A knob body's own colour and the pointer drawn on it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct KnobCap {
+    pub body: Color,
+    pub pointer: Color,
 }
 
 impl EffectKnobWidget {
@@ -84,6 +95,8 @@ impl EffectKnobWidget {
             default,
             arc_color,
             ring_tint: None,
+            bipolar: false,
+            cap: None,
         }
     }
 
@@ -108,6 +121,8 @@ impl EffectKnobWidget {
             default,
             arc_color,
             ring_tint: None,
+            bipolar: false,
+            cap: None,
         }
     }
 
@@ -124,6 +139,8 @@ impl EffectKnobWidget {
             default: 0.0,
             arc_color,
             ring_tint: Some(arc_color),
+            bipolar: false,
+            cap: None,
         }
     }
 
@@ -149,6 +166,8 @@ impl EffectKnobWidget {
             default,
             arc_color,
             ring_tint: None,
+            bipolar: false,
+            cap: None,
         }
     }
 
@@ -232,6 +251,31 @@ impl EffectKnobWidget {
             0.0
         } else {
             ((self.value - self.min) / range).clamp(0.0, 1.0)
+        }
+    }
+
+    /// This knob lit from its centre.
+    pub fn bipolar(mut self) -> Self {
+        self.bipolar = true;
+        self
+    }
+
+    /// This knob wearing `cap`.
+    pub fn with_cap(mut self, cap: KnobCap) -> Self {
+        self.cap = Some(cap);
+        self
+    }
+
+    /// The span of the ring lit by the value, as start and end angles, or
+    /// none when the value lights no visible part of it.
+    fn lit_arc(&self) -> Option<(f32, f32)> {
+        let norm = self.normalized();
+        let value = ARC_START + norm * (ARC_END - ARC_START);
+        if self.bipolar {
+            let centre = (ARC_START + ARC_END) / 2.0;
+            ((norm - 0.5).abs() > 0.005).then_some((centre.min(value), centre.max(value)))
+        } else {
+            (norm > 0.005).then_some((ARC_START, value))
         }
     }
 
@@ -333,8 +377,8 @@ impl canvas::Program<Message> for EffectKnobWidget {
         });
         frame.stroke(&bg_arc, round.with_color(ring).with_width(2.5));
 
-        if norm > 0.005 {
-            let value_arc = build_arc(center, arc_radius, ARC_START, value_angle);
+        if let Some((from, to)) = self.lit_arc() {
+            let value_arc = build_arc(center, arc_radius, from, to);
             let arc_color = if engaged {
                 Color {
                     r: (self.arc_color.r * 1.2).min(1.0),
@@ -350,14 +394,13 @@ impl canvas::Program<Message> for EffectKnobWidget {
 
         // Knob body: filled disc, subtly lighter while engaged.
         let body = canvas::Path::circle(center, body_radius);
-        frame.fill(
-            &body,
-            if engaged {
-                theme::knob_body_engaged()
-            } else {
-                theme::knob_body()
-            },
-        );
+        let body_colour = match (self.cap, engaged) {
+            (Some(cap), false) => cap.body,
+            (Some(cap), true) => theme::blend(cap.body, theme::text(), 0.12),
+            (None, false) => theme::knob_body(),
+            (None, true) => theme::knob_body_engaged(),
+        };
+        frame.fill(&body, body_colour);
 
         // Pointer: from inside the body to its edge, rounded, never
         // touching the arc.
@@ -373,16 +416,12 @@ impl canvas::Program<Message> for EffectKnobWidget {
                 center.y + pointer_outer * value_angle.sin(),
             ),
         );
-        frame.stroke(
-            &pointer,
-            round
-                .with_color(if engaged {
-                    theme::text()
-                } else {
-                    theme::text_dim()
-                })
-                .with_width(2.0),
-        );
+        let pointer_colour = match (self.cap, engaged) {
+            (Some(cap), _) => cap.pointer,
+            (None, true) => theme::text(),
+            (None, false) => theme::text_dim(),
+        };
+        frame.stroke(&pointer, round.with_color(pointer_colour).with_width(2.0));
 
         vec![frame.into_geometry()]
     }
@@ -543,6 +582,31 @@ mod tests {
             )) if actual_track == track_id && actual_effect == effect_id
                 && (value - 0.031_622_775).abs() < 1e-6
         ));
+    }
+
+    #[test]
+    fn a_bipolar_knob_lights_from_its_centre_toward_its_value() {
+        let knob = |value: f32| {
+            EffectKnobWidget::new(
+                TrackId::new(),
+                EffectId::new(),
+                0,
+                value,
+                -12.0,
+                12.0,
+                0.0,
+                Color::WHITE,
+            )
+        };
+        let centre = (ARC_START + ARC_END) / 2.0;
+        let quarter = (ARC_END - ARC_START) / 4.0;
+
+        let (from, to) = knob(6.0).bipolar().lit_arc().unwrap();
+        assert!((from - centre).abs() < 1e-5 && (to - (centre + quarter)).abs() < 1e-5);
+        let (from, to) = knob(-6.0).bipolar().lit_arc().unwrap();
+        assert!((from - (centre - quarter)).abs() < 1e-5 && (to - centre).abs() < 1e-5);
+        assert_eq!(knob(0.0).bipolar().lit_arc(), None, "flat lights nothing");
+        assert_eq!(knob(6.0).lit_arc().unwrap().0, ARC_START);
     }
 
     fn clip_knob(field: AudioClipRotaryField) -> EffectKnobWidget {

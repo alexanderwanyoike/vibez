@@ -152,7 +152,7 @@ fn loop_toggle_and_resize_apply_to_the_whole_clip_selection() {
 }
 
 #[test]
-fn selected_midi_loop_activation_replaces_stale_bounds_with_the_clip_length() {
+fn selected_midi_loop_activation_without_a_loop_region_loops_the_clip_length() {
     let mut arrangement = arrangement_with_tracks(1);
     let mut engine = RecordingEngine::default();
     arrangement.update(
@@ -177,7 +177,7 @@ fn selected_midi_loop_activation_replaces_stale_bounds_with_the_clip_length() {
         start_marker_beats: 0.0,
         loop_enabled: false,
         loop_start_beats: 0.0,
-        loop_end_beats: 4.0,
+        loop_end_beats: 0.0,
         groove_grid: vibez_core::perform::GrooveGrid::Off,
     });
     arrangement
@@ -273,6 +273,10 @@ fn enabling_a_mixed_loop_selection_preserves_existing_regions() {
 fn extending_audio_does_not_enable_looping_implicitly() {
     let mut arrangement = arrangement_with_tracks(1);
     let (track_id, clip_id) = add_audio_clip(&mut arrangement, 0, 0, 200);
+    arrangement.tracks[0].clips[0].audio = Arc::new(vibez_core::audio_buffer::DecodedAudio {
+        channels: vec![vec![0.0; 400]],
+        sample_rate: 44100,
+    });
     let mut engine = RecordingEngine::default();
 
     arrangement.update(
@@ -344,7 +348,10 @@ fn duplicate_preserves_audio_and_midi_loop_settings() {
     a.update(
         ArrangementMsg::DuplicateSelectedClip,
         &mut engine,
-        ArrangementCtx::default(),
+        ArrangementCtx {
+            samples_per_beat: 100.0,
+            ..Default::default()
+        },
     );
 
     let audio_copy = a.tracks[0].clips.last().unwrap();
@@ -424,7 +431,10 @@ fn repeated_duplicate_keeps_the_source_clip_name_readable() {
         a.update(
             ArrangementMsg::DuplicateSelectedClip,
             &mut engine,
-            ArrangementCtx::default(),
+            ArrangementCtx {
+                samples_per_beat: 100.0,
+                ..Default::default()
+            },
         );
     }
 
@@ -464,7 +474,10 @@ fn midi_duplicate_keeps_the_source_clip_name_readable() {
     a.update(
         ArrangementMsg::DuplicateSelectedClip,
         &mut engine,
-        ArrangementCtx::default(),
+        ArrangementCtx {
+            samples_per_beat: 100.0,
+            ..Default::default()
+        },
     );
 
     assert!(a.tracks[1]

@@ -18,9 +18,12 @@ feature PRs on all three platforms.
 
 ## Requirements for a PR
 
-- CI green on all three platforms: `cargo test --workspace` and
-  `cargo clippy --workspace -- -D warnings`
-- `cargo fmt` clean
+- Follows [CODING_STANDARDS.md](CODING_STANDARDS.md), the rules code review
+  checks
+- CI green on all three platforms: `cargo test --workspace`,
+  `cargo clippy --workspace --all-targets --exclude vibez-plugin-host -- -D warnings`
+  and `cargo clippy -p vibez-plugin-host -- -D warnings`
+- `cargo fmt --all -- --check` clean
 - New logic comes with unit tests; UI logic belongs in a domain module
   (see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)) so it is testable
   without the GUI

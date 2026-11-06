@@ -109,7 +109,7 @@ impl App {
                 color: track_color,
                 zoom_level: layout.zoom_level,
                 scroll_offset_beats: layout.scroll_offset_beats,
-                grid: self.state.view.grid_config(),
+                grid: self.state.view.arrange_grid,
                 selected,
                 reference,
                 min_label,
@@ -254,7 +254,7 @@ impl App {
                     row![search, close]
                         .spacing(6)
                         .align_y(iced::Alignment::Center),
-                    iced::widget::scrollable(list).height(Length::Fixed(150.0)),
+                    crate::widgets::quiet_scroll::vertical(list).height(Length::Fixed(150.0)),
                 ]
                 .spacing(6),
             )
@@ -443,8 +443,8 @@ impl App {
         let layout = AutomationLaneLayout {
             header_width: crate::widgets::track_header::TRACK_HEADER_TOTAL_WIDTH,
             body_width: None,
-            zoom_level: self.state.view.zoom_level,
-            scroll_offset_beats: self.state.view.scroll_offset_beats,
+            zoom_level: self.state.view.viewport.zoom_level,
+            scroll_offset_beats: self.state.view.viewport.scroll_offset_beats,
         };
         for part in self.automation_lane_parts(track, automation, track_color, layout) {
             rows = rows.push(row![part.header, part.body].height(Length::Fixed(part.height)));

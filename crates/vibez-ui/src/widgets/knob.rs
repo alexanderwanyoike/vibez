@@ -83,7 +83,7 @@ impl canvas::Program<Message> for KnobWidget {
         frame.stroke(
             &bg_arc,
             canvas::Stroke::default()
-                .with_color(theme::fader_track())
+                .with_color(theme::knob_track())
                 .with_width(3.0),
         );
 

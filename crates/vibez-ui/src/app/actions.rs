@@ -138,7 +138,7 @@ impl App {
             self.state.status_text = "Perform settings saved".into();
         }
         if let Some(request) = action.track_mute_request {
-            let queued = self.state.transport.playing
+            let queued = self.state.transport.is_playing()
                 && request.quantization != vibez_core::perform::TrackMuteQuantization::Immediate;
             let pre_edit_snapshot = self.take_snapshot();
             let changed = {
@@ -148,7 +148,7 @@ impl App {
                     &mut self.state.project.history,
                     pre_edit_snapshot,
                     request,
-                    self.state.transport.playing,
+                    self.state.transport.is_playing(),
                     &mut engine,
                 )
             };
@@ -259,8 +259,8 @@ impl App {
             self.state.view.detail_panel_tab = DetailPanelTab::Clip;
         }
         if let Some(beat) = action.scroll_to_beat {
-            if !self.state.arrangement.drag_resize_active
-                && !self.state.perform.timeline_editor().drag_resize_active
+            if !self.state.arrangement.edit_drag.is_active()
+                && !self.state.perform.timeline_editor().edit_drag.is_active()
             {
                 self.auto_scroll_to_beat(beat);
             }
@@ -358,8 +358,8 @@ impl App {
             self.state.arrangement.selected_track = Some(track_id);
         }
         if action.end_drag_resize {
-            self.state.arrangement.drag_resize_active = false;
-            self.state.perform.timeline_editor_mut().drag_resize_active = false;
+            self.state.arrangement.end_drag_resize();
+            self.state.perform.timeline_editor_mut().end_drag_resize();
         }
         if action.close_device_menu {
             self.state.devices.context_menu = None;
@@ -468,8 +468,8 @@ impl App {
             }
         }
         if let Some(beat) = action.scroll_to_beat {
-            if !self.state.arrangement.drag_resize_active
-                && !self.state.perform.timeline_editor().drag_resize_active
+            if !self.state.arrangement.edit_drag.is_active()
+                && !self.state.perform.timeline_editor().edit_drag.is_active()
             {
                 self.auto_scroll_to_beat(beat);
             }
@@ -478,9 +478,13 @@ impl App {
             if self.state.view.workspace == crate::state::Workspace::Perform
                 && self.state.perform.has_selected_timeline()
             {
-                self.state.perform.timeline_editor_mut().drag_resize_active = true;
+                self.state
+                    .perform
+                    .timeline_editor_mut()
+                    .edit_drag
+                    .mark_active();
             } else {
-                self.state.arrangement.drag_resize_active = true;
+                self.state.arrangement.edit_drag.mark_active();
             }
         }
         if let Some(status) = action.status {
@@ -583,7 +587,7 @@ impl App {
         let cursor_x = self.state.view.cursor_x;
         let right_boundary = (self.state.view.window_width - TIMELINE_WINDOW_EDGE_INSET).max(1.0);
         let section_drag = self.state.view.workspace == crate::state::Workspace::Perform
-            && self.state.perform.timeline_editor().drag_resize_active;
+            && self.state.perform.timeline_editor().edit_drag.is_active();
         if section_drag {
             let viewport_width = self.section_timeline_viewport_width();
             let left_boundary = (right_boundary - viewport_width).max(0.0);
@@ -605,17 +609,9 @@ impl App {
                     viewport_width,
                 );
             }
-        } else if self.state.arrangement.drag_resize_active {
-            let browser_width = if self.state.browser.open {
-                self.state
-                    .browser
-                    .effective_dock_width(self.state.view.window_width)
-                    + super::views_shell::HORIZONTAL_PANE_SPLITTER_WIDTH
-            } else {
-                0.0
-            };
+        } else if self.state.arrangement.edit_drag.is_active() {
             let left_boundary =
-                browser_width + crate::widgets::track_header::TRACK_HEADER_TOTAL_WIDTH;
+                self.workspace_span().left + crate::widgets::track_header::TRACK_HEADER_TOTAL_WIDTH;
             let viewport_width = (right_boundary - left_boundary).max(1.0);
             let velocity = crate::timeline_geometry::edge_scroll_velocity(
                 cursor_x,
@@ -623,12 +619,11 @@ impl App {
                 right_boundary,
             );
             if velocity != 0.0 {
-                let mut viewport = crate::timeline_geometry::TimelineViewport::new(
-                    self.state.view.zoom_level,
-                    self.state.view.scroll_offset_beats,
-                );
-                viewport.scroll_by(velocity / 60.0, self.state.total_beats(), viewport_width);
-                self.state.view.scroll_offset_beats = viewport.scroll_offset_beats;
+                let total_beats = self.state.total_beats();
+                self.state
+                    .view
+                    .viewport
+                    .scroll_by(velocity / 60.0, total_beats, viewport_width);
             }
         }
         let auto_save_task = if self.save_runtime.auto_save_due(std::time::Instant::now()) {

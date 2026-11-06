@@ -204,14 +204,13 @@ pub fn run() -> iced::Result {
 
 /// A device card as the device section would hold it, `section` wide and
 /// tall, under a caption naming the case.
-fn framed_card<'a>(
-    label: &'static str,
+fn effect_card<'a>(
     card_width: f32,
-    section: (f32, f32),
     track: TrackId,
     effect: &'a UiEffect,
     accent: iced::Color,
     body: Element<'a, Message>,
+    advanced: crate::widgets::device_chrome::Action,
 ) -> Element<'a, Message> {
     let card = view_effect_slot(
         track,
@@ -221,10 +220,23 @@ fn framed_card<'a>(
             content: body,
             width: card_width,
             padding: iced::Padding::ZERO,
+            preset: Some(Box::new(move |selector_w| {
+                crate::widgets::device_preset_bar::view(track, effect, None, accent, selector_w)
+            })),
+            advanced: Some(advanced),
         }),
         None,
         48_000,
     );
+    card
+}
+
+/// `card` in a dark section `section` big under `label`.
+fn gallery_section<'a>(
+    label: &'static str,
+    section: (f32, f32),
+    card: Element<'a, Message>,
+) -> Element<'a, Message> {
     column![
         text(label).size(11).color(th::text_dim()),
         container(row![card].height(Length::Fill))
@@ -243,6 +255,29 @@ fn framed_card<'a>(
     ]
     .spacing(4)
     .into()
+}
+
+/// An instrument card titled `name` and `card_width` wide, its header
+/// carrying `device`'s presets.
+fn instrument_card<'a>(
+    name: &'a str,
+    track_id: TrackId,
+    device: crate::domains::device_params::DeviceParams<'a>,
+    accent: iced::Color,
+    card_width: f32,
+    body: Element<'a, Message>,
+) -> Element<'a, Message> {
+    use crate::widgets::device_chrome::{shell, Action, Header};
+    let header = Header::new(name, accent, String::new())
+        .preset(move |selector_w| {
+            crate::widgets::device_preset_bar::view(track_id, device, None, accent, selector_w)
+        })
+        .action(Action::new(
+            crate::icons::X,
+            "Remove instrument",
+            Message::remove_track_instrument(track_id),
+        ));
+    shell(header, body, card_width)
 }
 
 /// Native Gain at each width tier and section height it adapts to, with
@@ -311,30 +346,13 @@ impl GainGallery {
         let effect = &self.effect;
         let track = self.track;
         let body = iced::widget::responsive(move |size| {
-            crate::widgets::gain_device::view(
-                track,
-                effect,
-                accent,
-                panel,
-                None,
-                crate::widgets::device_preset_bar::view(
-                    track,
-                    effect,
-                    None,
-                    accent,
-                    crate::widgets::gain_device::preset_bar_width(size),
-                ),
-                size,
-            )
+            crate::widgets::gain_device::view(track, effect, accent, panel, None, size)
         });
-        framed_card(
+        let advanced = crate::widgets::gain_device::advanced(effect, panel.advanced, accent);
+        gallery_section(
             label,
-            card_width,
             section,
-            track,
-            effect,
-            accent,
-            body.into(),
+            effect_card(card_width, track, effect, accent, body.into(), advanced),
         )
     }
 
@@ -481,35 +499,21 @@ impl EqGallery {
         let effect = &self.effect;
         let track = self.track;
         let spectrum = &self.spectrum;
-        let body = iced::widget::responsive(move |size| {
-            crate::widgets::eq_device::EqView {
-                track_id: track,
-                effect,
-                accent,
-                panel,
-                entry: None,
-                spectrum: Some(spectrum),
-                sample_rate: 48_000.0,
-            }
-            .view(
-                crate::widgets::device_preset_bar::view(
-                    track,
-                    effect,
-                    None,
-                    accent,
-                    crate::widgets::eq_device::preset_bar_width(size),
-                ),
-                size,
-            )
-        });
-        framed_card(
-            label,
-            card_width,
-            section,
-            track,
+        let view = move || crate::widgets::eq_device::EqView {
+            track_id: track,
             effect,
             accent,
-            body.into(),
+            panel,
+            entry: None,
+            spectrum: Some(spectrum),
+            sample_rate: 48_000.0,
+        };
+        let advanced = view().advanced_switch();
+        let body = iced::widget::responsive(move |size| view().view(size));
+        gallery_section(
+            label,
+            section,
+            effect_card(card_width, track, effect, accent, body.into(), advanced),
         )
     }
 
@@ -647,33 +651,19 @@ impl CompressorGallery {
         let accent = th::track_color(0);
         let effect = &self.effect;
         let track = self.track;
-        let body = iced::widget::responsive(move |size| {
-            crate::widgets::compressor_device::CompressorView {
-                track_id: track,
-                effect,
-                accent,
-                panel,
-                entry: None,
-            }
-            .view(
-                crate::widgets::device_preset_bar::view(
-                    track,
-                    effect,
-                    None,
-                    accent,
-                    crate::widgets::compressor_device::preset_bar_width(size),
-                ),
-                size,
-            )
-        });
-        framed_card(
-            label,
-            card_width,
-            section,
-            track,
+        let view = move || crate::widgets::compressor_device::CompressorView {
+            track_id: track,
             effect,
             accent,
-            body.into(),
+            panel,
+            entry: None,
+        };
+        let advanced = view().advanced_switch();
+        let body = iced::widget::responsive(move |size| view().view(size));
+        gallery_section(
+            label,
+            section,
+            effect_card(card_width, track, effect, accent, body.into(), advanced),
         )
     }
 
@@ -802,34 +792,20 @@ impl FilterGallery {
         let accent = th::track_color(0);
         let effect = &self.effect;
         let track = self.track;
-        let body = iced::widget::responsive(move |size| {
-            crate::widgets::filter_device::FilterView {
-                track_id: track,
-                effect,
-                accent,
-                panel,
-                entry: None,
-                sample_rate: 48_000.0,
-            }
-            .view(
-                crate::widgets::device_preset_bar::view(
-                    track,
-                    effect,
-                    None,
-                    accent,
-                    crate::widgets::filter_device::preset_bar_width(size),
-                ),
-                size,
-            )
-        });
-        framed_card(
-            label,
-            card_width,
-            section,
-            track,
+        let view = move || crate::widgets::filter_device::FilterView {
+            track_id: track,
             effect,
             accent,
-            body.into(),
+            panel,
+            entry: None,
+            sample_rate: 48_000.0,
+        };
+        let advanced = view().advanced_switch();
+        let body = iced::widget::responsive(move |size| view().view(size));
+        gallery_section(
+            label,
+            section,
+            effect_card(card_width, track, effect, accent, body.into(), advanced),
         )
     }
 
@@ -987,33 +963,19 @@ impl GateGallery {
         let accent = th::track_color(0);
         let effect = &self.effect;
         let track = self.track;
-        let body = iced::widget::responsive(move |size| {
-            crate::widgets::gate_device::GateView {
-                track_id: track,
-                effect,
-                accent,
-                panel,
-                entry: None,
-            }
-            .view(
-                crate::widgets::device_preset_bar::view(
-                    track,
-                    effect,
-                    None,
-                    accent,
-                    crate::widgets::gate_device::preset_bar_width(size),
-                ),
-                size,
-            )
-        });
-        framed_card(
-            label,
-            card_width,
-            section,
-            track,
+        let view = move || crate::widgets::gate_device::GateView {
+            track_id: track,
             effect,
             accent,
-            body.into(),
+            panel,
+            entry: None,
+        };
+        let advanced = view().advanced_switch();
+        let body = iced::widget::responsive(move |size| view().view(size));
+        gallery_section(
+            label,
+            section,
+            effect_card(card_width, track, effect, accent, body.into(), advanced),
         )
     }
 
@@ -1134,33 +1096,19 @@ impl DriveGallery {
         let accent = th::track_color(0);
         let effect = &self.effect;
         let track = self.track;
-        let body = iced::widget::responsive(move |size| {
-            crate::widgets::drive_device::DriveView {
-                track_id: track,
-                effect,
-                accent,
-                panel,
-                entry: None,
-            }
-            .view(
-                crate::widgets::device_preset_bar::view(
-                    track,
-                    effect,
-                    None,
-                    accent,
-                    crate::widgets::drive_device::preset_bar_width(size),
-                ),
-                size,
-            )
-        });
-        framed_card(
-            label,
-            card_width,
-            section,
-            track,
+        let view = move || crate::widgets::drive_device::DriveView {
+            track_id: track,
             effect,
             accent,
-            body.into(),
+            panel,
+            entry: None,
+        };
+        let advanced = view().advanced_switch();
+        let body = iced::widget::responsive(move |size| view().view(size));
+        gallery_section(
+            label,
+            section,
+            effect_card(card_width, track, effect, accent, body.into(), advanced),
         )
     }
 
@@ -1278,34 +1226,20 @@ impl BitcrushGallery {
         let accent = th::track_color(0);
         let effect = &self.effect;
         let track = self.track;
-        let body = iced::widget::responsive(move |size| {
-            crate::widgets::bitcrush_device::BitcrushView {
-                track_id: track,
-                effect,
-                accent,
-                panel,
-                entry: None,
-                host_rate: 44_100,
-            }
-            .view(
-                crate::widgets::device_preset_bar::view(
-                    track,
-                    effect,
-                    None,
-                    accent,
-                    crate::widgets::bitcrush_device::preset_bar_width(size),
-                ),
-                size,
-            )
-        });
-        framed_card(
-            label,
-            card_width,
-            section,
-            track,
+        let view = move || crate::widgets::bitcrush_device::BitcrushView {
+            track_id: track,
             effect,
             accent,
-            body.into(),
+            panel,
+            entry: None,
+            host_rate: 44_100,
+        };
+        let advanced = view().advanced_switch();
+        let body = iced::widget::responsive(move |size| view().view(size));
+        gallery_section(
+            label,
+            section,
+            effect_card(card_width, track, effect, accent, body.into(), advanced),
         )
     }
 
@@ -1430,34 +1364,20 @@ impl DelayGallery {
         let accent = th::track_color(0);
         let effect = &self.effect;
         let track = self.track;
-        let body = iced::widget::responsive(move |size| {
-            crate::widgets::delay_device::DelayView {
-                track_id: track,
-                effect,
-                accent,
-                panel,
-                entry: None,
-                bpm: 120.0,
-            }
-            .view(
-                crate::widgets::device_preset_bar::view(
-                    track,
-                    effect,
-                    None,
-                    accent,
-                    crate::widgets::delay_device::preset_bar_width(size),
-                ),
-                size,
-            )
-        });
-        framed_card(
-            label,
-            card_width,
-            section,
-            track,
+        let view = move || crate::widgets::delay_device::DelayView {
+            track_id: track,
             effect,
             accent,
-            body.into(),
+            panel,
+            entry: None,
+            bpm: 120.0,
+        };
+        let advanced = view().advanced_switch();
+        let body = iced::widget::responsive(move |size| view().view(size));
+        gallery_section(
+            label,
+            section,
+            effect_card(card_width, track, effect, accent, body.into(), advanced),
         )
     }
 
@@ -1571,34 +1491,20 @@ impl EchoGallery {
         let accent = th::track_color(0);
         let effect = &self.effect;
         let track = self.track;
-        let body = iced::widget::responsive(move |size| {
-            crate::widgets::echo_device::EchoView {
-                track_id: track,
-                effect,
-                accent,
-                panel,
-                entry: None,
-                bpm: 120.0,
-            }
-            .view(
-                crate::widgets::device_preset_bar::view(
-                    track,
-                    effect,
-                    None,
-                    accent,
-                    crate::widgets::echo_device::preset_bar_width(size),
-                ),
-                size,
-            )
-        });
-        framed_card(
-            label,
-            card_width,
-            section,
-            track,
+        let view = move || crate::widgets::echo_device::EchoView {
+            track_id: track,
             effect,
             accent,
-            body.into(),
+            panel,
+            entry: None,
+            bpm: 120.0,
+        };
+        let advanced = view().advanced_switch();
+        let body = iced::widget::responsive(move |size| view().view(size));
+        gallery_section(
+            label,
+            section,
+            effect_card(card_width, track, effect, accent, body.into(), advanced),
         )
     }
 
@@ -1708,33 +1614,19 @@ impl SaturatorGallery {
         let accent = th::track_color(0);
         let effect = &self.effect;
         let track = self.track;
-        let body = iced::widget::responsive(move |size| {
-            crate::widgets::saturator_device::SaturatorView {
-                track_id: track,
-                effect,
-                accent,
-                panel,
-                entry: None,
-            }
-            .view(
-                crate::widgets::device_preset_bar::view(
-                    track,
-                    effect,
-                    None,
-                    accent,
-                    crate::widgets::saturator_device::preset_bar_width(size),
-                ),
-                size,
-            )
-        });
-        framed_card(
-            label,
-            card_width,
-            section,
-            track,
+        let view = move || crate::widgets::saturator_device::SaturatorView {
+            track_id: track,
             effect,
             accent,
-            body.into(),
+            panel,
+            entry: None,
+        };
+        let advanced = view().advanced_switch();
+        let body = iced::widget::responsive(move |size| view().view(size));
+        gallery_section(
+            label,
+            section,
+            effect_card(card_width, track, effect, accent, body.into(), advanced),
         )
     }
 
@@ -1908,34 +1800,20 @@ impl LimiterGallery {
         let accent = th::track_color(0);
         let effect = &self.effect;
         let track = self.track;
-        let body = iced::widget::responsive(move |size| {
-            crate::widgets::limiter_device::LimiterView {
-                track_id: track,
-                effect,
-                accent,
-                panel,
-                entry: None,
-                now: panel.last_meter_at.unwrap_or_else(std::time::Instant::now),
-            }
-            .view(
-                crate::widgets::device_preset_bar::view(
-                    track,
-                    effect,
-                    None,
-                    accent,
-                    crate::widgets::limiter_device::preset_bar_width(size),
-                ),
-                size,
-            )
-        });
-        framed_card(
-            label,
-            card_width,
-            section,
-            track,
+        let view = move || crate::widgets::limiter_device::LimiterView {
+            track_id: track,
             effect,
             accent,
-            body.into(),
+            panel,
+            entry: None,
+            now: panel.last_meter_at.unwrap_or_else(std::time::Instant::now),
+        };
+        let advanced = view().advanced_switch();
+        let body = iced::widget::responsive(move |size| view().view(size));
+        gallery_section(
+            label,
+            section,
+            effect_card(card_width, track, effect, accent, body.into(), advanced),
         )
     }
 
@@ -2097,34 +1975,20 @@ impl ReverbGallery {
         let accent = th::track_color(0);
         let effect = &self.effect;
         let track = self.track;
-        let body = iced::widget::responsive(move |size| {
-            crate::widgets::reverb_device::ReverbView {
-                track_id: track,
-                effect,
-                accent,
-                panel,
-                entry: None,
-                bpm: 120.0,
-            }
-            .view(
-                crate::widgets::device_preset_bar::view(
-                    track,
-                    effect,
-                    None,
-                    accent,
-                    crate::widgets::reverb_device::preset_bar_width(size),
-                ),
-                size,
-            )
-        });
-        framed_card(
-            label,
-            card_width,
-            section,
-            track,
+        let view = move || crate::widgets::reverb_device::ReverbView {
+            track_id: track,
             effect,
             accent,
-            body.into(),
+            panel,
+            entry: None,
+            bpm: 120.0,
+        };
+        let advanced = view().advanced_switch();
+        let body = iced::widget::responsive(move |size| view().view(size));
+        gallery_section(
+            label,
+            section,
+            effect_card(card_width, track, effect, accent, body.into(), advanced),
         )
     }
 
@@ -2245,34 +2109,20 @@ impl AutoPanGallery {
         let accent = th::track_color(0);
         let effect = &self.effect;
         let track = self.track;
-        let body = iced::widget::responsive(move |size| {
-            crate::widgets::auto_pan_device::AutoPanView {
-                track_id: track,
-                effect,
-                accent,
-                panel,
-                entry: None,
-                bpm: 120.0,
-            }
-            .view(
-                crate::widgets::device_preset_bar::view(
-                    track,
-                    effect,
-                    None,
-                    accent,
-                    crate::widgets::auto_pan_device::preset_bar_width(size),
-                ),
-                size,
-            )
-        });
-        framed_card(
-            label,
-            card_width,
-            section,
-            track,
+        let view = move || crate::widgets::auto_pan_device::AutoPanView {
+            track_id: track,
             effect,
             accent,
-            body.into(),
+            panel,
+            entry: None,
+            bpm: 120.0,
+        };
+        let advanced = view().advanced_switch();
+        let body = iced::widget::responsive(move |size| view().view(size));
+        gallery_section(
+            label,
+            section,
+            effect_card(card_width, track, effect, accent, body.into(), advanced),
         )
     }
 
@@ -2380,34 +2230,20 @@ impl PhaserGallery {
         let accent = th::track_color(0);
         let effect = &self.effect;
         let track = self.track;
-        let body = iced::widget::responsive(move |size| {
-            crate::widgets::phaser_device::PhaserView {
-                track_id: track,
-                effect,
-                accent,
-                panel,
-                entry: None,
-                bpm: 120.0,
-            }
-            .view(
-                crate::widgets::device_preset_bar::view(
-                    track,
-                    effect,
-                    None,
-                    accent,
-                    crate::widgets::phaser_device::preset_bar_width(size),
-                ),
-                size,
-            )
-        });
-        framed_card(
-            label,
-            card_width,
-            section,
-            track,
+        let view = move || crate::widgets::phaser_device::PhaserView {
+            track_id: track,
             effect,
             accent,
-            body.into(),
+            panel,
+            entry: None,
+            bpm: 120.0,
+        };
+        let advanced = view().advanced_switch();
+        let body = iced::widget::responsive(move |size| view().view(size));
+        gallery_section(
+            label,
+            section,
+            effect_card(card_width, track, effect, accent, body.into(), advanced),
         )
     }
 
@@ -2531,46 +2367,20 @@ impl SynthGallery {
                 panel: panel.clone(),
                 entry: None,
             }
-            .view(
-                crate::widgets::device_preset_bar::view(
-                    track_id,
-                    device,
-                    None,
-                    accent,
-                    crate::widgets::synth_device::preset_bar_width(size),
-                ),
-                size,
-            )
+            .view(size)
         });
-        let title = crate::widgets::device_chrome::title_bar(
-            row![
-                text("\u{25CF}").size(8).color(accent),
-                text("Subtractive Synth").size(11).color(th::text())
-            ]
-            .spacing(5)
-            .align_y(iced::Alignment::Center),
-        );
-        let card = crate::widgets::device_chrome::card(
-            column![title, body].width(Length::Fixed(card_width)),
-        );
-        column![
-            text(label).size(11).color(th::text_dim()),
-            container(row![card].height(Length::Fill))
-                .padding(8)
-                .width(section.0)
-                .height(section.1)
-                .style(|_theme: &Theme| container::Style {
-                    background: Some(th::bg_dark().into()),
-                    border: iced::Border {
-                        color: th::border(),
-                        width: 1.0,
-                        radius: 0.0.into(),
-                    },
-                    ..Default::default()
-                }),
-        ]
-        .spacing(4)
-        .into()
+        gallery_section(
+            label,
+            section,
+            instrument_card(
+                "Subtractive Synth",
+                track_id,
+                device,
+                accent,
+                card_width,
+                body.into(),
+            ),
+        )
     }
 
     fn view(&self) -> Element<'_, Message> {
@@ -2663,19 +2473,15 @@ pub fn run_synth() -> iced::Result {
 }
 
 /// A tabbed instrument card titled `name` in a section `section` big,
-/// under `label`: `body` builds the card's body from the track's controls,
-/// a preset bar and the body's size.
+/// under `label`: `body` builds the card's body from the track's controls
+/// and the body's size.
 fn tabbed_scene<'a>(
     label: &'static str,
     name: &'static str,
     track: &'a ProjectTrack,
     card_width: f32,
     section: (f32, f32),
-    body: impl Fn(
-            crate::domains::device_params::DeviceParams<'a>,
-            Element<'a, Message>,
-            iced::Size,
-        ) -> Element<'a, Message>
+    body: impl Fn(crate::domains::device_params::DeviceParams<'a>, iced::Size) -> Element<'a, Message>
         + 'a,
 ) -> Element<'a, Message> {
     let accent = th::track_color(0);
@@ -2683,47 +2489,12 @@ fn tabbed_scene<'a>(
     let Some(device) = crate::domains::device_params::DeviceParams::instrument(track) else {
         return text("no instrument").into();
     };
-    let body = iced::widget::responsive(move |size| {
-        body(
-            device,
-            crate::widgets::device_preset_bar::view(
-                track_id,
-                device,
-                None,
-                accent,
-                crate::widgets::instrument_bands::preset_bar_width(size),
-            ),
-            size,
-        )
-    });
-    let title = crate::widgets::device_chrome::title_bar(
-        row![
-            text("\u{25CF}").size(8).color(accent),
-            text(name).size(11).color(th::text())
-        ]
-        .spacing(5)
-        .align_y(iced::Alignment::Center),
-    );
-    let card =
-        crate::widgets::device_chrome::card(column![title, body].width(Length::Fixed(card_width)));
-    column![
-        text(label).size(11).color(th::text_dim()),
-        container(row![card].height(Length::Fill))
-            .padding(8)
-            .width(section.0)
-            .height(section.1)
-            .style(|_theme: &Theme| container::Style {
-                background: Some(th::bg_dark().into()),
-                border: iced::Border {
-                    color: th::border(),
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
-            }),
-    ]
-    .spacing(4)
-    .into()
+    let body = iced::widget::responsive(move |size| body(device, size));
+    gallery_section(
+        label,
+        section,
+        instrument_card(name, track_id, device, accent, card_width, body.into()),
+    )
 }
 
 /// Native Wavetable Synth at each width tier, tab and height it adapts to,
@@ -2779,7 +2550,7 @@ impl WavetableGallery {
             &self.track,
             card_width,
             section,
-            move |device, preset_bar, size| {
+            move |device, size| {
                 crate::widgets::wavetable_device::WavetableView {
                     track_id,
                     device,
@@ -2787,7 +2558,7 @@ impl WavetableGallery {
                     panel: panel.clone(),
                     entry: None,
                 }
-                .view(preset_bar, size)
+                .view(size)
             },
         )
     }
@@ -2986,46 +2757,13 @@ impl SamplerGallery {
                 panel: panel.clone(),
                 entry: None,
             }
-            .view(
-                crate::widgets::device_preset_bar::view(
-                    track_id,
-                    device,
-                    None,
-                    accent,
-                    crate::widgets::sampler_device::preset_bar_width(size),
-                ),
-                size,
-            )
+            .view(size)
         });
-        let title = crate::widgets::device_chrome::title_bar(
-            row![
-                text("\u{25CF}").size(8).color(accent),
-                text("Sampler").size(11).color(th::text())
-            ]
-            .spacing(5)
-            .align_y(iced::Alignment::Center),
-        );
-        let card = crate::widgets::device_chrome::card(
-            column![title, body].width(Length::Fixed(card_width)),
-        );
-        column![
-            text(label).size(11).color(th::text_dim()),
-            container(row![card].height(Length::Fill))
-                .padding(8)
-                .width(section.0)
-                .height(section.1)
-                .style(|_theme: &Theme| container::Style {
-                    background: Some(th::bg_dark().into()),
-                    border: iced::Border {
-                        color: th::border(),
-                        width: 1.0,
-                        radius: 0.0.into(),
-                    },
-                    ..Default::default()
-                }),
-        ]
-        .spacing(4)
-        .into()
+        gallery_section(
+            label,
+            section,
+            instrument_card("Sampler", track_id, device, accent, card_width, body.into()),
+        )
     }
 
     fn view(&self) -> Element<'_, Message> {
@@ -3207,7 +2945,6 @@ impl DrumRackGallery {
             return text("no pad").into();
         };
         let body = iced::widget::responsive(move |size| {
-            let layout = crate::widgets::drum_rack_device::arrange(size);
             let mut firing = [false; vibez_core::track::DRUM_RACK_BANK_SIZE];
             firing[0] = true;
             crate::widgets::drum_rack_device::DrumRackView {
@@ -3222,46 +2959,20 @@ impl DrumRackGallery {
                 panel: panel.clone(),
                 entry: None,
             }
-            .view(
-                crate::widgets::device_preset_bar::view(
-                    track_id,
-                    device,
-                    None,
-                    accent,
-                    crate::widgets::drum_rack_device::preset_bar_width(layout),
-                ),
-                size,
-            )
+            .view(size)
         });
-        let title = crate::widgets::device_chrome::title_bar(
-            row![
-                text("\u{25CF}").size(8).color(accent),
-                text("Drum Rack").size(11).color(th::text())
-            ]
-            .spacing(5)
-            .align_y(iced::Alignment::Center),
-        );
-        let card = crate::widgets::device_chrome::card(
-            column![title, body].width(Length::Fixed(card_width)),
-        );
-        column![
-            text(label).size(11).color(th::text_dim()),
-            container(row![card].height(Length::Fill))
-                .padding(8)
-                .width(section.0)
-                .height(section.1)
-                .style(|_theme: &Theme| container::Style {
-                    background: Some(th::bg_dark().into()),
-                    border: iced::Border {
-                        color: th::border(),
-                        width: 1.0,
-                        radius: 0.0.into(),
-                    },
-                    ..Default::default()
-                }),
-        ]
-        .spacing(4)
-        .into()
+        gallery_section(
+            label,
+            section,
+            instrument_card(
+                "Drum Rack",
+                track_id,
+                device,
+                accent,
+                card_width,
+                body.into(),
+            ),
+        )
     }
 
     fn view(&self) -> Element<'_, Message> {
@@ -3426,7 +3137,7 @@ impl FmGallery {
             &self.track,
             card_width,
             section,
-            move |device, preset_bar, size| {
+            move |device, size| {
                 crate::widgets::fm_device::FmView {
                     track_id,
                     device,
@@ -3434,7 +3145,7 @@ impl FmGallery {
                     panel: panel.clone(),
                     entry: None,
                 }
-                .view(preset_bar, size)
+                .view(size)
             },
         )
     }

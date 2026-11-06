@@ -180,7 +180,7 @@ impl canvas::Program<Message> for ImpulsePlot<'_> {
                     text,
                     Point::new(LABEL_W - 4.0, y(db)),
                     iced::alignment::Horizontal::Right,
-                    th::text_muted(),
+                    th::text_dim(),
                 );
             }
         }
@@ -201,7 +201,7 @@ impl canvas::Program<Message> for ImpulsePlot<'_> {
                     format!("{second:.1}"),
                     Point::new(x(second), plot.y + plot.height + LABEL_H / 2.0 + 1.0),
                     iced::alignment::Horizontal::Center,
-                    th::text_muted(),
+                    th::text_dim(),
                 );
             }
             second += 0.5;

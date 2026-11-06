@@ -97,6 +97,9 @@ pub struct AudioEngine {
     audition: AuditionBus,
     sample_rate: u32,
     cmd_rx: Consumer<EngineCommand>,
+    transport_rx: crate::transport_ring::TransportReceiver,
+    /// UI end of the transport ring, parked here until the UI takes it.
+    transport_tx: Option<crate::transport_ring::TransportSender>,
     pub(super) event_tx: Producer<EngineEvent>,
     clip_event_drops: u64,
     reported_clip_event_drops: u64,
@@ -117,6 +120,8 @@ pub struct AudioEngine {
     /// these frames advance the newly active Section's local playhead.
     section_advance_override: Option<u64>,
     arrangement_audio_length: Option<u64>,
+    /// Open [`EngineCommand::BeginContentRebuild`]s.
+    content_rebuilds: u32,
     /// Audio Track Recording may extend Arrange beyond existing content.
     arrangement_recording: bool,
     /// Project Swing is engine state because generated-event consumers share
@@ -238,6 +243,7 @@ impl AudioEngine {
     /// consumer on the UI thread.
     pub fn new() -> (Self, Producer<EngineCommand>, Consumer<EngineEvent>) {
         let (cmd_tx, cmd_rx) = RingBuffer::<EngineCommand>::new(RING_BUFFER_CAPACITY);
+        let (transport_tx, transport_rx) = crate::transport_ring::transport_ring();
         let (event_tx, event_rx) = RingBuffer::<EngineEvent>::new(RING_BUFFER_CAPACITY);
         let (spectrum_tx, spectrum_rx) = RingBuffer::<f32>::new(SPECTRUM_RING_CAPACITY);
         let (effect_spectrum, effect_spectrum_rx) =
@@ -292,6 +298,8 @@ impl AudioEngine {
             audition: AuditionBus::new(),
             sample_rate: DEFAULT_SAMPLE_RATE,
             cmd_rx,
+            transport_rx: crate::transport_ring::TransportReceiver::new(transport_rx),
+            transport_tx: Some(transport_tx),
             event_tx,
             clip_event_drops: 0,
             reported_clip_event_drops: 0,
@@ -307,6 +315,7 @@ impl AudioEngine {
             pending_section_record_stop: None,
             section_advance_override: None,
             arrangement_audio_length: None,
+            content_rebuilds: 0,
             arrangement_recording: false,
             project_swing: SwingAmount::default(),
             performance_position: 0,
@@ -318,6 +327,12 @@ impl AudioEngine {
         };
 
         (engine, cmd_tx, event_rx)
+    }
+
+    /// Take the sender for Play, Stop, Seek and loop changes before the
+    /// engine moves to the audio thread; returns `None` if already taken.
+    pub fn take_transport_sender(&mut self) -> Option<crate::transport_ring::TransportSender> {
+        self.transport_tx.take()
     }
 
     /// Take the consumer side of the spectrum-analyser ring. Must be
@@ -430,6 +445,9 @@ impl AudioEngine {
         } else {
             self.transport.advance(frames as u64)
         };
+        if was_playing && !performing && !self.transport.is_playing() {
+            self.present_natural_playback_stop_after(self.mix_latency());
+        }
         self.performance_position = if was_playing {
             if performing {
                 self.performance_position.saturating_add(frames as u64)
@@ -532,8 +550,7 @@ impl AudioEngine {
             self.rendered_callback_frames = rendered;
             self.active_section = None;
             self.clock_domain = ClockDomain::Arrange;
-            self.transport
-                .set_audio_length(self.arrangement_audio_length);
+            self.transport.set_audio_length(self.arrangement_end());
         }
 
         // Discontinuous jump NOT already handled by the loop-boundary
@@ -800,6 +817,14 @@ mod tests;
 #[cfg(test)]
 #[path = "engine_stuck_note_tests.rs"]
 mod stuck_note_tests;
+
+#[cfg(test)]
+#[path = "engine_transport_ring_tests.rs"]
+mod transport_ring_tests;
+
+#[cfg(test)]
+#[path = "engine_content_rebuild_tests.rs"]
+mod content_rebuild_tests;
 
 #[cfg(test)]
 #[path = "engine_note_edit_allocation_tests.rs"]

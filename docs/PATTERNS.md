@@ -9,7 +9,7 @@ introduces a new convention adds it here in the same PR.
 Two ground rules frame everything below:
 
 - The audio callback is lock-free and allocation-free. Anything reachable
-  from `AudioEngine::process` must neither allocate nor block, and every
+  from `AudioEngine::process_block` must neither allocate nor block, and every
   `EngineCommand` variant must be safe to drop on the audio thread.
 - Comments state the why the code cannot express (constraints, invariants,
   rationale). Never what the code does.
@@ -465,6 +465,10 @@ Undo is whole-project snapshots. The conventions:
 - One user gesture is one undo step: continuous inputs carry an
   `UndoGestureId` minted at press and reused across moves; the history
   coalesces snapshots by gesture id.
+- A cancelled gesture leaves no step: Escape during a drag calls
+  `UndoHistory::revert_gesture`, which swaps the gesture's snapshot back in,
+  puts nothing on the redo stack and refuses the gesture's later edits. The
+  lane holding the drag captures that Escape, so it cancels nothing else.
 - Messages whose outcome decides whether anything changed are listed in
   `defers_project_edit()`: the snapshot is taken before routing but pushed
   only if the domain reports `mark_dirty`.

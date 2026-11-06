@@ -5,7 +5,7 @@
 use std::collections::HashSet;
 
 use iced::widget::{
-    button, canvas, center, column, container, horizontal_space, mouse_area, row, scrollable, text,
+    button, canvas, center, column, container, horizontal_space, mouse_area, row, text,
 };
 use iced::{Element, Length, Theme};
 
@@ -19,17 +19,31 @@ use crate::message::Message;
 use crate::state::{ArrangementSelection, ContextMenuTarget, TrackTimelineContent};
 use crate::theme as th;
 use crate::timeline_geometry::TimelineGeometry;
+use crate::timeline_snap::SnapTargets;
+use crate::widgets::arrange_corner::{arrange_corner, arrangement_size_labels, song_length_label};
+use crate::widgets::quiet_scroll;
 use crate::widgets::timeline::{
-    build_row_spans, ArrangementMinimap, MinimapTrack, RulerWidget, TimelineClip, TrackClipCanvas,
-    TRACK_ROW_HEIGHT,
+    build_row_spans, ArrangementMinimap, MinimapTrack, RulerWidget, TimeRulerWidget, TimelineClip,
+    TrackClipCanvas, ARRANGE_RULER_HEIGHT, OVERVIEW_HEIGHT, TIME_RULER_HEIGHT,
 };
 use crate::widgets::track_header::{
-    view_editable_channel_name, view_track_header, TrackHeaderRecordingView,
+    view_editable_channel_name, view_track_header, with_resize_edge, ChannelNameStyle,
+    TrackHeaderFlags, TrackHeaderRecordingView, TRACK_HEADER_TOTAL_WIDTH,
 };
 
 use super::*;
 
+/// Expanded return or master automation scrolls inside this cap so the
+/// pinned footer can never squeeze the track list out of the window.
+const CHANNEL_FOOTER_MAX_HEIGHT: f32 = 240.0;
+
 impl App {
+    /// Width of the clip lanes, right of the track headers.
+    pub(super) fn arrange_lane_width(&self) -> f32 {
+        (self.browser_workspace_width() - crate::widgets::track_header::TRACK_HEADER_TOTAL_WIDTH)
+            .max(1.0)
+    }
+
     pub(super) fn view_arrangement(&self) -> Element<'_, Message> {
         let timeline = self.state.arrangement.resolve_timeline().editor;
         if self.state.project_tracks.tracks.is_empty() {
@@ -68,11 +82,8 @@ impl App {
                 target: ContextMenuTarget::ArrangementEmpty,
             }));
             if browser_drag_active {
-                let grid = self.state.view.grid_config();
-                let geometry = TimelineGeometry::from_zoom(
-                    self.state.view.zoom_level,
-                    self.state.view.scroll_offset_beats,
-                );
+                let grid = self.state.view.arrange_grid;
+                let geometry = self.state.view.viewport.geometry();
                 area = area
                     .on_move(move |point| {
                         let beat =
@@ -86,44 +97,57 @@ impl App {
             return area.into();
         }
 
-        let playhead_beats = self.state.position_beats();
+        let playhead_beats = self.state.transport.position_beats();
         let sample_rate = self.state.transport.sample_rate;
         let bpm = self.state.transport.bpm;
-        let zoom_level = self.state.view.zoom_level;
-        let scroll_offset = self.state.view.scroll_offset_beats;
+        let zoom_level = self.state.view.viewport.zoom_level;
+        let scroll_offset = self.state.view.viewport.scroll_offset_beats;
         let geometry = TimelineGeometry::from_zoom(zoom_level, scroll_offset);
         let total_beats = self.state.total_beats();
 
-        // Beat-based ruler across the top (offset by track header width)
+        let play_start_beats = self.state.transport.play_start_beats;
+        let snap_targets = std::sync::Arc::new(SnapTargets::for_arrangement(
+            timeline,
+            &self.state.transport,
+        ));
+
+        // Beat-based ruler, offset by track header width
         let ruler = RulerWidget {
             playhead_beats,
-            bpm,
+            play_start_beats: Some(play_start_beats),
             zoom_level,
-            grid: self.state.view.grid_config(),
+            grid: self.state.view.arrange_grid,
             scroll_offset_beats: scroll_offset,
-            total_beats,
+            loop_brace: true,
             loop_enabled: self.state.transport.loop_enabled,
             loop_start_beats: self.state.transport.loop_start_beats,
             loop_end_beats: self.state.transport.loop_end_beats,
             time_selection_active: timeline.time_selection_active,
             selection_start_beats: timeline.selection_start_beats,
             selection_end_beats: timeline.selection_end_beats,
+            snap_targets: snap_targets.clone(),
         };
         let ruler_canvas: Element<'_, Message> = canvas(ruler)
             .width(Length::Fill)
-            .height(Length::Fixed(28.0))
+            .height(Length::Fixed(ARRANGE_RULER_HEIGHT))
             .into();
 
-        // Spacer matching header width (including color bar) for the ruler row
-        let ruler_spacer = container(text(""))
-            .width(Length::Fixed(
-                crate::widgets::track_header::TRACK_HEADER_TOTAL_WIDTH,
-            ))
-            .height(Length::Fixed(28.0))
-            .style(|_theme: &Theme| iced::widget::container::Style {
-                background: Some(crate::theme::bg_surface().into()),
-                ..Default::default()
-            });
+        let (tracks_label, clips_label) = arrangement_size_labels(
+            self.state.project_tracks.tracks.len(),
+            timeline.timeline.clip_count(
+                self.state
+                    .project_tracks
+                    .tracks
+                    .iter()
+                    .map(|track| track.id),
+            ),
+        );
+        let ruler_spacer = arrange_corner(
+            tracks_label,
+            clips_label,
+            TRACK_HEADER_TOTAL_WIDTH,
+            ARRANGE_RULER_HEIGHT,
+        );
 
         let ruler_row = row![ruler_spacer, ruler_canvas];
 
@@ -169,18 +193,15 @@ impl App {
                 })
                 .collect(),
         };
-        let minimap_spacer = container(text(""))
-            .width(Length::Fixed(
-                crate::widgets::track_header::TRACK_HEADER_TOTAL_WIDTH,
-            ))
-            .height(Length::Fixed(40.0))
-            .style(|_theme: &Theme| iced::widget::container::Style {
-                background: Some(th::bg_surface().into()),
-                ..Default::default()
-            });
+        let minimap_spacer = arrange_corner(
+            "Overview".into(),
+            song_length_label(self.state.duration_seconds(), bpm),
+            TRACK_HEADER_TOTAL_WIDTH,
+            OVERVIEW_HEIGHT,
+        );
         let minimap_canvas: Element<'_, Message> = canvas(minimap)
             .width(Length::Fill)
-            .height(Length::Fixed(40.0))
+            .height(Length::Fixed(OVERVIEW_HEIGHT))
             .into();
         let minimap_row = row![minimap_spacer, minimap_canvas];
 
@@ -192,7 +213,6 @@ impl App {
             .iter()
             .map(|t| t.id)
             .collect();
-        let total_track_count = self.state.project_tracks.tracks.len();
         let browser_drag_duration = self
             .state
             .browser
@@ -211,23 +231,24 @@ impl App {
         // Track rows: header widgets + clip canvas
         // Real vertical layout of the column, so a rubber-band drag can map
         // a y offset back to a track even with automation lanes expanded.
-        let row_spans = build_row_spans(
-            TRACK_ROW_HEIGHT,
-            self.state.project_tracks.tracks.iter().map(|track| {
-                let extra_height = if self.state.automation_ui.expanded.contains(&track.id) {
-                    self.automation_rows_height(timeline, track.id)
-                } else {
-                    0.0
-                };
-                (track.id, extra_height)
-            }),
-        );
+        let row_spans = build_row_spans(self.state.project_tracks.tracks.iter().map(|track| {
+            let extra_height = if self.state.automation_ui.expanded.contains(&track.id) {
+                self.automation_rows_height(timeline, track.id)
+            } else {
+                0.0
+            };
+            (
+                track.id,
+                self.state.track_heights.height(track.id).pixels(),
+                extra_height,
+            )
+        }));
 
         let mut track_rows = column![].spacing(0);
         let empty_content = TrackTimelineContent::default();
         let browser_drag_active = self.state.browser.drag_source.is_some();
 
-        for (track_index, track) in self.state.project_tracks.tracks.iter().enumerate() {
+        for (track, span) in self.state.project_tracks.tracks.iter().zip(&row_spans) {
             let content = timeline.timeline.get(track.id).unwrap_or(&empty_content);
             let selected = timeline.selected_track == Some(track.id);
             let track_color = th::track_color(track.color_index);
@@ -257,26 +278,33 @@ impl App {
             let input_channels = self.state.audio_settings.input_channel_count();
             let input_target = self.state.audio_recording.armed_track == Some(track.id)
                 || self.state.audio_recording.monitor_track == Some(track.id);
-            let header = view_track_header(
-                track,
-                selected,
-                editing,
-                &self.state.view.edit_name_text,
-                automation_open,
-                TrackHeaderRecordingView {
-                    output_peaks: self
-                        .track_meter_peaks
-                        .get(&track.id)
-                        .copied()
-                        .unwrap_or_default(),
-                    input_channels,
-                    armed: self.state.audio_recording.armed_track == Some(track.id),
-                    input_peaks: input_target.then_some((
-                        self.state.audio_recording.input_peak_l,
-                        self.state.audio_recording.input_peak_r,
-                    )),
-                    source_tracks: &self.state.project_tracks.tracks,
-                },
+            let header = with_resize_edge(
+                view_track_header(
+                    track,
+                    TrackHeaderFlags {
+                        selected,
+                        editing_name: editing,
+                        automation_open,
+                        hovered: self.state.view.hovered_track_header == Some(track.id),
+                    },
+                    &self.state.view.edit_name_text,
+                    TrackHeaderRecordingView {
+                        output_peaks: self
+                            .track_meter_peaks
+                            .get(&track.id)
+                            .copied()
+                            .unwrap_or_default(),
+                        input_channels,
+                        armed: self.state.audio_recording.armed_track == Some(track.id),
+                        input_peaks: input_target.then_some((
+                            self.state.audio_recording.input_peak_l,
+                            self.state.audio_recording.input_peak_r,
+                        )),
+                        source_tracks: &self.state.project_tracks.tracks,
+                    },
+                ),
+                track.id,
+                self.state.track_heights.resizing() == Some(track.id),
             );
 
             // Clip canvas for this track
@@ -285,7 +313,7 @@ impl App {
                 content,
                 playhead_beats,
                 zoom_level,
-                self.state.view.grid_config(),
+                self.state.view.arrange_grid,
                 scroll_offset,
                 (self.state.view.window_width
                     - crate::widgets::track_header::TRACK_HEADER_TOTAL_WIDTH)
@@ -296,8 +324,6 @@ impl App {
                 track_color,
                 bpm,
                 track.id,
-                track_index,
-                total_track_count,
                 track_ids.clone(),
                 selected_clips,
                 self.state.transport.loop_enabled,
@@ -314,7 +340,9 @@ impl App {
             .with_marquee(
                 row_spans.clone(),
                 timeline.marquee.as_ref().map(|marquee| marquee.rect),
-            );
+            )
+            .with_snap_targets(snap_targets.clone())
+            .with_clip_drag(timeline.clip_drag.as_ref().map(|drag| drag.preview.clone()));
             if let Some(preview) = self.state.audio_recording.preview_for_track(track.id) {
                 let name = match preview.source {
                     crate::domains::audio_recording::AudioRecordingSource::HardwareInput => {
@@ -350,12 +378,12 @@ impl App {
             }
             let track_id = track.id;
             let compatible = !track.kind.is_midi();
-            let grid = self.state.view.grid_config();
+            let grid = self.state.view.arrange_grid;
             let track_geometry = geometry;
             let mut clip_canvas_area = mouse_area(
                 canvas(clip_canvas_widget)
                     .width(Length::Fill)
-                    .height(Length::Fixed(TRACK_ROW_HEIGHT)),
+                    .height(Length::Fixed(span.lane_height)),
             );
             if browser_drag_active {
                 clip_canvas_area = clip_canvas_area
@@ -374,7 +402,13 @@ impl App {
             }
             let clip_canvas: Element<'_, Message> = clip_canvas_area.into();
 
-            let track_row = row![header, clip_canvas].height(Length::Fixed(TRACK_ROW_HEIGHT));
+            let header =
+                mouse_area(header).on_right_press(Message::View(ViewMsg::ShowContextMenu {
+                    x: self.state.view.cursor_x,
+                    y: self.state.view.cursor_y,
+                    target: ContextMenuTarget::TrackHeader { track_id: track.id },
+                }));
+            let track_row = row![header, clip_canvas].height(Length::Fixed(span.lane_height));
 
             track_rows = track_rows.push(track_row);
 
@@ -384,7 +418,7 @@ impl App {
         }
 
         if self.state.browser.drag_source.is_some() {
-            let grid = self.state.view.grid_config();
+            let grid = self.state.view.arrange_grid;
             let empty_geometry = geometry;
             let empty_beat = match self.state.browser.drag_target {
                 Some(crate::state::BrowserDropTarget::EmptyArrangement { beat }) => Some(beat),
@@ -442,6 +476,7 @@ impl App {
         // Clipless lanes at the bottom, Ableton-style: a slim header
         // (select, expand, delete for returns) and their automation
         // lanes when expanded.
+        let mut channel_rows = column![].spacing(0);
         let master_ref = &self.state.project_tracks.master;
         let channel_refs: Vec<&crate::state::ProjectTrack> = self
             .state
@@ -487,10 +522,13 @@ impl App {
             } else {
                 view_editable_channel_name(
                     channel,
-                    self.state.view.editing_track_name == Some(channel.id),
-                    &self.state.view.edit_name_text,
-                    11,
-                    name_color,
+                    (self.state.view.editing_track_name == Some(channel.id))
+                        .then_some(self.state.view.edit_name_text.as_str()),
+                    ChannelNameStyle {
+                        size: 11,
+                        font: iced::Font::DEFAULT,
+                        color: name_color,
+                    },
                 )
             };
 
@@ -533,7 +571,7 @@ impl App {
                             th::bg_surface().into()
                         }),
                         border: iced::Border {
-                            color: if selected { chan_color } else { th::border() },
+                            color: th::groove(),
                             width: 1.0,
                             radius: 0.0.into(),
                         },
@@ -549,30 +587,49 @@ impl App {
                 .style(|_theme: &Theme| container::Style {
                     background: Some(th::bg_dark().into()),
                     border: iced::Border {
-                        color: th::divider(),
+                        color: th::groove(),
                         width: 1.0,
                         radius: 0.0.into(),
                     },
                     ..Default::default()
                 });
 
-            track_rows = track_rows.push(row![header, filler].height(Length::Fixed(26.0)));
+            channel_rows = channel_rows.push(row![header, filler].height(Length::Fixed(26.0)));
             if expanded {
-                track_rows = self.push_automation_lanes(track_rows, timeline, channel, chan_color);
+                channel_rows =
+                    self.push_automation_lanes(channel_rows, timeline, channel, chan_color);
             }
         }
 
-        let content = column![ruler_row, minimap_row, track_rows];
+        let track_body = quiet_scroll::vertical(track_rows).height(Length::Fill);
+        let channel_footer =
+            container(quiet_scroll::vertical(channel_rows)).max_height(CHANNEL_FOOTER_MAX_HEIGHT);
 
-        let scrollable_content = scrollable(content).direction(scrollable::Direction::Vertical(
-            scrollable::Scrollbar::default(),
-        ));
+        let time_ruler: Element<'_, Message> = canvas(TimeRulerWidget {
+            bpm,
+            zoom_level,
+            scroll_offset_beats: scroll_offset,
+        })
+        .width(Length::Fill)
+        .height(Length::Fixed(TIME_RULER_HEIGHT))
+        .into();
+        let time_row = row![
+            arrange_corner(
+                "Time".into(),
+                String::new(),
+                TRACK_HEADER_TOTAL_WIDTH,
+                TIME_RULER_HEIGHT
+            ),
+            time_ruler
+        ];
+
+        let content = column![minimap_row, ruler_row, track_body, channel_footer, time_row];
 
         // mouse_area only provides on_right_press (no cursor position),
         // so use the globally tracked cursor for the scrollable background.
         // Track canvas right-clicks still supply their precise event position.
         mouse_area(
-            container(scrollable_content)
+            container(content)
                 .width(Length::Fill)
                 .height(Length::FillPortion(5))
                 .style(|_theme: &Theme| container::Style {

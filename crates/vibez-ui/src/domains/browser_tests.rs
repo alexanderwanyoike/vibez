@@ -56,8 +56,9 @@ fn splitter_drag_tracks_the_cursor_at_the_narrow_window_yield_point() {
     assert_eq!(browser.dock_width, browser.effective_dock_width(window));
     assert_eq!(browser.dock_width, 340.0);
 
-    // A wide window leaves drags untouched within the static range.
-    browser.set_dock_width(browser.dock_drag_width(620.0, 1_500.0));
+    // A wide window leaves drags untouched within the static range, the
+    // card's edge staying under the cursor in the middle of the gap.
+    browser.set_dock_width(browser.dock_drag_width(632.0, 1_500.0));
     assert_eq!(browser.dock_width, 620.0);
 }
 

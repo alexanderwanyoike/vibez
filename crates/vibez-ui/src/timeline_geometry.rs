@@ -4,8 +4,13 @@
 pub const BASE_PIXELS_PER_BEAT: f32 = 20.0;
 const WHEEL_LINE_PIXELS: f32 = 40.0;
 const ZOOM_SENSITIVITY: f32 = 0.003;
+/// Zoom per pixel of vertical ruler drag: about 3.3x per 100 px.
+const RULER_DRAG_ZOOM_PER_PIXEL: f32 = 0.012;
 pub const EDGE_SCROLL_ZONE_PIXELS: f32 = 64.0;
 pub const MAX_EDGE_SCROLL_BEATS_PER_SECOND: f64 = 8.0;
+/// Space kept either side of a framed span so its first and last bar lines
+/// stay clear of the lane edges.
+pub const FRAME_MARGIN_PIXELS: f32 = 12.0;
 
 /// Normalise line- and pixel-based wheel input to physical-ish pixels.
 pub fn wheel_delta_pixels(delta: iced::mouse::ScrollDelta) -> (f32, f32) {
@@ -59,6 +64,16 @@ pub struct TimelineViewport {
 }
 
 impl TimelineViewport {
+    const MIN_ZOOM: f32 = 0.01;
+    const MAX_ZOOM: f32 = 16.0;
+    /// One zoom in or out by keyboard or button.
+    pub const ZOOM_STEP: f32 = 1.25;
+
+    /// `zoom_level` held inside the zoom range every timeline shares.
+    pub fn clamp_zoom(zoom_level: f32) -> f32 {
+        zoom_level.clamp(Self::MIN_ZOOM, Self::MAX_ZOOM)
+    }
+
     pub const fn new(zoom_level: f32, scroll_offset_beats: f64) -> Self {
         Self {
             zoom_level,
@@ -87,9 +102,40 @@ impl TimelineViewport {
         }
         let anchor_x = anchor_x.clamp(0.0, viewport_width.max(0.0));
         let anchor_beat = self.geometry().x_to_beat(anchor_x);
-        self.zoom_level = (self.zoom_level * factor).clamp(0.01, 16.0);
+        self.zoom_level = Self::clamp_zoom(self.zoom_level * factor);
         self.scroll_offset_beats = anchor_beat - self.geometry().beats_for_width(anchor_x);
         self.clamp(total_beats, viewport_width);
+    }
+
+    /// Zoom and scroll so `start..end` fills the viewport inside the margin.
+    pub fn frame(&mut self, start_beats: f64, end_beats: f64, viewport_width: f32) {
+        let span = (end_beats - start_beats).max(f64::EPSILON);
+        let usable = (viewport_width - 2.0 * FRAME_MARGIN_PIXELS).max(1.0);
+        let pixels_per_beat = (f64::from(usable) / span) as f32;
+        self.zoom_level = Self::clamp_zoom(pixels_per_beat / BASE_PIXELS_PER_BEAT);
+        self.scroll_offset_beats =
+            (start_beats - self.geometry().beats_for_width(FRAME_MARGIN_PIXELS)).max(0.0);
+    }
+
+    /// The view that shows exactly `start..end` across `viewport_width`.
+    pub fn showing(start_beats: f64, end_beats: f64, viewport_width: f32) -> Self {
+        let span = (end_beats - start_beats).max(f64::EPSILON);
+        let pixels_per_beat = (f64::from(viewport_width) / span) as f32;
+        Self::new(
+            Self::clamp_zoom(pixels_per_beat / BASE_PIXELS_PER_BEAT),
+            start_beats,
+        )
+    }
+
+    /// The view a ruler drag that started on this view reaches. Dragging
+    /// `drag_down` pixels down zooms in, and the grabbed beat stays under
+    /// the pointer, so sideways movement pans.
+    pub fn ruler_dragged(self, grabbed_beat: f64, pointer_x: f32, drag_down: f32) -> Self {
+        let zoom_level =
+            Self::clamp_zoom(self.zoom_level * (drag_down * RULER_DRAG_ZOOM_PER_PIXEL).exp());
+        let scroll_offset_beats =
+            grabbed_beat - TimelineGeometry::from_zoom(zoom_level, 0.0).beats_for_width(pointer_x);
+        Self::new(zoom_level, scroll_offset_beats)
     }
 
     pub fn clamp(&mut self, total_beats: f64, viewport_width: f32) {
@@ -142,6 +188,11 @@ impl TimelineGeometry {
         }
     }
 
+    /// The same mapping drawn to the right of a fixed header.
+    pub fn with_origin(self, origin_x: f32) -> Self {
+        Self { origin_x, ..self }
+    }
+
     pub fn pixels_per_beat(self) -> f32 {
         self.pixels_per_beat
     }
@@ -165,6 +216,14 @@ impl TimelineGeometry {
     pub fn beats_for_width(self, pixels: f32) -> f64 {
         pixels as f64 / self.pixels_per_beat as f64
     }
+
+    /// The beats of a `step` grid from the last one at or before `from_x`
+    /// to the first one at or after `to_x`, none before beat zero.
+    pub fn grid_beats(self, step: f64, from_x: f32, to_x: f32) -> impl Iterator<Item = f64> {
+        let first = (self.x_to_beat(from_x) / step).floor().max(0.0) as u64;
+        let last = (self.x_to_beat(to_x) / step).ceil().max(0.0) as u64;
+        (first..=last).map(move |index| index as f64 * step)
+    }
 }
 
 #[cfg(test)]
@@ -187,6 +246,18 @@ mod tests {
         assert_eq!(geometry.beat_to_x(4.0), 252.0);
         assert_eq!(geometry.x_to_beat(252.0), 4.0);
         assert_eq!(geometry.width_for_beats(2.0), 100.0);
+    }
+
+    #[test]
+    fn grid_beats_cover_the_span_from_the_step_before_to_the_step_after() {
+        let geometry = TimelineGeometry::new(20.0, 1.5);
+
+        let beats: Vec<f64> = geometry.grid_beats(1.0, 0.0, 50.0).collect();
+        assert_eq!(beats, vec![1.0, 2.0, 3.0, 4.0]);
+        let from_zero: Vec<f64> = TimelineGeometry::new(20.0, 0.0)
+            .grid_beats(2.0, -100.0, 30.0)
+            .collect();
+        assert_eq!(from_zero, vec![0.0, 2.0]);
     }
 
     #[test]
@@ -231,5 +302,57 @@ mod tests {
         assert_eq!(viewport.scroll_offset_beats, 44.0);
         viewport.scroll_by(-1_000.0, 64.0, 800.0);
         assert_eq!(viewport.scroll_offset_beats, 0.0);
+    }
+
+    #[test]
+    fn dragging_the_ruler_down_zooms_in_around_the_grabbed_beat() {
+        let start = TimelineViewport::new(1.0, 10.0);
+
+        let closer = start.ruler_dragged(30.0, 400.0, 50.0);
+        let wider = start.ruler_dragged(30.0, 400.0, -50.0);
+
+        assert!(closer.zoom_level > 1.5);
+        assert!(wider.zoom_level < 0.6);
+        for view in [closer, wider] {
+            assert!((view.geometry().x_to_beat(400.0) - 30.0).abs() < 1.0e-9);
+        }
+    }
+
+    #[test]
+    fn dragging_the_ruler_sideways_pans_with_the_pointer() {
+        let start = TimelineViewport::new(1.0, 10.0);
+
+        let panned = start.ruler_dragged(30.0, 300.0, 0.0);
+
+        assert_eq!(panned, TimelineViewport::new(1.0, 15.0));
+    }
+
+    #[test]
+    fn ruler_drag_zoom_stops_at_the_zoom_limits() {
+        let start = TimelineViewport::new(1.0, 0.0);
+
+        assert_eq!(start.ruler_dragged(0.0, 0.0, 10_000.0).zoom_level, 16.0);
+        assert_eq!(start.ruler_dragged(0.0, 0.0, -10_000.0).zoom_level, 0.01);
+    }
+
+    #[test]
+    fn framing_a_span_fills_the_viewport_inside_a_margin() {
+        let mut viewport = TimelineViewport::new(1.0, 0.0);
+
+        viewport.frame(32.0, 48.0, 800.0);
+
+        let geometry = viewport.geometry();
+        assert!((geometry.beat_to_x(32.0) - FRAME_MARGIN_PIXELS).abs() < 1.0e-3);
+        assert!((geometry.beat_to_x(48.0) - (800.0 - FRAME_MARGIN_PIXELS)).abs() < 1.0e-3);
+    }
+
+    #[test]
+    fn framing_from_the_song_start_never_scrolls_before_it() {
+        let mut viewport = TimelineViewport::new(1.0, 12.0);
+
+        viewport.frame(0.0, 64.0, 800.0);
+
+        assert_eq!(viewport.scroll_offset_beats, 0.0);
+        assert!(viewport.geometry().beat_to_x(64.0) < 800.0 - FRAME_MARGIN_PIXELS);
     }
 }

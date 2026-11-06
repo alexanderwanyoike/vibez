@@ -4,16 +4,20 @@ use std::sync::Arc;
 
 mod browser_results;
 mod browser_state;
+mod clip_drag;
 mod project_tracks;
+mod same_channels;
 mod snapshot;
 pub use project_tracks::ProjectTracksState;
 mod transport_state;
 mod ui_types;
-pub use transport_state::TransportState;
+pub use transport_state::{PlaybackPhase, TransportState};
 
 use crate::remote_provider::RemoteCatalogSnapshot;
+use crate::widgets::clip_editor_view::StoredClipView;
 pub use browser_results::LocalResults;
 pub use browser_state::*;
+pub use clip_drag::*;
 pub use snapshot::*;
 pub use ui_types::*;
 
@@ -106,14 +110,24 @@ pub struct ViewState {
     pub detail_panel_tab: DetailPanelTab,
     pub detail_panel_height: f32,
     pub detail_panel_resize_active: bool,
+    /// The detail card's height in Mix once its divider has been dragged.
+    pub mix_detail_panel_height: Option<f32>,
     pub perform_surface_width: f32,
     pub perform_surface_resize_active: bool,
-    pub zoom_level: f32,
-    pub scroll_offset_beats: f64,
-    pub snap_grid: SnapGrid,
-    pub snap_enabled: bool,
-    pub adaptive_grid: bool,
-    pub adaptive_grid_bias: i8,
+    /// How far the Arrange timeline is zoomed and scrolled.
+    pub viewport: crate::timeline_geometry::TimelineViewport,
+    /// The Arrange view a zoom to selection replaced, for zoom back.
+    pub zoom_before_selection: Option<crate::timeline_geometry::TimelineViewport>,
+    /// What the producer asked the clip editor to show of the clip it last
+    /// showed. Opening another clip shows that clip afresh.
+    pub stored_clip_editor_view: Option<(ClipId, StoredClipView)>,
+    /// The clip editor view a frame of the loop replaced, for zoom back.
+    pub clip_view_before_loop: Option<(ClipId, Option<StoredClipView>)>,
+    /// Arrange and Section timelines. The transport bar always edits it; the
+    /// grid shortcuts edit it unless a clip editor has focus.
+    pub arrange_grid: GridConfig,
+    /// Piano roll and audio clip editor, following their own zoom.
+    pub clip_grid: GridConfig,
     pub context_menu: Option<ContextMenu>,
     pub drum_rack_slice_dialog: Option<DrumRackSliceDialog>,
     pub transient_analysis_dialog: Option<TransientAnalysisDialog>,
@@ -125,6 +139,9 @@ pub struct ViewState {
     pub editing_track_name: Option<TrackId>,
     pub editing_clip_name: Option<(TrackId, ClipId)>,
     pub edit_name_text: String,
+    /// The Arrange track header under the pointer, which shows its quieter
+    /// actions only while hovered.
+    pub hovered_track_header: Option<TrackId>,
     /// Short-lived, engine-authored note flashes for device feedback.
     /// This is view state only and is never persisted with the project.
     pub(crate) drum_pad_flash_until: HashMap<(TrackId, u8), std::time::Instant>,
@@ -141,14 +158,15 @@ impl Default for ViewState {
             detail_panel_tab: DetailPanelTab::Clip,
             detail_panel_height: DETAIL_PANEL_DEFAULT_HEIGHT,
             detail_panel_resize_active: false,
+            mix_detail_panel_height: None,
             perform_surface_width: PERFORM_SURFACE_DEFAULT_WIDTH,
             perform_surface_resize_active: false,
-            zoom_level: 1.0,
-            scroll_offset_beats: 0.0,
-            snap_grid: SnapGrid::EIGHTH,
-            snap_enabled: true,
-            adaptive_grid: false,
-            adaptive_grid_bias: 0,
+            viewport: crate::timeline_geometry::TimelineViewport::new(1.0, 0.0),
+            zoom_before_selection: None,
+            stored_clip_editor_view: None,
+            clip_view_before_loop: None,
+            arrange_grid: GridConfig::default(),
+            clip_grid: GridConfig::default(),
             context_menu: None,
             drum_rack_slice_dialog: None,
             transient_analysis_dialog: None,
@@ -160,6 +178,7 @@ impl Default for ViewState {
             editing_track_name: None,
             editing_clip_name: None,
             edit_name_text: String::new(),
+            hovered_track_header: None,
             drum_pad_flash_until: HashMap::new(),
             held_modifiers: iced::keyboard::Modifiers::empty(),
             mixer_send_bank: 0,
@@ -168,6 +187,12 @@ impl Default for ViewState {
 }
 
 impl ViewState {
+    pub(crate) fn clip_editor_view(&self, clip_id: ClipId) -> Option<StoredClipView> {
+        self.stored_clip_editor_view
+            .filter(|(shown, _)| *shown == clip_id)
+            .map(|(_, viewport)| viewport)
+    }
+
     const DRUM_PAD_FLASH_HOLD: std::time::Duration = std::time::Duration::from_millis(140);
 
     pub fn trigger_drum_pad_flash(
@@ -210,15 +235,6 @@ impl ViewState {
     pub fn prune_drum_pad_flashes(&mut self, now: std::time::Instant) {
         self.drum_pad_flash_until
             .retain(|_, expires_at| *expires_at > now);
-    }
-
-    pub fn grid_config(&self) -> GridConfig {
-        GridConfig::new(
-            self.snap_grid,
-            self.snap_enabled,
-            self.adaptive_grid,
-            self.adaptive_grid_bias,
-        )
     }
 
     pub fn dismiss_clip_dialogs_for(
@@ -328,6 +344,9 @@ pub enum ContextMenuTarget {
         transient_marker: Option<u64>,
         warp_marker: Option<u64>,
     },
+    TrackHeader {
+        track_id: TrackId,
+    },
     ArrangementEmpty,
 }
 
@@ -399,6 +418,30 @@ pub fn new_master_track() -> ProjectTrack {
 /// One musical timeline's content, associated with shared Project Tracks by
 /// stable identity. Hash-map storage prevents track reordering from moving or
 /// cloning timeline content.
+/// Whether an editor drag is in flight, and what a trim drag began from.
+#[derive(Debug, Clone, Default)]
+pub enum EditDrag {
+    #[default]
+    Idle,
+    Active,
+    /// Each trim step trims from the content the drag began from, so markers
+    /// the edge passes over come back when it returns.
+    Trimming(Arc<TimelineContent>),
+}
+
+impl EditDrag {
+    pub fn is_active(&self) -> bool {
+        !matches!(self, Self::Idle)
+    }
+
+    /// A trim already in flight keeps its origin.
+    pub fn mark_active(&mut self) {
+        if matches!(self, Self::Idle) {
+            *self = Self::Active;
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct TimelineContent {
     pub by_track: HashMap<TrackId, TrackTimelineContent>,
@@ -419,6 +462,16 @@ impl TimelineContent {
 
     pub fn remove(&mut self, track_id: TrackId) -> Option<TrackTimelineContent> {
         self.by_track.remove(&track_id)
+    }
+
+    /// Audio and note clips on `tracks`, leaving out content kept for a
+    /// track no longer in the list.
+    pub fn clip_count(&self, tracks: impl IntoIterator<Item = TrackId>) -> usize {
+        tracks
+            .into_iter()
+            .filter_map(|track_id| self.get(track_id))
+            .map(|content| content.clips.len() + content.note_clips.len())
+            .sum()
     }
 }
 
@@ -444,9 +497,12 @@ pub struct TimelineEditorState {
     /// Live rubber-band, present only while a box drag is in flight.
     /// Every lane draws its own slice of it.
     pub marquee: Option<ArrangementMarquee>,
-    /// An arrangement drag (move/resize) is active; drives edge
+    /// The Clip drag in flight, present from its first step until it drops
+    /// or is cancelled. Every lane draws its preview.
+    pub clip_drag: Option<ClipDrag>,
+    /// The move, resize or trim drag in flight, which drives edge
     /// auto-scroll on ticks.
-    pub drag_resize_active: bool,
+    pub edit_drag: EditDrag,
     /// In-flight numeric Inspector edits. A missing entry means the control
     /// shows its committed Audio Clip value.
     pub audio_clip_inspector_edits: HashMap<(ClipId, AudioClipInspectorField), String>,
@@ -524,7 +580,8 @@ impl Default for TimelineEditorState {
             selection_end_beats: 0.0,
             time_selection_track: None,
             marquee: None,
-            drag_resize_active: false,
+            clip_drag: None,
+            edit_drag: EditDrag::Idle,
             audio_clip_inspector_edits: HashMap::new(),
             audio_clip_transpose_debounce: HashMap::new(),
         }
@@ -655,6 +712,8 @@ pub struct AppState {
     /// from `UiSettings::warp_confidence_threshold`.
     pub warp_confidence_threshold: f32,
     pub automation_ui: crate::domains::automation::AutomationState,
+    /// Arrange lane heights, saved with the project but outside undo.
+    pub track_heights: crate::domains::track_heights::TrackHeights,
 
     // Browser domain slice (sample library, Dropbox, drag-drop).
     pub browser: BrowserState,
@@ -706,6 +765,7 @@ impl Default for AppState {
             auto_warp_on_import: false,
             warp_confidence_threshold: 0.6,
             automation_ui: crate::domains::automation::AutomationState::default(),
+            track_heights: Default::default(),
             browser: BrowserState::default(),
             current_theme_name: "Charcoal".to_string(),
             user_themes: Vec::new(),
@@ -785,10 +845,6 @@ impl AppState {
         self.transport.position_samples as f64 / self.transport.sample_rate as f64
     }
 
-    pub fn position_beats(&self) -> f64 {
-        self.position_seconds() * self.transport.bpm / 60.0
-    }
-
     pub fn duration_seconds(&self) -> f64 {
         let samples = self.total_duration_samples();
         if samples > 0 {
@@ -817,63 +873,46 @@ impl AppState {
     /// Pixels per beat at the current zoom level.
     #[allow(dead_code)]
     pub fn pixels_per_beat(&self) -> f32 {
-        crate::timeline_geometry::TimelineGeometry::from_zoom(
-            self.view.zoom_level,
-            self.view.scroll_offset_beats,
-        )
-        .pixels_per_beat()
+        self.view.viewport.geometry().pixels_per_beat()
     }
 
     /// Number of beats visible in a canvas of the given width.
     #[allow(dead_code)]
     pub fn visible_beats(&self, canvas_width: f32) -> f64 {
-        crate::timeline_geometry::TimelineGeometry::from_zoom(
-            self.view.zoom_level,
-            self.view.scroll_offset_beats,
-        )
-        .visible_beats(canvas_width)
+        self.view.viewport.geometry().visible_beats(canvas_width)
     }
 
     /// Convert a beat value to a pixel x coordinate in the viewport.
     #[allow(dead_code)]
     pub fn beat_to_x(&self, beat: f64) -> f32 {
-        crate::timeline_geometry::TimelineGeometry::from_zoom(
-            self.view.zoom_level,
-            self.view.scroll_offset_beats,
-        )
-        .beat_to_x(beat)
+        self.view.viewport.geometry().beat_to_x(beat)
     }
 
     /// Convert a pixel x coordinate in the viewport to a beat value.
     #[allow(dead_code)]
     pub fn x_to_beat(&self, x: f32) -> f64 {
-        crate::timeline_geometry::TimelineGeometry::from_zoom(
-            self.view.zoom_level,
-            self.view.scroll_offset_beats,
-        )
-        .x_to_beat(x)
+        self.view.viewport.geometry().x_to_beat(x)
+    }
+
+    /// Where the song's last clip ends, in beats; zero for an empty song.
+    pub fn song_beats(&self) -> f64 {
+        if self.transport.bpm > 0.0 {
+            self.duration_seconds() * self.transport.bpm / 60.0
+        } else {
+            0.0
+        }
     }
 
     /// Total duration in beats across all tracks, with generous padding.
     pub fn total_beats(&self) -> f64 {
-        let dur = self.duration_seconds();
-        if dur > 0.0 && self.transport.bpm > 0.0 {
-            let content_beats = dur * self.transport.bpm / 60.0;
+        let content_beats = self.song_beats();
+        if content_beats > 0.0 {
             // Pad by 32 beats or 25% of content, whichever is larger
             let padding = (content_beats * 0.25).max(32.0);
             (content_beats + padding).max(64.0)
         } else {
             // Minimum 64 beats for empty projects
             64.0
-        }
-    }
-
-    /// Convert a beat value to a sample position.
-    pub fn beats_to_samples(&self, beats: f64) -> u64 {
-        if self.transport.bpm > 0.0 {
-            (beats * self.transport.sample_rate as f64 * 60.0 / self.transport.bpm) as u64
-        } else {
-            0
         }
     }
 

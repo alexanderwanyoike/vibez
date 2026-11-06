@@ -245,15 +245,16 @@ impl App {
             );
             return Task::none();
         };
-        if !self.apply_audio_output_configuration_with_preference(
+        self.apply_audio_output_configuration_with_preference(
             choice.name,
             remembered_output,
             sample_rate,
             buffer_size,
-        ) {
+        )
+        .unwrap_or_else(|| {
             self.state.audio_settings = previous;
-        }
-        Task::none()
+            Task::none()
+        })
     }
 
     pub(super) fn handle_set_buffer_size(&mut self, size: u32) -> Task<Message> {
@@ -270,8 +271,7 @@ impl App {
             self.state.audio_settings.preferred_output_name.clone(),
             self.state.audio_settings.sample_rate,
             size,
-        );
-        Task::none()
+        )
     }
 
     pub(super) fn handle_set_audio_sample_rate(
@@ -299,8 +299,7 @@ impl App {
             self.state.audio_settings.preferred_output_name.clone(),
             sample_rate.0,
             buffer_size,
-        );
-        Task::none()
+        )
     }
 
     pub(super) fn handle_select_audio_output(
@@ -320,8 +319,7 @@ impl App {
             self.state.status_text = format!("{choice} has no usable output configuration");
             return Task::none();
         };
-        self.apply_audio_output_configuration(choice.name, sample_rate, buffer_size);
-        Task::none()
+        self.apply_audio_output_configuration(choice.name, sample_rate, buffer_size)
     }
 
     pub(super) fn handle_select_audio_input(&mut self, choice: AudioDeviceChoice) -> Task<Message> {
@@ -390,25 +388,27 @@ impl App {
         preferred_output_name: Option<String>,
         sample_rate: u32,
         buffer_size: u32,
-    ) -> bool {
+    ) -> Task<Message> {
         self.apply_audio_output_configuration_with_preference(
             preferred_output_name.clone(),
             preferred_output_name,
             sample_rate,
             buffer_size,
         )
+        .unwrap_or_else(Task::none)
     }
 
+    /// The configuration's follow-up work, or `None` when it was rejected.
     fn apply_audio_output_configuration_with_preference(
         &mut self,
         requested_output_name: Option<String>,
         preferred_output_name: Option<String>,
         sample_rate: u32,
         buffer_size: u32,
-    ) -> bool {
+    ) -> Option<Task<Message>> {
         if self.state.audio_recording.is_busy() {
             self.state.status_text = "Stop Audio Track Recording before changing hardware".into();
-            return false;
+            return None;
         }
         let backend = self.state.audio_settings.backend;
         let active_backend = self.state.audio_settings.active_backend;
@@ -449,17 +449,22 @@ impl App {
                 };
                 self.state.audio_settings.active_backend = Some(backend);
                 self.state.audio_settings.active_output_name = active_output_name.clone();
+                let at_previous_rate = (actual_sample_rate != self.state.transport.sample_rate)
+                    .then(|| self.project_for_save());
                 self.state.audio_settings.sample_rate = actual_sample_rate;
                 self.state.audio_settings.buffer_size = buffer_size;
                 self.state.transport.sample_rate = actual_sample_rate;
                 self.state.audio_stream_health = AudioStreamHealth::Running;
                 self.send_command(EngineCommand::SetSampleRate(actual_sample_rate));
+                let conversion = at_previous_rate.map_or_else(Task::none, |project| {
+                    self.convert_project_sample_rate(project)
+                });
                 self.state.audio_settings.remember_current_backend();
                 self.persist_ui_settings();
                 if let Err(error) = self.sync_audio_input_runtime() {
                     self.state.status_text =
                         format!("Audio Output changed, but Audio Input could not reopen — {error}");
-                    return true;
+                    return Some(conversion);
                 }
                 self.state.status_text = if applied_request == 0 {
                     format!(
@@ -473,7 +478,7 @@ impl App {
                         active_output_name.as_deref().unwrap_or("System Default")
                     )
                 };
-                true
+                Some(conversion)
             }
             Err(error) => {
                 eprintln!("vibez: audio configuration rejected: {error}");
@@ -504,7 +509,7 @@ impl App {
                         Some(&input_error),
                     );
                 }
-                false
+                None
             }
         }
     }

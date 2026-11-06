@@ -1,0 +1,118 @@
+//! The filled, borderless look buttons and switches share: the control
+//! shade at rest, the hover shade under the pointer, solid colour while on.
+
+use iced::widget::{button, pick_list};
+use iced::{Border, Color, Theme};
+
+use crate::theme as th;
+
+pub const RADIUS: f32 = 4.0;
+
+/// The fill of a control lit in `on`, if it is on.
+pub fn fill(on: Option<Color>, status: button::Status) -> Color {
+    match on {
+        Some(colour) => colour,
+        None if hovered(status) => th::bg_hover(),
+        None => th::control(),
+    }
+}
+
+/// The label colour over [`fill`].
+pub fn ink(on: Option<Color>, status: button::Status) -> Color {
+    match on {
+        Some(_) => th::bg_dark(),
+        None if hovered(status) => th::text(),
+        None if status == button::Status::Disabled => th::text_muted(),
+        None => th::text_dim(),
+    }
+}
+
+/// A pick list filled like a control, its handle lit in `highlight` while
+/// hovered or open.
+pub fn list(highlight: Color) -> impl Fn(&Theme, pick_list::Status) -> pick_list::Style {
+    move |_theme, status| {
+        let lit = matches!(
+            status,
+            pick_list::Status::Hovered | pick_list::Status::Opened
+        );
+        pick_list::Style {
+            text_color: th::text(),
+            placeholder_color: th::text_dim(),
+            handle_color: if lit { highlight } else { th::text_dim() },
+            background: if lit { th::bg_hover() } else { th::control() }.into(),
+            border: Border {
+                radius: RADIUS.into(),
+                ..Default::default()
+            },
+        }
+    }
+}
+
+fn hovered(status: button::Status) -> bool {
+    matches!(status, button::Status::Hovered | button::Status::Pressed)
+}
+
+/// A control's style, lit in `on` while it is on.
+pub fn style(on: Option<Color>) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_theme, status| styled(on, status)
+}
+
+/// [`style`] in one `status`, for controls that adjust it.
+pub fn styled(on: Option<Color>, status: button::Status) -> button::Style {
+    button::Style {
+        background: Some(fill(on, status).into()),
+        text_color: ink(on, status),
+        border: Border {
+            radius: RADIUS.into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const LIT: Color = Color::from_rgb(0.9, 0.5, 0.1);
+
+    #[test]
+    fn an_idle_control_is_filled_with_the_control_shade_and_has_no_border() {
+        let idle = style(None)(&Theme::Dark, button::Status::Active);
+
+        assert_eq!(idle.background, Some(th::control().into()));
+        assert_eq!(idle.border.width, 0.0);
+        assert_eq!(idle.text_color, th::text_dim());
+    }
+
+    #[test]
+    fn a_hovered_control_lifts_to_the_hover_shade() {
+        let hovered = style(None)(&Theme::Dark, button::Status::Hovered);
+
+        assert_eq!(hovered.background, Some(th::bg_hover().into()));
+        assert_eq!(hovered.text_color, th::text());
+    }
+
+    #[test]
+    fn a_pick_list_is_filled_like_a_control_and_lights_its_handle_while_open() {
+        let idle = list(LIT)(&Theme::Dark, pick_list::Status::Active);
+        let open = list(LIT)(&Theme::Dark, pick_list::Status::Opened);
+
+        assert_eq!(idle.background, th::control().into());
+        assert_eq!(idle.border.width, 0.0);
+        assert_eq!(idle.handle_color, th::text_dim());
+        assert_eq!(open.background, th::bg_hover().into());
+        assert_eq!(open.handle_color, LIT);
+    }
+
+    #[test]
+    fn a_lit_control_is_filled_with_its_colour_under_dark_ink() {
+        for status in [button::Status::Active, button::Status::Hovered] {
+            let lit = style(Some(LIT))(&Theme::Dark, status);
+
+            assert_eq!(lit.background, Some(LIT.into()), "{status:?}");
+            assert_eq!(lit.text_color, th::bg_dark(), "{status:?}");
+            assert_eq!(lit.border.width, 0.0);
+        }
+    }
+}

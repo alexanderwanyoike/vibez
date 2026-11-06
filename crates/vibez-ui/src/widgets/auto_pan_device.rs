@@ -3,7 +3,7 @@
 //! Advanced holds the phase between the sides, the offset, retrigger and
 //! smoothing. The shortest cards put the controls on a line.
 
-use iced::widget::{column, container, row, text, Space};
+use iced::widget::{column, container, row, text};
 use iced::{Alignment, Color, Element, Length, Size};
 use vibez_core::id::TrackId;
 use vibez_dsp::auto_pan::{param, AUTO_PAN_PARAMS};
@@ -18,12 +18,11 @@ use crate::state::UiEffect;
 use crate::theme as th;
 use crate::widgets::auto_pan_display::{GainPlot, StereoPosition};
 use crate::widgets::device_controls::{
-    disclosure, heading, plot_band, rule, toggle, vertical_rule, Param, LABEL_SIZE,
+    heading, plot_band, rule, toggle, vertical_rule, Param, LABEL_SIZE,
 };
 use crate::widgets::device_layout::{stack, Stack, KNOB_ROW_H};
 
 const PAD: f32 = 10.0;
-const PRESET_ROW_H: f32 = 28.0;
 const KNOB: f32 = 32.0;
 const KNOB_COL_W: f32 = 68.0;
 const PLOT_MIN_H: f32 = 72.0;
@@ -50,12 +49,8 @@ pub const WIDTHS: crate::widgets::device_chrome::CardWidths =
         max: MAX_W,
     };
 
-pub fn preset_bar_width(size: Size) -> f32 {
-    size.width - PAD * 2.0 - 90.0
-}
-
 pub fn arrange(size: Size, advanced: bool) -> Stack {
-    let below = (size.height - PRESET_ROW_H - 1.0).max(0.0);
+    let below = size.height.max(0.0);
     stack(below, advanced.then_some(KNOB_ROW_H), PLOT_MIN_H)
 }
 
@@ -105,26 +100,18 @@ impl<'a> AutoPanView<'a> {
         .into()
     }
 
-    pub fn view(self, preset_bar: Element<'a, Message>, size: Size) -> Element<'a, Message> {
+    /// The card header's Advanced switch.
+    pub fn advanced_switch(&self) -> crate::widgets::device_chrome::Action {
+        crate::widgets::device_chrome::advanced(
+            self.panel.advanced,
+            Message::Card(CardMsg::ToggleAdvanced(self.effect.id)),
+            self.accent(),
+        )
+    }
+
+    pub fn view(self, size: Size) -> Element<'a, Message> {
         let stack = arrange(size, self.panel.advanced);
-        let top = row![
-            preset_bar,
-            Space::with_width(Length::Fill),
-            disclosure(
-                self.panel.advanced,
-                Message::Card(CardMsg::ToggleAdvanced(self.effect.id)),
-                self.accent(),
-            )
-        ]
-        .spacing(6)
-        .align_y(Alignment::Center);
-        let mut body = column![
-            container(top)
-                .padding([0.0, PAD])
-                .height(PRESET_ROW_H)
-                .align_y(Alignment::Center),
-            rule(),
-        ];
+        let mut body = column![];
         if stack.advanced_only {
             let height = stack.advanced.unwrap_or(0.0);
             body = body.push(self.advanced(height, size.width));
@@ -342,7 +329,7 @@ mod tests {
                 for advanced in [false, true] {
                     let stack = arrange(Size::new(width, height), advanced);
                     let context = format!("{width}x{height} {advanced}: {stack:?}");
-                    let mut used = PRESET_ROW_H + 1.0;
+                    let mut used = 0.0;
                     if stack.advanced_only {
                         used += stack.advanced.unwrap();
                         assert!(stack.advanced.unwrap() >= LINE_H - 0.01, "{context}");

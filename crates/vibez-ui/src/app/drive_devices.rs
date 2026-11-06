@@ -88,7 +88,9 @@ mod tests {
         save_project_async(path.clone(), None, project)
             .await
             .unwrap();
-        let loaded = load_project_async(path, None).await.unwrap();
+        let loaded = load_project_async(path, None, vibez_core::constants::DEFAULT_SAMPLE_RATE)
+            .await
+            .unwrap();
         let mut app = super::super::test_support::app();
         app.rebuild_from_loaded_project(loaded);
         let effect = app

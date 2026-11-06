@@ -9,7 +9,7 @@ use vibez_engine::commands::EngineCommand;
 use super::{ArrangementAction, ArrangementCtx, EngineHandle};
 use crate::state::{
     ArrangementMarquee, ArrangementMarqueeRect, ArrangementSelection, ProjectTracksState,
-    TimelineEditorState, UiNoteClip,
+    TimelineEditorState, UiNoteClip, SHORTEST_LENGTH_BEATS,
 };
 
 impl TimelineEditorState {
@@ -226,6 +226,7 @@ impl TimelineEditorState {
 
         if split_count > 0 {
             action.status = Some(format!("Split {split_count} clips at region boundaries"));
+            action.mark_dirty = true;
         }
         action
     }
@@ -338,8 +339,10 @@ impl TimelineEditorState {
 
         if all_audio {
             action.status = self.join_audio_clips(first_track, &clips, engine);
+            action.mark_dirty = action.status.is_some();
         } else if all_note {
             action.status = self.join_note_clips(first_track, &clips, engine);
+            action.mark_dirty = action.status.is_some();
         } else {
             action.status = Some("Join requires same type and track".to_string());
         }
@@ -370,12 +373,7 @@ impl TimelineEditorState {
                         .find_content_mut(track_id)
                         .and_then(|t| t.clips.iter_mut().find(|c| c.id == clip_id))
                     {
-                        let was_enabled = clip.loop_enabled;
-                        if enable && !was_enabled {
-                            clip.enable_loop_over_clip();
-                        } else {
-                            clip.loop_enabled = enable;
-                        }
+                        clip.set_loop_enabled(enable);
                         command = Some((clip.loop_start, clip.loop_end));
                         changed += 1;
                     }
@@ -395,12 +393,7 @@ impl TimelineEditorState {
                         .find_content_mut(track_id)
                         .and_then(|t| t.note_clips.iter_mut().find(|c| c.id == clip_id))
                     {
-                        let was_enabled = clip.loop_enabled;
-                        if enable && !was_enabled {
-                            clip.enable_loop_over_clip();
-                        } else {
-                            clip.loop_enabled = enable;
-                        }
+                        clip.set_loop_enabled(enable);
                         command = Some((clip.loop_start_beats, clip.loop_end_beats));
                         changed += 1;
                     }
@@ -439,43 +432,37 @@ impl TimelineEditorState {
         if ctx.samples_per_beat <= 0.0 {
             return ArrangementAction::default();
         }
-        let anchor_duration = match anchor {
-            ArrangementSelection::AudioClip { track_id, clip_id } => self
-                .find_content(track_id)
-                .and_then(|t| t.clips.iter().find(|c| c.id == clip_id))
-                .map(|c| c.duration as f64 / ctx.samples_per_beat),
-            ArrangementSelection::NoteClip { track_id, clip_id } => self
-                .find_content(track_id)
-                .and_then(|t| t.note_clips.iter().find(|c| c.id == clip_id))
-                .map(|c| c.duration_beats),
-        };
-        let Some(anchor_duration) = anchor_duration else {
+        let Some(anchor_duration) = self
+            .clip_span(anchor, ctx.samples_per_beat)
+            .map(|span| span.length_beats)
+        else {
             return ArrangementAction::default();
         };
         let delta = new_duration_beats - anchor_duration;
-        let targets: Vec<_> = if self.selected_clips.contains(&anchor) {
-            self.selected_clips.iter().copied().collect()
-        } else {
-            vec![anchor]
-        };
+        let targets = self.gesture_targets(anchor);
         let mut max_end = None::<f64>;
+        let mut changed = false;
         for target in targets {
             match target {
                 ArrangementSelection::AudioClip { track_id, clip_id } => {
-                    let old = self
+                    let resized = self
                         .find_content(track_id)
                         .and_then(|t| t.clips.iter().find(|c| c.id == clip_id))
-                        .map(|c| c.duration as f64 / ctx.samples_per_beat);
-                    if let Some(old) = old {
-                        let duration =
-                            ((old + delta).max(0.25) * ctx.samples_per_beat).round() as u64;
-                        let action = self.op_resize_audio_clip(
-                            engine,
-                            ctx,
-                            track_id,
-                            clip_id,
-                            duration.max(1),
-                        );
+                        .map(|c| {
+                            let old_beats = c.duration as f64 / ctx.samples_per_beat;
+                            let requested = (((old_beats + delta).max(SHORTEST_LENGTH_BEATS)
+                                * ctx.samples_per_beat)
+                                .round() as u64)
+                                .max(1);
+                            (c.duration, c.playable_duration(requested))
+                        });
+                    if let Some((old, duration)) = resized {
+                        if duration == old {
+                            continue;
+                        }
+                        changed = true;
+                        let action =
+                            self.op_resize_audio_clip(engine, ctx, track_id, clip_id, duration);
                         max_end = match (max_end, action.scroll_to_beat) {
                             (Some(a), Some(b)) => Some(a.max(b)),
                             (None, value) | (value, None) => value,
@@ -483,54 +470,33 @@ impl TimelineEditorState {
                     }
                 }
                 ArrangementSelection::NoteClip { track_id, clip_id } => {
-                    let mut sync = None;
                     if let Some(clip) = self
                         .find_content_mut(track_id)
                         .and_then(|t| t.note_clips.iter_mut().find(|c| c.id == clip_id))
                     {
-                        clip.duration_beats = (clip.duration_beats + delta).max(0.25);
-                        clip.clamp_start_to_duration();
-                        if clip.loop_enabled {
-                            clip.clamp_loop_to_duration();
+                        let duration = (clip.duration_beats + delta).max(SHORTEST_LENGTH_BEATS);
+                        if duration == clip.duration_beats {
+                            continue;
                         }
-                        sync = Some(clip.clone());
+                        changed = true;
+                        clip.resize(duration);
+                        engine.send(clip.bounds_command(track_id));
                         max_end = Some(
                             max_end
                                 .unwrap_or(0.0)
                                 .max(clip.position_beats + clip.duration_beats),
                         );
                     }
-                    if let Some(clip) = sync {
-                        engine.send(EngineCommand::RemoveNoteClip(track_id, clip_id));
-                        engine.send(EngineCommand::AddNoteClip {
-                            track_id,
-                            insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
-                                clip_id,
-                                clip.position_beats,
-                                clip.duration_beats,
-                                clip.start_marker_beats,
-                                clip.loop_enabled,
-                                clip.loop_start_beats,
-                                clip.loop_end_beats,
-                                clip.groove_grid,
-                            ),
-                        });
-                        for note in clip.notes {
-                            engine.send(EngineCommand::AddNote {
-                                track_id,
-                                clip_id,
-                                insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(
-                                    note,
-                                ),
-                            });
-                        }
-                    }
                 }
             }
         }
-        self.drag_resize_active = true;
+        if !changed {
+            return ArrangementAction::default();
+        }
+        self.edit_drag.mark_active();
         ArrangementAction {
             scroll_to_beat: max_end,
+            mark_dirty: true,
             ..Default::default()
         }
     }

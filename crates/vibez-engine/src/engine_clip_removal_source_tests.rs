@@ -73,6 +73,8 @@ fn autonomous_section_and_clip_boundaries_transfer_staged_owners_once_under_full
                         request_id: 1,
                         length_samples: 64,
                         looping: true,
+                        launch_mode: Default::default(),
+                        start_position: 0,
                         source: Box::new(old),
                     })],
                     quantization: MusicalBoundary::Immediate,
@@ -97,6 +99,8 @@ fn autonomous_section_and_clip_boundaries_transfer_staged_owners_once_under_full
                         request_id: 2,
                         length_samples: 64,
                         looping: true,
+                        launch_mode: Default::default(),
+                        start_position: 0,
                         source: Box::new(new),
                     })],
                     quantization: MusicalBoundary::OneBeat,
@@ -216,6 +220,8 @@ fn rejected_prepared_sources_and_offline_teardown_keep_staged_audio_ownership_co
                         request_id: 1,
                         length_samples: 128,
                         looping: true,
+                        launch_mode: Default::default(),
+                        start_position: 0,
                         source: Box::new(staged),
                     })))
                     .unwrap();

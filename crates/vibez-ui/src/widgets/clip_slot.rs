@@ -72,11 +72,13 @@ fn label(
     });
 }
 
-/// The grid is glass: each cell is a well sunk into it, and a clip is a
-/// film laid inside the well, so glass shows around every clip.
-const WELL_INSET: f32 = 2.0;
-pub(crate) const FILM_INSET: f32 = WELL_INSET + 4.0;
-const FILM_RADIUS: f32 = 3.0;
+/// Each slot is a rounded tile keeping half the gap on every side of its
+/// cell, so neighbouring tiles sit an even gap apart on the card.
+pub(crate) const TILE_GAP: f32 = 6.0;
+const TILE_INSET: f32 = TILE_GAP / 2.0;
+const TILE_RADIUS: f32 = 6.0;
+/// Where the cell's buttons sit, inside the tile.
+pub(crate) const BUTTON_INSET: f32 = TILE_INSET + 4.0;
 const HEADER_H: f32 = 18.0;
 /// Room along the film's bottom for the cell's buttons.
 const BUTTON_ROOM: f32 = 21.0;
@@ -89,6 +91,64 @@ fn inset(size: Size, by: f32) -> Rectangle {
             (size.height - 2.0 * by).max(1.0),
         ),
     )
+}
+
+/// The slot's own shape inside the cell.
+fn tile(size: Size) -> Rectangle {
+    inset(size, TILE_INSET)
+}
+
+/// Where a clip is drawn inside its slot.
+fn film(size: Size) -> Rectangle {
+    tile(size)
+}
+
+/// How much of the pointer's and the selection's attention a slot has.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Attention {
+    Idle,
+    Hovered,
+    Selected,
+}
+
+/// The colour ringing a slot with `attention`, if any.
+fn ring(attention: Attention, has_clip: bool) -> Option<Color> {
+    match attention {
+        Attention::Selected => Some(th::accent()),
+        Attention::Hovered if !has_clip => Some(th::blend(th::field(), th::text(), 0.16)),
+        Attention::Hovered | Attention::Idle => None,
+    }
+}
+
+/// A ring of `width` drawn just inside the edge of `area`.
+fn ring_path(area: Rectangle, width: f32) -> canvas::Path {
+    let half = width / 2.0;
+    rounded(
+        Rectangle::new(
+            Point::new(area.x + half, area.y + half),
+            Size::new(area.width - width, area.height - width),
+        ),
+        TILE_RADIUS - half,
+    )
+}
+
+/// The line marking how far through `film` a playing clip is, shortened
+/// near either side so its ends stay inside the tile's rounded corners.
+fn progress_line(film: Rectangle, progress: f32) -> Rectangle {
+    let x = film.x + 1.0 + (film.width - 2.0) * progress.clamp(0.0, 1.0);
+    let from_side = (x - film.x).min(film.x + film.width - (x + 1.0));
+    let inset = corner_pull(from_side, TILE_RADIUS).max(1.0);
+    Rectangle::new(
+        Point::new(x, film.y + inset),
+        Size::new(1.0, (film.height - 2.0 * inset).max(0.0)),
+    )
+}
+
+/// How far a rounded corner of `radius` pulls a tile's top and bottom edges
+/// in at `distance` from its side.
+fn corner_pull(distance: f32, radius: f32) -> f32 {
+    let across = (radius - distance).max(0.0);
+    radius - (radius * radius - across * across).max(0.0).sqrt()
 }
 
 fn rounded(area: Rectangle, radius: impl Into<iced::border::Radius>) -> canvas::Path {
@@ -125,7 +185,7 @@ fn tight_title_width(film_width: f32, has_key: bool) -> f32 {
 }
 
 fn thumbnail_plot(size: Size, compact: bool, has_key: bool) -> Rectangle {
-    let film = inset(size, FILM_INSET);
+    let film = film(size);
     if compact && size.height < 44.0 {
         let title_width = tight_title_width(film.width, has_key);
         Rectangle::new(
@@ -310,57 +370,43 @@ impl canvas::Program<Message> for ClipSlot<'_> {
                 return;
             }
             let size = Size::new(w, h);
-            let well = inset(size, WELL_INSET);
-            let well_path = rounded(well, FILM_RADIUS);
-            frame.fill(
-                &well_path,
-                th::with_alpha(Color::BLACK, if hovered { 0.28 } else { 0.38 }),
-            );
-            frame.fill_rectangle(
-                Point::new(well.x + FILM_RADIUS, well.y),
-                Size::new((well.width - 2.0 * FILM_RADIUS).max(0.0), 1.0),
-                th::with_alpha(Color::BLACK, 0.65),
-            );
-            if drop_target {
+            let attention = if self.selected {
+                Attention::Selected
+            } else if hovered {
+                Attention::Hovered
+            } else {
+                Attention::Idle
+            };
+            let tile = tile(size);
+            let tile_path = rounded(tile, TILE_RADIUS);
+            let drop_ring = |frame: &mut canvas::Frame| {
+                frame.fill(&tile_path, th::with_alpha(th::accent(), 0.08));
                 frame.stroke(
-                    &well_path,
+                    &ring_path(tile, 1.5),
                     canvas::Stroke::default()
                         .with_color(th::accent())
                         .with_width(1.5),
                 );
-                let ghost = rounded(inset(size, FILM_INSET), FILM_RADIUS);
-                frame.fill(&ghost, th::with_alpha(th::accent(), 0.035));
-                frame.stroke(
-                    &ghost,
-                    canvas::Stroke {
-                        line_dash: canvas::LineDash {
-                            segments: &[4.0, 3.0],
-                            offset: 0,
-                        },
-                        ..canvas::Stroke::default()
-                            .with_color(th::with_alpha(th::accent(), 0.7))
-                            .with_width(1.0)
-                    },
-                );
-            }
+            };
             let Some(slot) = self.clip else {
+                frame.fill(&tile_path, th::field());
+                if drop_target {
+                    drop_ring(frame);
+                } else if let Some(colour) = ring(attention, false) {
+                    frame.stroke(
+                        &ring_path(tile, 1.0),
+                        canvas::Stroke::default().with_color(colour).with_width(1.0),
+                    );
+                }
                 label(
                     frame,
                     self.key,
-                    w - 22.0 - WELL_INSET,
+                    w - 22.0 - TILE_INSET,
                     6.0,
                     10.0,
                     th::text_dim(),
                     true,
                 );
-                if self.selected && !drop_target {
-                    frame.stroke(
-                        &well_path,
-                        canvas::Stroke::default()
-                            .with_color(th::text_dim())
-                            .with_width(1.0),
-                    );
-                }
                 return;
             };
             let ink = if self.recording {
@@ -369,25 +415,15 @@ impl canvas::Program<Message> for ClipSlot<'_> {
                 self.color
             };
             let tight = self.compact && h < 44.0;
-            let film = inset(size, FILM_INSET);
-            let film_path = rounded(film, FILM_RADIUS);
-            frame.fill(
-                &rounded(
-                    Rectangle {
-                        y: film.y + 2.0,
-                        ..film
-                    },
-                    FILM_RADIUS,
-                ),
-                th::with_alpha(Color::BLACK, 0.6),
-            );
+            let film = film(size);
+            let film_path = rounded(film, TILE_RADIUS);
             frame.fill(&film_path, vertical(film, tint(ink, 0.17), tint(ink, 0.07)));
             let (band_top, band_bottom) = if self.playing {
                 (0.63, 0.42)
             } else {
                 (0.48, 0.31)
             };
-            let r = FILM_RADIUS;
+            let r = TILE_RADIUS;
             let (header, corners) = if tight {
                 (
                     Rectangle {
@@ -426,30 +462,19 @@ impl canvas::Program<Message> for ClipSlot<'_> {
                     tint(ink, 0.55),
                 );
             }
-            frame.stroke(
-                &film_path,
-                canvas::Stroke::default()
-                    .with_color(tint(ink, if self.playing { 0.8 } else { 0.4 }))
-                    .with_width(1.0),
-            );
-            frame.fill_rectangle(
-                Point::new(film.x + r, film.y),
-                Size::new((film.width - 2.0 * r).max(0.0), 1.0),
-                tint(ink, if self.playing { 1.0 } else { 0.85 }),
-            );
-            if self.selected {
+            if drop_target {
+                drop_ring(frame);
+            } else if let Some(colour) = ring(attention, true) {
                 frame.stroke(
-                    &rounded(inset(size, FILM_INSET - 2.0), r + 1.0),
-                    canvas::Stroke::default()
-                        .with_color(th::text())
-                        .with_width(1.5),
+                    &ring_path(film, 1.5),
+                    canvas::Stroke::default().with_color(colour).with_width(1.5),
                 );
             }
             let key_space = if self.key.is_empty() { 0.0 } else { 22.0 };
             let title_width = if tight {
                 tight_title_width(film.width, !self.key.is_empty())
             } else {
-                w - 50.0 - key_space - 2.0 * FILM_INSET
+                w - 50.0 - key_space - 2.0 * TILE_INSET
             };
             label(
                 frame,
@@ -461,6 +486,7 @@ impl canvas::Program<Message> for ClipSlot<'_> {
                     },
                     title_width - 12.0,
                     if tight { 10.0 } else { 12.0 },
+                    PERFORM_LABEL,
                 ),
                 film.x + 6.0,
                 film.y + if tight { 4.0 } else { 3.0 },
@@ -600,24 +626,35 @@ impl canvas::Program<Message> for ClipSlot<'_> {
         }
         if self.progress.is_some() || self.queued {
             let mut overlay = canvas::Frame::new(renderer, bounds.size());
-            let film = inset(bounds.size(), FILM_INSET);
+            let film = film(bounds.size());
             if let Some(progress) = self.progress {
-                let played = (film.width - 2.0) * progress.clamp(0.0, 1.0);
-                overlay.fill_rectangle(
+                let line = progress_line(film, progress);
+                let played = Rectangle::new(
                     Point::new(film.x + 1.0, film.y + 1.0),
-                    Size::new(played, film.height - 2.0),
+                    Size::new(line.x - film.x - 1.0, film.height - 2.0),
+                );
+                let left = (TILE_RADIUS - 1.0).min(played.width).max(0.0);
+                overlay.fill(
+                    &rounded(
+                        played,
+                        iced::border::Radius {
+                            top_left: left,
+                            bottom_left: left,
+                            ..Default::default()
+                        },
+                    ),
                     th::with_alpha(self.color, 0.07),
                 );
                 overlay.fill_rectangle(
-                    Point::new(film.x + 1.0 + played, film.y + 1.0),
-                    Size::new(1.0, film.height - 2.0),
+                    line.position(),
+                    line.size(),
                     th::with_alpha(self.color, 0.7),
                 );
             }
             if self.queued {
                 overlay.fill_rectangle(
-                    Point::new(film.x + FILM_RADIUS, film.y),
-                    Size::new((film.width - 2.0 * FILM_RADIUS).max(0.0), 2.0),
+                    Point::new(film.x + TILE_RADIUS, film.y),
+                    Size::new((film.width - 2.0 * TILE_RADIUS).max(0.0), 2.0),
                     th::text(),
                 );
             }
@@ -646,7 +683,7 @@ impl canvas::Program<Message> for LauncherTrackName<'_> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         label(
             &mut frame,
-            &crate::typography::fit(self.name, bounds.width, 13.0),
+            &crate::typography::fit(self.name, bounds.width, 13.0, PERFORM_LABEL),
             0.0,
             0.0,
             13.0,
@@ -712,7 +749,7 @@ mod tests {
     fn the_thumbnail_sits_inside_the_film_between_its_header_and_buttons() {
         for height in [48.0, 56.0, 64.0, 72.0] {
             let size = Size::new(240.0, height);
-            let film = inset(size, FILM_INSET);
+            let film = film(size);
             let plot = thumbnail_plot(size, false, true);
             assert!(plot.x >= film.x && plot.x + plot.width <= film.x + film.width);
             assert!(plot.y >= film.y + HEADER_H, "{height}: below the header");
@@ -723,6 +760,43 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_clip_fills_its_slots_tile_with_no_well_around_it() {
+        for size in [Size::new(140.0, 48.0), Size::new(240.0, 72.0)] {
+            assert_eq!(film(size), tile(size));
+        }
+    }
+
+    #[test]
+    fn the_selection_rings_a_slot_in_the_accent_with_or_without_a_clip() {
+        assert_eq!(ring(Attention::Selected, true), Some(th::accent()));
+        assert_eq!(ring(Attention::Selected, false), Some(th::accent()));
+    }
+
+    #[test]
+    fn an_empty_slot_shows_an_edge_only_under_the_pointer() {
+        assert_eq!(ring(Attention::Idle, false), None);
+        assert!(ring(Attention::Hovered, false).is_some());
+        assert_eq!(ring(Attention::Hovered, true), None, "a clip needs no edge");
+    }
+
+    #[test]
+    fn the_progress_line_stays_inside_the_tiles_rounded_corners() {
+        let film = film(Size::new(160.0, 64.0));
+        let bottom = |line: Rectangle| line.y + line.height;
+        for progress in [0.0, 1.0] {
+            let line = progress_line(film, progress);
+            assert!(line.y > film.y + 2.0, "{progress}: clear of the top corner");
+            assert!(
+                bottom(line) < bottom(film) - 2.0,
+                "{progress}: clear of the bottom corner"
+            );
+        }
+        let middle = progress_line(film, 0.5);
+        assert_eq!(middle.y, film.y + 1.0, "full height away from the corners");
+        assert_eq!(bottom(middle), bottom(film) - 1.0);
     }
 
     #[test]

@@ -253,8 +253,11 @@ impl App {
             row![menu_card]
         };
         let padded = column![
-            vertical_space().height(Length::Fixed(42.0)),
-            row![horizontal_space().width(Length::Fixed(60.0)), menus,]
+            vertical_space().height(Length::Fixed(super::views_control_bar::MENU_TOP)),
+            row![
+                horizontal_space().width(Length::Fixed(super::views_control_bar::FILE_MENU_LEFT)),
+                menus,
+            ]
         ];
 
         mouse_area(container(padded).width(Length::Fill).height(Length::Fill))

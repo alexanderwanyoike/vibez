@@ -15,13 +15,12 @@ use crate::spectrum::SpectrumState;
 use crate::state::UiEffect;
 use crate::theme as th;
 use crate::widgets::device_controls::{
-    disclosure, heading, rule, segmented, toggle, vertical_rule, Param, LABEL_SIZE,
+    heading, rule, segmented, toggle, vertical_rule, Param, LABEL_SIZE,
 };
 use crate::widgets::eq_display::EqDisplayWidget;
 use crate::widgets::level_meter::{self, LevelMeter};
 
 const PAD: f32 = 10.0;
-const PRESET_ROW_H: f32 = 28.0;
 const SIDE_W: f32 = 200.0;
 /// Band name and three parameter lines.
 const SIDE_H: f32 = 112.0;
@@ -33,6 +32,7 @@ const TABS_H: f32 = 56.0;
 const TABS_W: f32 = 320.0;
 const STRIP_H: f32 = 86.0;
 const ADVANCED_H: f32 = 56.0;
+const BAND_GROUP_RADIUS: f32 = 5.0;
 const BAND_GROUP_W: f32 = 172.0;
 const OUTPUT_W: f32 = 340.0;
 const STRIP_KNOB: f32 = 28.0;
@@ -43,7 +43,10 @@ const LINE_KNOB: f32 = 18.0;
 /// A one-line Advanced has room for the output trim after both cuts.
 const LINE_OUTPUT_W: f32 = 480.0;
 
-pub const COMPACT_W: f32 = TABS_W + PAD * 2.0;
+/// The band tabs, or the card's header where that is wider.
+pub const COMPACT_W: f32 = (TABS_W + PAD * 2.0).max(crate::widgets::device_chrome::header_min_w(
+    crate::widgets::device_chrome::MOST_ACTIONS,
+));
 /// The graph with the selected band beside it.
 pub const MEDIUM_W: f32 = GRAPH_MIN_W + 1.0 + SIDE_W + PAD * 2.0;
 /// A short card keeps its graph beside the band tabs.
@@ -111,7 +114,7 @@ fn upper_for(width: f32, height: f32) -> Upper {
 }
 
 pub fn arrange(size: Size, advanced: bool) -> Arrangement {
-    let below = (size.height - PRESET_ROW_H - 1.0).max(0.0);
+    let below = size.height.max(0.0);
     let stacked = if advanced { 1.0 + ADVANCED_H } else { 0.0 };
     let kind = upper_for(size.width, below - stacked);
     let advanced_only = advanced && (kind != Upper::Side || below - stacked < SIDE_H);
@@ -137,11 +140,6 @@ pub fn arrange(size: Size, advanced: bool) -> Arrangement {
         advanced_only,
         advanced_spectrum: size.width >= ADVANCED_SPECTRUM_W,
     }
-}
-
-/// Width left for the preset bar beside the Advanced toggle.
-pub fn preset_bar_width(size: Size) -> f32 {
-    size.width - PAD * 2.0 - 90.0
 }
 
 pub struct EqView<'a> {
@@ -180,22 +178,9 @@ impl<'a> EqView<'a> {
         Message::set_effect_param(self.track_id, self.effect.id, index, value)
     }
 
-    pub fn view(self, preset_bar: Element<'a, Message>, size: Size) -> Element<'a, Message> {
+    pub fn view(self, size: Size) -> Element<'a, Message> {
         let layout = arrange(size, self.panel.advanced);
-        let top = row![
-            preset_bar,
-            Space::with_width(Length::Fill),
-            self.disclosure()
-        ]
-        .spacing(6)
-        .align_y(Alignment::Center);
-        let mut body = column![
-            container(top)
-                .padding([0.0, PAD])
-                .height(PRESET_ROW_H)
-                .align_y(Alignment::Center),
-            rule(),
-        ];
+        let mut body = column![];
         if layout.advanced_only {
             body = body.push(self.advanced(
                 layout.advanced.unwrap_or(0.0),
@@ -430,11 +415,8 @@ impl<'a> EqView<'a> {
     }
 
     fn strip(&self, with_output: bool) -> Element<'a, Message> {
-        let mut bands = row![].spacing(0).height(STRIP_H);
+        let mut bands = row![].spacing(1).height(STRIP_H);
         for band in 0..BAND_NAMES.len() {
-            if band > 0 {
-                bands = bands.push(vertical_rule());
-            }
             let third: Element<'a, Message> = if has_q(band) {
                 self.param(param::SHAPE[band]).label("Q").column(STRIP_KNOB)
             } else {
@@ -465,7 +447,18 @@ impl<'a> EqView<'a> {
             .padding([4.0, 6.0])
             .width(BAND_GROUP_W)
             .style(move |_| container::Style {
-                background: selected.then(|| th::bg_hover().into()),
+                background: Some(
+                    if selected {
+                        th::bg_hover()
+                    } else {
+                        th::card_inset()
+                    }
+                    .into(),
+                ),
+                border: iced::Border {
+                    radius: BAND_GROUP_RADIUS.into(),
+                    ..Default::default()
+                },
                 ..Default::default()
             });
             bands = bands
@@ -625,8 +618,9 @@ impl<'a> EqView<'a> {
         line.into()
     }
 
-    fn disclosure(&self) -> Element<'a, Message> {
-        disclosure(
+    /// The card header's Advanced switch.
+    pub fn advanced_switch(&self) -> crate::widgets::device_chrome::Action {
+        crate::widgets::device_chrome::advanced(
             self.panel.advanced,
             Message::Eq(EqMsg::ToggleAdvanced(self.effect.id)),
             self.accent(),
@@ -639,7 +633,7 @@ mod tests {
     use super::*;
 
     fn used(layout: Arrangement) -> f32 {
-        let mut used = PRESET_ROW_H + 1.0;
+        let mut used = 0.0;
         if layout.advanced_only {
             return used + layout.advanced.unwrap();
         }
@@ -692,11 +686,11 @@ mod tests {
     #[test]
     fn short_cards_keep_the_graph_beside_the_tabs_when_wide_enough() {
         assert_eq!(
-            arrange(Size::new(FULL_W, 100.0), false).kind,
+            arrange(Size::new(FULL_W, 71.0), false).kind,
             Upper::TabsBeside
         );
         assert_eq!(
-            arrange(Size::new(COMPACT_W, 100.0), false).kind,
+            arrange(Size::new(COMPACT_W, 71.0), false).kind,
             Upper::TabsOnly
         );
         assert_eq!(
@@ -704,7 +698,7 @@ mod tests {
             Upper::TabsBelow
         );
         assert_eq!(arrange(Size::new(MEDIUM_W, 200.0), false).kind, Upper::Side);
-        assert_eq!(arrange(Size::new(FULL_W, 70.0), false).kind, Upper::Line);
+        assert_eq!(arrange(Size::new(FULL_W, 41.0), false).kind, Upper::Line);
     }
 
     #[test]

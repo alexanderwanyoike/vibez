@@ -50,8 +50,7 @@ impl App {
         self.input_bridge.set_resample_source(None);
         self._input_stream = None;
         self.state.audio_recording = Default::default();
-        self.state.transport.playing = false;
-        self.state.transport.position_samples = 0;
+        self.state.transport.reset_to_song_start();
         self.send_command(EngineCommand::Stop);
         self.send_command(EngineCommand::Seek(0));
 
@@ -78,6 +77,7 @@ impl App {
             self.send_command(EngineCommand::RemoveBus(bus_id));
         }
         Arc::make_mut(&mut self.state.project_tracks).buses.clear();
+        self.state.track_heights = Default::default();
         self.state.arrangement.timeline = Arc::new(crate::state::ArrangementTimeline::default());
         self.state
             .arrangement
@@ -113,7 +113,8 @@ impl App {
         self.state.arrangement.time_selection_active = false;
         self.state.arrangement.selection_start_beats = 0.0;
         self.state.arrangement.selection_end_beats = 0.0;
-        self.state.view.scroll_offset_beats = 0.0;
+        self.state.view.viewport.scroll_offset_beats = 0.0;
+        self.state.view.zoom_before_selection = None;
         self.state.view.context_menu = None;
         self.state.devices.context_menu = None;
         self.state.project.file_menu_open = false;
@@ -259,7 +260,14 @@ impl App {
     }
 
     pub(super) fn persist_ui_settings(&mut self) {
-        let settings = UiSettings {
+        if let Err(err) = self.ui_settings().save() {
+            self.state.status_text = format!("UI settings save error: {err}");
+        }
+    }
+
+    /// The preferences as ui.json saves them.
+    fn ui_settings(&self) -> UiSettings {
+        UiSettings {
             recent_project_paths: self.state.project.recent_project_paths.clone(),
             perform_input_mapping: self.state.perform.input_mapping.clone(),
             fixed_computer_velocity: self.state.perform.fixed_computer_velocity(),
@@ -269,6 +277,9 @@ impl App {
             sample_browser_width: self.state.browser.dock_width,
             perform_surface_width: self.state.view.perform_surface_width,
             detail_panel_height: self.state.view.detail_panel_height,
+            mix_detail_panel_height: self.state.view.mix_detail_panel_height,
+            arrange_grid: self.state.view.arrange_grid,
+            clip_grid: self.state.view.clip_grid,
             audition_enabled: self.state.browser.audition_enabled,
             audition_gain: self.state.browser.audition_gain,
             auto_warp_on_import: self.state.auto_warp_on_import,
@@ -288,11 +299,9 @@ impl App {
             confirm_project_track_deletion: self.state.confirm_project_track_deletion,
             auto_save_enabled: self.state.auto_save_enabled,
             interface_scale: self.interface_scale,
+            colour_strength: crate::theme::colour_strength(),
             check_for_updates: self.state.update_check.enabled,
             last_update_check_unix: self.state.update_check.last_check_unix,
-        };
-        if let Err(err) = settings.save() {
-            self.state.status_text = format!("UI settings save error: {err}");
         }
     }
 
@@ -345,6 +354,20 @@ impl App {
             sample_rate: self.state.transport.sample_rate,
             tracks,
             perform_layout: self.state.perform.layout,
+            launcher_tracks: self.state.perform.clips.launcher_tracks(
+                self.state
+                    .project_tracks
+                    .tracks
+                    .iter()
+                    .map(|track| track.id),
+            ),
+            track_heights: self.state.track_heights.saved(
+                self.state
+                    .project_tracks
+                    .tracks
+                    .iter()
+                    .map(|track| track.id),
+            ),
             launcher_clips: self
                 .state
                 .perform
@@ -356,6 +379,7 @@ impl App {
                     track_id: clip.track_id,
                     row: clip.row,
                     timeline: super::project_sections::timeline_info_from_ui(&clip.timeline),
+                    launch: clip.launch,
                 })
                 .collect(),
             arrange: super::project_sections::timeline_info_from_ui(
@@ -425,22 +449,26 @@ impl App {
         let remote_provenance = first_remote_provenance_label(&loaded.project);
         self.clear_project_runtime();
         self.state.project.unresolved_clips = loaded.unresolved_clips;
+        self.state.track_heights =
+            crate::domains::track_heights::TrackHeights::from_saved(&loaded.project.track_heights);
         self.state.perform.layout = loaded.project.perform_layout;
-        self.state.perform.clips = Arc::new(crate::domains::perform::ClipStore {
-            clips: loaded
-                .project
-                .launcher_clips
-                .iter()
-                .map(|clip| crate::domains::perform::LauncherClip {
-                    id: clip.id,
-                    track_id: clip.track_id,
-                    row: clip.row,
-                    timeline: Arc::new(super::project_sections::timeline_without_audio(
-                        &clip.timeline,
-                    )),
-                })
-                .collect(),
-        });
+        let mut clips = crate::domains::perform::ClipStore::default();
+        clips.clips = loaded
+            .project
+            .launcher_clips
+            .iter()
+            .map(|clip| crate::domains::perform::LauncherClip {
+                id: clip.id,
+                track_id: clip.track_id,
+                row: clip.row,
+                timeline: Arc::new(super::project_sections::timeline_without_audio(
+                    &clip.timeline,
+                )),
+                launch: clip.launch,
+            })
+            .collect();
+        clips.restore_launcher_tracks(&loaded.project.launcher_tracks);
+        self.state.perform.clips = Arc::new(clips);
         self.state.perform.sections = Arc::new(
             super::project_sections::section_store_from_project(&loaded.project.sections),
         );
@@ -767,44 +795,25 @@ impl App {
         }
 
         for note_clip in &loaded.project.arrange.note_clips {
-            let start_marker_beats = note_clip.resolved_start_marker_beats();
-            self.send_command(EngineCommand::AddNoteClip {
-                track_id: note_clip.track_id,
-                insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
-                    note_clip.id,
-                    note_clip.position_beats,
-                    note_clip.duration_beats,
-                    start_marker_beats,
-                    note_clip.loop_enabled,
-                    note_clip.loop_start_beats,
-                    note_clip.loop_end_beats,
-                    note_clip.groove_grid,
-                ),
-            });
-            for note in &note_clip.notes {
-                self.send_command(EngineCommand::AddNote {
-                    track_id: note_clip.track_id,
-                    clip_id: note_clip.id,
-                    insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(*note),
-                });
-            }
+            let clip = UiNoteClip {
+                id: note_clip.id,
+                name: note_clip.name.clone(),
+                position_beats: note_clip.position_beats,
+                duration_beats: note_clip.duration_beats,
+                notes: note_clip.notes.clone(),
+                selected_notes: HashSet::new(),
+                start_marker_beats: note_clip.resolved_start_marker_beats(),
+                loop_enabled: note_clip.loop_enabled,
+                loop_start_beats: note_clip.loop_start_beats,
+                loop_end_beats: note_clip.loop_end_beats,
+                groove_grid: note_clip.groove_grid,
+            };
+            self.send_command(clip.add_command(note_clip.track_id));
             if self.state.find_track(note_clip.track_id).is_some() {
                 self.state
                     .arrange_content_mut(note_clip.track_id)
                     .note_clips
-                    .push(UiNoteClip {
-                        id: note_clip.id,
-                        name: note_clip.name.clone(),
-                        position_beats: note_clip.position_beats,
-                        duration_beats: note_clip.duration_beats,
-                        notes: note_clip.notes.clone(),
-                        selected_notes: HashSet::new(),
-                        start_marker_beats,
-                        loop_enabled: note_clip.loop_enabled,
-                        loop_start_beats: note_clip.loop_start_beats,
-                        loop_end_beats: note_clip.loop_end_beats,
-                        groove_grid: note_clip.groove_grid,
-                    });
+                    .push(clip);
             }
         }
 
@@ -971,3 +980,30 @@ pub(super) fn drum_rack_pads_for_save(pads: &[UiDrumPad]) -> Vec<vibez_core::tra
 #[cfg(test)]
 #[path = "project_io_tests.rs"]
 mod instrument_invariant_tests;
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_new_or_opened_project_forgets_the_view_before_zoom_to_selection() {
+        let mut app = super::super::test_support::app();
+        app.state.view.zoom_before_selection = Some(Default::default());
+
+        app.clear_project_runtime();
+
+        assert!(app.state.view.zoom_before_selection.is_none());
+    }
+
+    #[test]
+    fn ui_json_saves_the_mix_split_beside_the_arrange_one() {
+        let mut app = super::super::test_support::app();
+        app.state.view.mix_detail_panel_height = Some(312.0);
+
+        let saved = serde_json::to_value(app.ui_settings()).unwrap();
+
+        assert_eq!(saved["mix_detail_panel_height"], 312.0);
+        assert_eq!(
+            saved["detail_panel_height"],
+            f64::from(crate::state::DETAIL_PANEL_DEFAULT_HEIGHT)
+        );
+    }
+}

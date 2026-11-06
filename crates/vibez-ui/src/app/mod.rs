@@ -210,6 +210,7 @@ mod plugins;
 mod project_export;
 mod project_io;
 mod project_replay;
+mod project_sample_rate;
 mod project_sections;
 mod project_serialization;
 mod save_runtime;
@@ -237,12 +238,16 @@ mod views_browser_remote;
 mod views_browser_style;
 mod views_clip_swing;
 mod views_close_confirm;
+mod views_control_bar;
+mod views_control_bar_style;
+mod views_control_status;
 mod views_detail;
 mod views_devices;
 mod views_file_menu;
 mod views_mixer;
 mod views_overlays;
 mod views_perform;
+mod views_perform_header;
 mod views_perform_instrument;
 mod views_perform_pads;
 mod views_perform_playhead;
@@ -254,6 +259,7 @@ mod views_settings_audio;
 mod views_settings_dropbox;
 mod views_settings_perform;
 mod views_settings_project;
+mod views_settings_rows;
 mod views_settings_updates;
 mod views_shell;
 mod views_transient_analysis;
@@ -272,7 +278,15 @@ mod instrument_media_shutdown_tests;
 mod instrument_media_ui_flow_tests;
 
 #[cfg(test)]
+mod loop_region_persistence_tests;
+#[cfg(test)]
 mod project_format_v1_tests;
+#[cfg(test)]
+mod sample_rate_import_tests;
+#[cfg(test)]
+mod sample_rate_reopen_tests;
+#[cfg(test)]
+mod track_height_tests;
 
 impl Drop for App {
     fn drop(&mut self) {
@@ -289,6 +303,9 @@ impl Drop for App {
 impl App {
     fn new() -> (Self, Task<Message>) {
         let (mut engine, cmd_tx, event_rx) = AudioEngine::new();
+        let transport = engine
+            .take_transport_sender()
+            .expect("a new engine still holds its transport sender");
         let eq_spectrum_rx = engine.take_effect_spectrum_consumer();
         let ui_settings = UiSettings::load();
         // Read before the settings are picked apart below, and clamped
@@ -399,6 +416,9 @@ impl App {
             view: crate::state::ViewState {
                 perform_surface_width: ui_settings.perform_surface_width,
                 detail_panel_height: ui_settings.detail_panel_height,
+                mix_detail_panel_height: ui_settings.mix_detail_panel_height,
+                arrange_grid: ui_settings.arrange_grid,
+                clip_grid: ui_settings.clip_grid,
                 ..Default::default()
             },
             browser: crate::state::BrowserState {
@@ -433,6 +453,7 @@ impl App {
             eprintln!("vibez: theme scan: {warning}");
         }
         state.user_themes = user_themes;
+        th::set_colour_strength(ui_settings.colour_strength);
         if let Some(name) = &ui_settings.theme {
             let palette = crate::themes::builtin_by_name(name).or_else(|| {
                 state
@@ -465,7 +486,7 @@ impl App {
         let mut app = Self {
             state,
             edge_shortcuts: EdgeShortcutState::default(),
-            cmd_tx: crate::domains::EngineCommandQueue::new(cmd_tx),
+            cmd_tx: crate::domains::EngineCommandQueue::new(cmd_tx, transport),
             event_rx: Some(event_rx),
             _stream: Some(output_stream),
             sample_retirement: Default::default(),
@@ -653,28 +674,8 @@ impl App {
         );
     }
 
-    pub(super) fn active_editor_pixels_per_beat(&self) -> f32 {
-        let editor = self.state.active_timeline_editor();
-        if let Some((track_id, clip_id)) = editor.selected_note_clip {
-            if let Some(duration) =
-                self.state
-                    .active_timeline_content(track_id)
-                    .and_then(|content| {
-                        content
-                            .note_clips
-                            .iter()
-                            .find(|clip| clip.id == clip_id)
-                            .map(|clip| clip.duration_beats)
-                    })
-            {
-                return crate::timeline_geometry::TimelineGeometry::fitted(
-                    duration,
-                    self.state.view.window_width,
-                    52.0,
-                )
-                .pixels_per_beat();
-            }
-        }
+    /// Zoom of the Arrange or Section timeline on screen.
+    pub(super) fn timeline_pixels_per_beat(&self) -> f32 {
         if self.state.view.workspace == crate::state::Workspace::Perform
             && self.state.perform.selected_section.is_some()
         {
@@ -686,11 +687,7 @@ impl App {
                 .geometry()
                 .pixels_per_beat();
         }
-        crate::timeline_geometry::TimelineGeometry::from_zoom(
-            self.state.view.zoom_level,
-            self.state.view.scroll_offset_beats,
-        )
-        .pixels_per_beat()
+        self.state.view.viewport.geometry().pixels_per_beat()
     }
 
     /// Auto-scroll the arrangement when a clip's right edge nears the visible boundary.
@@ -698,27 +695,24 @@ impl App {
     fn auto_scroll_to_beat(&mut self, clip_end_beat: f64) {
         // Conservative estimate of canvas width (window minus track headers)
         let canvas_width = 1400.0_f32;
-        let geometry = crate::timeline_geometry::TimelineGeometry::from_zoom(
-            self.state.view.zoom_level,
-            self.state.view.scroll_offset_beats,
-        );
+        let geometry = self.state.view.viewport.geometry();
         let visible_beats = geometry.visible_beats(canvas_width);
-        let visible_end = self.state.view.scroll_offset_beats + visible_beats;
+        let visible_end = self.state.view.viewport.scroll_offset_beats + visible_beats;
         let margin = 2.0_f64;
 
         if clip_end_beat > visible_end - margin {
             let delta = clip_end_beat - visible_end + margin * 2.0;
             let total = self.state.total_beats();
-            self.state.view.scroll_offset_beats =
-                (self.state.view.scroll_offset_beats + delta).clamp(0.0, total);
+            self.state.view.viewport.scroll_offset_beats =
+                (self.state.view.viewport.scroll_offset_beats + delta).clamp(0.0, total);
         }
         // Also scroll left when dragging toward the left edge
-        if clip_end_beat < self.state.view.scroll_offset_beats + margin
-            && self.state.view.scroll_offset_beats > 0.0
+        if clip_end_beat < self.state.view.viewport.scroll_offset_beats + margin
+            && self.state.view.viewport.scroll_offset_beats > 0.0
         {
-            let delta = self.state.view.scroll_offset_beats + margin - clip_end_beat;
-            self.state.view.scroll_offset_beats =
-                (self.state.view.scroll_offset_beats - delta).max(0.0);
+            let delta = self.state.view.viewport.scroll_offset_beats + margin - clip_end_beat;
+            self.state.view.viewport.scroll_offset_beats =
+                (self.state.view.viewport.scroll_offset_beats - delta).max(0.0);
         }
     }
 
@@ -771,6 +765,8 @@ impl App {
     }
 }
 
+#[cfg(test)]
+mod clip_launch_options_tests;
 mod clip_launcher;
 #[cfg(test)]
 mod clip_launcher_resume_tests;
@@ -779,6 +775,23 @@ mod views_clip_launcher;
 
 #[cfg(test)]
 mod clip_project_tests;
+
+#[cfg(test)]
+mod capture_then_play_tests;
+
+#[cfg(test)]
+mod clip_drag_undo_tests;
+
+#[cfg(test)]
+mod clip_drag_cancel_tests;
+#[cfg(test)]
+mod fade_drag_cancel_tests;
+
+#[cfg(test)]
+mod clip_shortcut_tests;
+
+#[cfg(test)]
+mod grid_shortcut_tests;
 
 #[cfg(test)]
 mod note_clip_insertion_tests;
@@ -812,6 +825,12 @@ mod compensation_selection_tests;
 
 #[cfg(test)]
 mod undo_replay_routing_tests;
+
+#[cfg(test)]
+mod undo_content_swap_tests;
+
+#[cfg(test)]
+mod drag_cost_tests;
 
 mod midi_input;
 

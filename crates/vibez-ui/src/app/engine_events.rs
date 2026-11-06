@@ -167,7 +167,7 @@ fn apply_clip_resync(
         .resync_track(snapshot, &state.perform.clips);
 
     if state.perform.clip_editor.next_request <= snapshot.through_request {
-        state.transport.playing = snapshot.transport_playing;
+        state.transport.follow_engine(snapshot.transport_playing);
     }
     let source = state
         .perform
@@ -395,11 +395,15 @@ impl App {
                         request_id,
                         retired,
                         effective_at_samples,
+                        start_position,
                         ..
                     } => {
                         let editor = &mut self.state.perform.clip_editor;
                         editor.acknowledge_transition(track_id, request_id);
-                        editor.started_at.insert(track_id, effective_at_samples);
+                        editor.started_at.insert(
+                            track_id,
+                            effective_at_samples.saturating_sub(start_position),
+                        );
                         if let Some(clip) = editor.pending.remove(&request_id) {
                             editor.playing.insert(track_id, clip);
                         } else {
@@ -414,11 +418,19 @@ impl App {
                             track_id,
                             source,
                             effective_at_samples,
-                            0,
+                            start_position,
                         );
                         drop(retired);
                     }
                     EngineEvent::PlaybackStopped => {
+                        // The engine's report, not a request, so none of the
+                        // checks a user's Stop goes through apply.
+                        let ctx = self.transport_ctx();
+                        self.state.transport.update(
+                            crate::domains::transport::TransportMsg::EngineStopped,
+                            &mut crate::domains::EngineTx(&mut self.cmd_tx),
+                            ctx,
+                        );
                         let editor = &mut self.state.perform.clip_editor;
                         editor.resume = editor
                             .playing
@@ -430,16 +442,13 @@ impl App {
                         self.state.perform.clip_editor.started_at.clear();
                         self.state.perform.clip_editor.clear_queue();
                         self.state.perform.clip_editor.pending.clear();
-                        self.state.transport.playing = false;
                         self.state.perform.playing_section = None;
                         self.state.perform.queued_section = None;
                         self.state.perform.pending_section_boundary_samples = None;
                         self.state.perform.section_playhead_samples = 0;
                         self.state.perform.clear_pending_track_mutes();
                     }
-                    EngineEvent::PlaybackStarted => {
-                        self.state.transport.playing = true;
-                    }
+                    EngineEvent::PlaybackStarted => self.state.transport.follow_engine(true),
                     EngineEvent::AuditionStopped => {
                         self.state.browser.stop_audition_state();
                         if active_audition_status(&self.state.status_text) {
@@ -995,7 +1004,7 @@ mod tests {
         assert!(state.perform.clip_editor.pending.is_empty());
         assert!(state.perform.clip_editor.running);
         assert!(
-            state.transport.playing,
+            state.transport.is_playing(),
             "a lost PlaybackStarted must also recover"
         );
         assert!(state.perform.clip_editor.started_at.contains_key(&track));
@@ -1050,6 +1059,22 @@ mod tests {
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].pitch, 42);
         assert_eq!(captured.by_track[&track].note_clips[0].position_beats, 2.0);
+    }
+
+    #[test]
+    fn arrange_stopping_on_its_own_shows_stopped_back_where_play_started() {
+        let mut app = crate::app::test_support::app();
+        let (mut events, received) = rtrb::RingBuffer::new(4);
+        app.event_rx = Some(received);
+        app.state.transport.playback = crate::state::PlaybackPhase::Playing;
+        app.state.transport.play_start_beats = 1.0;
+        app.state.transport.position_samples = 90_000;
+
+        events.push(EngineEvent::PlaybackStopped).unwrap();
+        app.poll_engine_events();
+
+        assert!(!app.state.transport.is_playing());
+        assert_eq!(app.state.transport.position_samples, 22_050);
     }
 
     #[test]

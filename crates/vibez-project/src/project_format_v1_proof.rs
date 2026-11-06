@@ -85,6 +85,8 @@ pub fn representative_document() -> ProjectDocumentV1 {
         sections: Vec::new(),
         perform_layout: Default::default(),
         launcher_clips: Vec::new(),
+        launcher_tracks: Vec::new(),
+        track_heights: Vec::new(),
     };
     ProjectDocumentV1::new(project)
 }

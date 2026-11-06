@@ -242,7 +242,7 @@ impl App {
         playback_mode: AuditionMode,
     ) {
         let warped = playback_mode == AuditionMode::Warp;
-        let queued = self.state.transport.playing && warped;
+        let queued = self.state.transport.is_playing() && warped;
         // Retain a UI-side clone (never cleared on stop) so the engine
         // voice can never drop the final Arc inside the RT callback.
         // A superseded buffer moves into the retired ring rather than
@@ -281,21 +281,32 @@ impl App {
         };
     }
 
-    pub(super) fn prepare_browser_warp(
+    pub(super) fn prepare_browser_audition(
         &mut self,
         source: MediaSourceRef,
         raw: Arc<DecodedAudio>,
-        source_bpm: f64,
+        plan: crate::state::BrowserAuditionPlan,
     ) -> Task<Message> {
         let project_bpm = self.state.transport.bpm;
+        let sample_rate = self.state.transport.sample_rate;
         let generation = self.state.browser.begin_audition_preparation(&source);
-        self.state.status_text =
-            format!("Fitting {source_bpm:.1} BPM loop to project {project_bpm:.1} BPM...");
+        let mode = match plan {
+            crate::state::BrowserAuditionPlan::Raw => {
+                self.state.status_text = format!("Resampling audition to {sample_rate} Hz...");
+                AuditionMode::Raw
+            }
+            crate::state::BrowserAuditionPlan::Warp { source_bpm } => {
+                self.state.status_text =
+                    format!("Fitting {source_bpm:.1} BPM loop to project {project_bpm:.1} BPM...");
+                AuditionMode::Warp
+            }
+        };
         Task::perform(
-            warp_browser_audition_async(raw, source_bpm, project_bpm),
-            move |result| Message::BrowserAuditionWarpReady {
+            prepare_browser_audition_async(raw, plan, project_bpm, sample_rate),
+            move |result| Message::BrowserAuditionReady {
                 source: source.clone(),
                 generation,
+                mode,
                 project_bpm,
                 result,
             },
@@ -308,13 +319,13 @@ impl App {
         raw: Arc<DecodedAudio>,
     ) -> Task<Message> {
         match self.state.browser.audition_playback_plan(&source) {
-            crate::state::BrowserAuditionPlan::Raw => {
+            crate::state::BrowserAuditionPlan::Raw
+                if raw.sample_rate == self.state.transport.sample_rate =>
+            {
                 self.start_browser_audition(raw, AuditionMode::Raw);
                 Task::none()
             }
-            crate::state::BrowserAuditionPlan::Warp { source_bpm } => {
-                self.prepare_browser_warp(source, raw, source_bpm)
-            }
+            plan => self.prepare_browser_audition(source, raw, plan),
         }
     }
 
@@ -439,6 +450,7 @@ impl App {
         source: MediaSourceRef,
     ) -> Task<Message> {
         let project_bpm = self.state.transport.bpm;
+        let sample_rate = self.state.transport.sample_rate;
         let treatment = match treatment.resolve_for_analysis(&analysed) {
             Ok(treatment) => treatment,
             Err(error) => {
@@ -454,7 +466,14 @@ impl App {
         let generation = self.browser_import_request.begin();
         let raw = analysed.audio;
         let task = Task::perform(
-            prepare_browser_import_audio_async(target, treatment, raw, source, project_bpm),
+            prepare_browser_import_audio_async(
+                target,
+                treatment,
+                raw,
+                source,
+                project_bpm,
+                sample_rate,
+            ),
             move |result| match result {
                 Ok((audio, original_audio, source)) => Message::BrowserImportPrepared {
                     target: retained_target.clone(),

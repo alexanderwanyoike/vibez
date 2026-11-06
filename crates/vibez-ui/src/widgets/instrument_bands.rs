@@ -18,7 +18,6 @@ use crate::widgets::device_controls::{
 use crate::widgets::device_layout::{pack, KNOB_ROW_H, LINE_H};
 
 pub const PAD: f32 = 10.0;
-pub const PRESET_ROW_H: f32 = 28.0;
 pub const TABS_H: f32 = 24.0;
 pub const HEADER_H: f32 = 22.0;
 /// What `plot_band` keeps clear above and below its content.
@@ -59,10 +58,6 @@ pub const WIDTHS: crate::widgets::device_chrome::CardWidths =
         max: MAX_W,
     };
 
-pub fn preset_bar_width(size: Size) -> f32 {
-    size.width - PAD * 2.0
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tier {
     Compact,
@@ -95,7 +90,7 @@ pub enum Form {
 /// The form a card `size` takes; `overview` is how tall the overview's top
 /// band's content must be, when the tab shown may have one.
 pub fn arrange(size: Size, overview: Option<f32>) -> Form {
-    let below = (size.height - PRESET_ROW_H - 1.0).max(0.0);
+    let below = size.height.max(0.0);
     let tabs = TABS_H + 1.0;
     let strip = BAND_PAD * 2.0 + 1.0 + STRIP_H;
     if overview.is_some_and(|top| below >= tabs + top + strip) {
@@ -109,13 +104,11 @@ pub fn arrange(size: Size, overview: Option<f32>) -> Form {
 
 /// How tall a card is in `form`, to check it never scrolls.
 pub fn used_height(form: Form) -> f32 {
-    PRESET_ROW_H
-        + 1.0
-        + match form {
-            Form::Band(content) => TABS_H + 1.0 + content + BAND_PAD * 2.0,
-            Form::Overview(top) => TABS_H + 1.0 + top + BAND_PAD * 2.0 + 1.0 + STRIP_H,
-            Form::Line => LINE_H,
-        }
+    match form {
+        Form::Band(content) => TABS_H + 1.0 + content + BAND_PAD * 2.0,
+        Form::Overview(top) => TABS_H + 1.0 + top + BAND_PAD * 2.0 + 1.0 + STRIP_H,
+        Form::Line => LINE_H,
+    }
 }
 
 /// What the layout needs to know of a card's plots.
@@ -219,11 +212,10 @@ pub trait BandCard<'a> {
     /// The part the shortest card shows.
     fn line_part(&self) -> usize;
 
-    /// The card: the preset bar over the tabs `pages` with `page` chosen,
+    /// The card: the tabs `pages` with `page` chosen,
     /// over `bands` (each its groups and content height) in `form`.
     fn frame(
         &self,
-        preset_bar: Element<'a, Message>,
         size: Size,
         form: Form,
         pages: &[&'a str],
@@ -231,15 +223,9 @@ pub trait BandCard<'a> {
         bands: Vec<(Vec<Group<'a, Self::Plot>>, f32)>,
     ) -> Element<'a, Message> {
         let inner = size.width - PAD * 2.0;
-        let mut body = column![
-            container(preset_bar)
-                .padding([0.0, PAD])
-                .height(PRESET_ROW_H)
-                .align_y(Alignment::Center),
-            rule(),
-        ];
+        let mut body = column![];
         if form == Form::Line {
-            body = body.push(self.line(inner, size.height - PRESET_ROW_H - 1.0));
+            body = body.push(self.line(inner, size.height));
             return body.width(Length::Fill).height(Length::Fill).into();
         }
         let track_id = self.track_id();

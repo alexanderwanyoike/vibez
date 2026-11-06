@@ -96,9 +96,12 @@ fn coverage(command: &EngineCommand) -> Coverage {
         | C::MoveEffect { .. }
         | C::RemoveTrackInstrument(_)
         | C::SetNoteClipDuration { .. }
+        | C::SetNoteClipBounds { .. }
         | C::SetNoteClipGrooveGrid { .. }
         | C::AddNoteClip { .. }
         | C::RemoveNoteClip(..)
+        | C::BeginContentRebuild
+        | C::EndContentRebuild
         | C::MoveNoteClip { .. }
         | C::AddNote { .. }
         | C::RemoveNote { .. }
@@ -696,6 +699,14 @@ fn cases() -> Vec<Case> {
             clip_id: f.note_clip,
             duration_beats: 2.0,
         }),
+        case!("SetNoteClipBounds", false, |f| C::SetNoteClipBounds {
+            track_id: f.synth,
+            clip_id: f.note_clip,
+            duration_beats: 2.0,
+            start_marker_beats: 0.5,
+            loop_start_beats: 0.5,
+            loop_end_beats: 1.5,
+        }),
         case!("SetNoteClipGrooveGrid", false, |f| {
             C::SetNoteClipGrooveGrid {
                 track_id: f.synth,
@@ -711,6 +722,15 @@ fn cases() -> Vec<Case> {
             f.synth,
             f.note_clip
         )),
+        case!("BeginContentRebuild", false, |_| C::BeginContentRebuild),
+        case!(
+            "EndContentRebuild",
+            false,
+            |commands, _| {
+                assert!(commands.push(C::BeginContentRebuild).is_ok());
+            },
+            |_| C::EndContentRebuild
+        ),
         case!("MoveNoteClip", false, |f| C::MoveNoteClip {
             track_id: f.synth,
             clip_id: f.note_clip,

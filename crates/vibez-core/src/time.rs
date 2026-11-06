@@ -14,8 +14,20 @@ impl SampleTime {
     }
 }
 
+/// The same instant counted at another sample rate, to the nearest frame.
+pub fn frames_at_rate(frames: u64, from_rate: u32, to_rate: u32) -> u64 {
+    if from_rate == to_rate || from_rate == 0 {
+        return frames;
+    }
+    let (from, to) = (u128::from(from_rate), u128::from(to_rate));
+    ((u128::from(frames) * to + from / 2) / from) as u64
+}
+
 /// Every bar is 4/4 until the Project gains a time signature.
 pub const BEATS_PER_BAR: f64 = 4.0;
+
+/// The finest musical resolution recorded and captured MIDI lands on.
+pub const TICKS_PER_BEAT: f64 = 960.0;
 
 /// Musical position in beats (quarter notes).
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default, Serialize, Deserialize)]
@@ -45,6 +57,34 @@ impl MusicalTime {
             (false, _) => plural(rest, "beat"),
         }
     }
+
+    /// A position as bar, beat and sixteenth counted from 1, such as
+    /// "33.1.1", as Ableton reads positions.
+    pub fn bar_beat_sixteenth(self) -> String {
+        // The epsilon keeps a position a hair under a line, from float
+        // error, on that line.
+        let sixteenths = (self.0.max(0.0) * 4.0 + 1e-6).floor() as u64;
+        let per_bar = (BEATS_PER_BAR * 4.0) as u64;
+        format!(
+            "{}.{}.{}",
+            sixteenths / per_bar + 1,
+            sixteenths % per_bar / 4 + 1,
+            sixteenths % 4 + 1
+        )
+    }
+
+    /// A length as whole bars, beats and sixteenths, such as "4.0.0", as
+    /// Ableton reads lengths.
+    pub fn bars_beats_sixteenths(self) -> String {
+        let sixteenths = (self.0.max(0.0) * 4.0).round() as u64;
+        let per_bar = (BEATS_PER_BAR * 4.0) as u64;
+        format!(
+            "{}.{}.{}",
+            sixteenths / per_bar,
+            sixteenths % per_bar / 4,
+            sixteenths % 4
+        )
+    }
 }
 
 /// Converts between musical time and sample time at a fixed tempo.
@@ -69,10 +109,10 @@ impl TempoMap {
         self.seconds_per_beat() * self.sample_rate as f64
     }
 
-    /// Convert musical time (beats) to sample time.
+    /// Convert musical time (beats) to its nearest sample.
     pub fn musical_to_sample(&self, musical: MusicalTime) -> SampleTime {
         let samples = musical.0 * self.samples_per_beat();
-        SampleTime(samples as u64)
+        SampleTime(samples.round() as u64)
     }
 
     /// Convert sample time to musical time (beats).
@@ -92,6 +132,14 @@ mod tests {
         let st = SampleTime::from_seconds(2.5, sr);
         let secs = st.to_seconds(sr);
         assert!((secs - 2.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn frames_at_rate_keeps_the_instant_to_the_nearest_frame() {
+        assert_eq!(frames_at_rate(88_200, 44_100, 48_000), 96_000);
+        assert_eq!(frames_at_rate(96_000, 48_000, 44_100), 88_200);
+        assert_eq!(frames_at_rate(1, 44_100, 48_000), 1);
+        assert_eq!(frames_at_rate(u64::MAX / 2, 48_000, 48_000), u64::MAX / 2);
     }
 
     #[test]
@@ -121,6 +169,25 @@ mod tests {
     }
 
     #[test]
+    fn a_position_reads_as_bar_beat_sixteenth_from_one() {
+        let label = |beats| MusicalTime(beats).bar_beat_sixteenth();
+        assert_eq!(label(0.0), "1.1.1");
+        assert_eq!(label(128.0), "33.1.1");
+        assert_eq!(label(5.75), "2.2.4");
+        assert_eq!(label(4.0 - 1e-9), "2.1.1");
+        assert_eq!(label(1.1), "1.2.1");
+    }
+
+    #[test]
+    fn a_length_reads_as_bars_beats_sixteenths_from_zero() {
+        let label = |beats| MusicalTime(beats).bars_beats_sixteenths();
+        assert_eq!(label(16.0), "4.0.0");
+        assert_eq!(label(6.5), "1.2.2");
+        assert_eq!(label(0.25), "0.0.1");
+        assert_eq!(label(12.3), "3.0.1");
+    }
+
+    #[test]
     fn tempo_map_120bpm() {
         let tm = TempoMap::new(120.0, 44_100);
         assert!((tm.seconds_per_beat() - 0.5).abs() < 1e-10);
@@ -133,8 +200,7 @@ mod tests {
         let musical = MusicalTime(4.0);
         let sample = tm.musical_to_sample(musical);
         let back = tm.sample_to_musical(sample);
-        // Tolerance accounts for u64 truncation in musical_to_sample
-        let tolerance = 1.0 / tm.samples_per_beat();
+        let tolerance = 0.5 / tm.samples_per_beat();
         assert!((back.0 - musical.0).abs() < tolerance);
     }
 
@@ -144,5 +210,12 @@ mod tests {
         // 1 beat at 120 BPM = 0.5 seconds = 22050 samples
         let st = tm.musical_to_sample(MusicalTime(1.0));
         assert_eq!(st.0, 22_050);
+    }
+
+    #[test]
+    fn a_beat_lands_on_its_nearest_sample() {
+        // 20_353.85 samples per beat.
+        let tm = TempoMap::new(130.0, 44_100);
+        assert_eq!(tm.musical_to_sample(MusicalTime(1.0)).0, 20_354);
     }
 }

@@ -10,7 +10,7 @@ use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::clip_timeline::{BeatClipTimeline, FrameClipTimeline};
 use vibez_core::effect::{EffectType, ParamDescriptor};
 use vibez_core::id::{ClipId, EffectId, TrackId};
-use vibez_core::midi::{InstrumentKind, MidiNote, TrackKind};
+use vibez_core::midi::{InstrumentKind, MidiNote, TrackKind, NOTE_CONTENT_END_BEATS};
 use vibez_core::track::{
     AudioInputRoute, ClipFades, ClipGainDb, ClipPlaybackDirection, ClipTranspose, DrumPadState,
     InputMonitoring, MediaSourceRef,
@@ -60,13 +60,129 @@ pub struct UiClip {
     pub original_audio: Option<Arc<DecodedAudio>>,
 }
 
+/// Decoded audio compares by buffer identity: comparing samples would scan
+/// whole recordings, and every edit that changes audio installs a new buffer.
+impl PartialEq for UiClip {
+    fn eq(&self, other: &Self) -> bool {
+        let Self {
+            id,
+            name,
+            audio,
+            source,
+            position,
+            source_offset,
+            start_marker,
+            duration,
+            loop_enabled,
+            loop_start,
+            loop_end,
+            gain_db,
+            fades,
+            playback_direction,
+            transient_markers,
+            warp_markers,
+            transpose,
+            original_bpm,
+            warped,
+            warped_to_bpm,
+            original_audio,
+        } = self;
+        *id == other.id
+            && Arc::ptr_eq(audio, &other.audio)
+            && *position == other.position
+            && *source_offset == other.source_offset
+            && *start_marker == other.start_marker
+            && *duration == other.duration
+            && *loop_enabled == other.loop_enabled
+            && *loop_start == other.loop_start
+            && *loop_end == other.loop_end
+            && *gain_db == other.gain_db
+            && *fades == other.fades
+            && *playback_direction == other.playback_direction
+            && *warp_markers == other.warp_markers
+            && *name == other.name
+            && *source == other.source
+            && *transient_markers == other.transient_markers
+            && *transpose == other.transpose
+            && *original_bpm == other.original_bpm
+            && *warped == other.warped
+            && *warped_to_bpm == other.warped_to_bpm
+            && same_audio(original_audio, &other.original_audio)
+    }
+}
+
+pub(super) fn same_audio(
+    left: &Option<Arc<DecodedAudio>>,
+    right: &Option<Arc<DecodedAudio>>,
+) -> bool {
+    match (left, right) {
+        (Some(left), Some(right)) => Arc::ptr_eq(left, right),
+        (left, right) => left.is_none() && right.is_none(),
+    }
+}
+
+/// Where a Clip sits on its lane, in beats.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ClipSpan {
+    pub start_beats: f64,
+    pub length_beats: f64,
+}
+
+impl ClipSpan {
+    pub fn end_beats(self) -> f64 {
+        self.start_beats + self.length_beats
+    }
+}
+
 impl UiClip {
+    pub fn span(&self, samples_per_beat: f64) -> ClipSpan {
+        ClipSpan {
+            start_beats: self.position as f64 / samples_per_beat,
+            length_beats: self.duration as f64 / samples_per_beat,
+        }
+    }
+
     pub(crate) fn source_end(&self) -> u64 {
         self.warp_markers.source_end(
             self.source_offset
                 .saturating_add(self.duration)
                 .min(self.audio.num_frames() as u64),
         )
+    }
+
+    /// The length `requested` may actually take, as an unlooped Clip stops
+    /// where its sample runs out.
+    pub(crate) fn playable_duration(&self, requested: u64) -> u64 {
+        if self.loop_enabled {
+            return requested;
+        }
+        let frames = self.audio.num_frames() as u64;
+        let longest = (self.warp_timeline_end() + frames.saturating_sub(self.source_end()))
+            .saturating_sub(self.start_marker.saturating_sub(self.source_offset));
+        requested.min(longest)
+    }
+
+    /// Change the length to `requested`, or as near as the sample allows,
+    /// moving the right edge.
+    pub(crate) fn resize(&mut self, requested: u64) {
+        let new_duration = self.playable_duration(requested);
+        let old_mapping_end = self.warp_timeline_end();
+        let new_mapping_end =
+            new_duration.min((self.audio.num_frames() as u64).saturating_sub(self.source_offset));
+        self.warp_markers = self.warp_markers.resized_timeline(
+            old_mapping_end,
+            new_mapping_end,
+            self.source_offset,
+            self.audio.num_frames() as u64,
+        );
+        self.duration = new_duration;
+        self.clamp_fades_to_clip();
+        self.clamp_start_to_source();
+        if self.loop_enabled {
+            self.clamp_loop_to_warp_map();
+        }
+        self.transient_markers
+            .retain_source_range(self.source_offset, self.source_end());
     }
 
     pub(crate) fn warp_timeline_end(&self) -> u64 {
@@ -86,20 +202,58 @@ impl UiClip {
         )
     }
 
+    /// Only a loop lets the start marker sit past the clip end, so the
+    /// marker returns to the clip start with the region it was bounded by.
     pub(crate) fn reset_loop_region_to_clip(&mut self) {
+        let end = self.source_offset.saturating_add(self.duration);
+        if self.start_marker >= end {
+            self.start_marker = self.source_offset;
+        }
         self.loop_start = self.start_marker;
-        self.loop_end = self.source_offset.saturating_add(self.duration);
+        self.loop_end = end;
     }
 
-    pub(crate) fn enable_loop_over_clip(&mut self) {
-        self.loop_enabled = true;
-        self.reset_loop_region_to_clip();
+    /// The loop region outlives its loop being off, as Ableton keeps a clip's
+    /// loop brace, so turning it back on loops the same region.
+    pub(crate) fn set_loop_enabled(&mut self, enabled: bool) {
+        self.loop_enabled = enabled;
+        if enabled && !self.accepts_loop_region(self.loop_start, self.loop_end) {
+            self.reset_loop_region_to_clip();
+        }
     }
 
-    pub(crate) fn clamp_loop_to_clip(&mut self) {
-        let clip_end = self.source_offset.saturating_add(self.duration);
-        self.loop_start = self.loop_start.max(self.source_offset).min(clip_end);
-        self.loop_end = self.loop_end.min(clip_end);
+    pub(crate) fn loop_content_start(&self) -> u64 {
+        FrameClipTimeline::loop_content_start(self.source_offset, &self.warp_markers)
+    }
+
+    pub(crate) fn loop_content_end(&self) -> u64 {
+        FrameClipTimeline::loop_content_end(
+            self.source_offset,
+            self.audio.num_frames() as u64,
+            &self.warp_markers,
+        )
+    }
+
+    /// The frames the audio editor spans: from where the loop may begin to
+    /// the furthest it may reach, or to the clip's end where an unlooped
+    /// clip runs on into silence.
+    pub(crate) fn editor_frames(&self) -> (u64, u64) {
+        let reach = self.loop_content_end();
+        let end = if self.loop_enabled {
+            reach
+        } else {
+            reach.max(self.source_offset.saturating_add(self.duration))
+        };
+        (self.loop_content_start(), end)
+    }
+
+    /// Resizing a warped clip resizes its Warp Marker map, which can cut the
+    /// loop.
+    pub(crate) fn clamp_loop_to_warp_map(&mut self) {
+        if self.warp_markers.is_empty() {
+            return;
+        }
+        self.loop_end = self.loop_end.min(self.loop_content_end());
         if self.loop_end <= self.loop_start || self.start_marker >= self.loop_end {
             self.reset_loop_region_to_clip();
         }
@@ -130,19 +284,33 @@ impl UiClip {
         true
     }
 
+    fn accepts_loop_region(&self, start: u64, end: u64) -> bool {
+        start >= self.loop_content_start()
+            && start < end
+            && end <= self.loop_content_end()
+            && self.start_marker < end
+    }
+
     pub(crate) fn set_loop_region(&mut self, start: u64, end: u64) -> bool {
-        let clip_end = self
-            .source_offset
-            .saturating_add(self.duration)
-            .min(self.audio.num_frames() as u64);
-        let valid = start >= self.source_offset && start < end && end <= clip_end;
-        let valid = valid && self.start_marker < end;
-        if !valid || (start, end) == (self.loop_start, self.loop_end) {
+        if !self.accepts_loop_region(start, end) || (start, end) == (self.loop_start, self.loop_end)
+        {
             return false;
         }
         self.loop_start = start;
         self.loop_end = end;
         true
+    }
+
+    /// A loop region may reach past the clip end, so new source bounds only
+    /// pull its start up to the source start; a region that still does not
+    /// fit becomes the clip's.
+    pub(crate) fn fit_loop_region_to_source(&mut self) {
+        let start = self.loop_start.max(self.source_offset);
+        if self.accepts_loop_region(start, self.loop_end) {
+            self.loop_start = start;
+        } else {
+            self.reset_loop_region_to_clip();
+        }
     }
 
     pub(crate) fn clamp_fades_to_clip(&mut self) {
@@ -400,7 +568,7 @@ impl UiEffect {
 }
 
 /// A note clip (MIDI pattern) as represented in the UI.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct UiNoteClip {
     pub id: ClipId,
     pub name: String,
@@ -417,6 +585,13 @@ pub struct UiNoteClip {
 }
 
 impl UiNoteClip {
+    pub fn span(&self) -> ClipSpan {
+        ClipSpan {
+            start_beats: self.position_beats,
+            length_beats: self.duration_beats,
+        }
+    }
+
     pub(crate) fn timeline(&self) -> BeatClipTimeline {
         BeatClipTimeline::new(
             self.start_marker_beats,
@@ -427,36 +602,58 @@ impl UiNoteClip {
         )
     }
 
+    /// See `UiClip::reset_loop_region_to_clip`.
     pub(crate) fn reset_loop_region_to_clip(&mut self) {
+        if self.start_marker_beats >= self.duration_beats {
+            self.start_marker_beats = 0.0;
+        }
         self.loop_start_beats = self.start_marker_beats;
         self.loop_end_beats = self.duration_beats;
     }
 
-    pub(crate) fn enable_loop_over_clip(&mut self) {
-        self.loop_enabled = true;
-        self.reset_loop_region_to_clip();
-    }
-
-    pub(crate) fn clamp_loop_to_duration(&mut self) {
-        self.loop_start_beats = self.loop_start_beats.clamp(0.0, self.duration_beats);
-        self.loop_end_beats = self.loop_end_beats.min(self.duration_beats);
-        if self.loop_end_beats <= self.loop_start_beats
-            || self.start_marker_beats >= self.loop_end_beats
-        {
+    /// See `UiClip::set_loop_enabled`.
+    pub(crate) fn set_loop_enabled(&mut self, enabled: bool) {
+        self.loop_enabled = enabled;
+        if enabled && !self.accepts_loop_region(self.loop_start_beats, self.loop_end_beats) {
             self.reset_loop_region_to_clip();
         }
     }
 
-    pub(crate) fn clamp_start_to_duration(&mut self) {
+    /// Change the length to `duration_beats`, moving the right edge.
+    pub(crate) fn resize(&mut self, duration_beats: f64) {
+        self.duration_beats = duration_beats;
+        self.clamp_start_to_content();
+    }
+
+    pub(crate) fn clamp_start_to_content(&mut self) {
         self.start_marker_beats =
             self.timeline()
-                .clamp_start(self.start_marker_beats, 0.0, self.duration_beats);
+                .clamp_start(self.start_marker_beats, 0.0, NOTE_CONTENT_END_BEATS);
+    }
+
+    /// The content beat this Clip plays at Arrangement `beat`; off the
+    /// Clip it plays nothing.
+    pub(crate) fn content_beat_at(&self, beat: f64) -> Option<f64> {
+        let into_clip = beat - self.position_beats;
+        (0.0..self.duration_beats)
+            .contains(&into_clip)
+            .then(|| self.timeline().source_at(into_clip))
+    }
+
+    /// Content beats a clip editor shows, from beat 0 to where the Clip
+    /// stops playing.
+    pub(crate) fn editor_beats(&self) -> f64 {
+        if self.timeline().is_looping() {
+            self.duration_beats
+        } else {
+            self.start_marker_beats + self.duration_beats
+        }
     }
 
     pub(crate) fn set_start_marker(&mut self, start_marker_beats: f64) -> bool {
         let valid = self
             .timeline()
-            .accepts_start(start_marker_beats, 0.0, self.duration_beats);
+            .accepts_start(start_marker_beats, 0.0, NOTE_CONTENT_END_BEATS);
         if !valid || start_marker_beats == self.start_marker_beats {
             return false;
         }
@@ -464,14 +661,19 @@ impl UiNoteClip {
         true
     }
 
-    pub(crate) fn set_loop_region(&mut self, start: f64, end: f64) -> bool {
-        let valid = start.is_finite()
+    fn accepts_loop_region(&self, start: f64, end: f64) -> bool {
+        start.is_finite()
             && end.is_finite()
             && start >= 0.0
             && start < end
-            && end <= self.duration_beats
-            && self.start_marker_beats < end;
-        if !valid || (start, end) == (self.loop_start_beats, self.loop_end_beats) {
+            && end <= NOTE_CONTENT_END_BEATS
+            && self.start_marker_beats < end
+    }
+
+    pub(crate) fn set_loop_region(&mut self, start: f64, end: f64) -> bool {
+        if !self.accepts_loop_region(start, end)
+            || (start, end) == (self.loop_start_beats, self.loop_end_beats)
+        {
             return false;
         }
         self.loop_start_beats = start;
@@ -482,6 +684,61 @@ impl UiNoteClip {
     /// Timeline-local occurrences of one source note onset, including repeats.
     pub(crate) fn note_occurrences(&self, source_beat: f64) -> Vec<f64> {
         self.timeline().occurrences_of(source_beat).collect()
+    }
+}
+
+#[cfg(test)]
+impl UiClip {
+    /// A silent, unlooped audio Clip `duration` frames long at `position`,
+    /// for tests to fill in the fields they care about.
+    pub(crate) fn test_clip(position: u64, duration: u64) -> Self {
+        Self {
+            id: ClipId::new(),
+            name: "Audio".into(),
+            audio: Arc::new(DecodedAudio {
+                channels: vec![vec![0.0; duration as usize]],
+                sample_rate: 48_000,
+            }),
+            source: None,
+            position,
+            source_offset: 0,
+            start_marker: 0,
+            duration,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
+            gain_db: Default::default(),
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            transient_markers: Default::default(),
+            warp_markers: Default::default(),
+            transpose: Default::default(),
+            original_bpm: None,
+            warped: false,
+            warped_to_bpm: None,
+            original_audio: None,
+        }
+    }
+}
+
+#[cfg(test)]
+impl UiNoteClip {
+    /// An empty, unlooped note Clip `duration_beats` long at
+    /// `position_beats`, for tests to fill in the fields they care about.
+    pub(crate) fn test_clip(position_beats: f64, duration_beats: f64) -> Self {
+        Self {
+            id: ClipId::new(),
+            name: "MIDI".into(),
+            position_beats,
+            duration_beats,
+            notes: Vec::new(),
+            selected_notes: Default::default(),
+            start_marker_beats: 0.0,
+            loop_enabled: false,
+            loop_start_beats: 0.0,
+            loop_end_beats: duration_beats,
+            groove_grid: Default::default(),
+        }
     }
 }
 
@@ -640,7 +897,7 @@ impl ProjectTrack {
 /// This type contains only timeline-editable state. Channel identity,
 /// devices, routing, sends, and mixer state stay on [`ProjectTrack`]. Runtime
 /// meters and device-media caches therefore cannot leak into timeline clones.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct TrackTimelineContent {
     pub clips: Vec<UiClip>,
     pub note_clips: Vec<UiNoteClip>,
@@ -707,7 +964,7 @@ pub enum DetailPanelTab {
     Devices,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 enum GridDivision {
     EightBars,
     FourBars,
@@ -720,7 +977,7 @@ enum GridDivision {
 }
 
 /// A musical grid division, optionally interpreted as a triplet.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SnapGrid {
     division: GridDivision,
     triplet: bool,
@@ -849,23 +1106,30 @@ impl SnapGrid {
         }
     }
 
+    /// The steps a zoom-adaptive grid picks from, coarsest first.
+    const ADAPTIVE_STEPS: [Self; 8] = [
+        Self::EIGHT_BARS,
+        Self::FOUR_BARS,
+        Self::TWO_BARS,
+        Self::BAR,
+        Self::QUARTER,
+        Self::EIGHTH,
+        Self::SIXTEENTH,
+        Self::THIRTY_SECOND,
+    ];
+
+    /// The furthest a bias can push the adaptive grid. Any further and every
+    /// zoom lands on the same end step.
+    pub const ADAPTIVE_BIAS_LIMIT: i8 = Self::ADAPTIVE_STEPS.len() as i8 - 1;
+
     pub fn adaptive(pixels_per_beat: f32, bias: i8, triplet: bool) -> Self {
-        let divisions = [
-            Self::EIGHT_BARS,
-            Self::FOUR_BARS,
-            Self::TWO_BARS,
-            Self::BAR,
-            Self::QUARTER,
-            Self::EIGHTH,
-            Self::SIXTEENTH,
-            Self::THIRTY_SECOND,
-        ];
-        let base = divisions
+        let steps = Self::ADAPTIVE_STEPS;
+        let base = steps
             .iter()
             .rposition(|grid| grid.beat_size() * pixels_per_beat as f64 >= 12.0)
             .unwrap_or(0);
-        let index = (base as i8 + bias).clamp(0, divisions.len() as i8 - 1) as usize;
-        let grid = divisions[index];
+        let index = (base as i8 + bias).clamp(0, Self::ADAPTIVE_BIAS_LIMIT) as usize;
+        let grid = steps[index];
         if triplet {
             grid.triplet()
         } else {
@@ -896,13 +1160,49 @@ impl std::fmt::Display for SnapGrid {
     }
 }
 
-/// Shared grid modes passed into arrangement and MIDI editor widgets.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// The shortest an edge drag may leave a Clip or a note is the finest grid
+/// step, whatever grid is showing, because a coarse adaptive grid at fit
+/// zoom would otherwise forbid anything under 8 bars.
+pub const SHORTEST_LENGTH_BEATS: f64 = 0.125;
+
+/// Grid modes passed into arrangement and clip editor widgets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GridConfig {
     pub selected: SnapGrid,
     pub snap_enabled: bool,
     pub adaptive: bool,
+    #[serde(deserialize_with = "deserialize_adaptive_bias")]
     pub adaptive_bias: i8,
+}
+
+fn deserialize_adaptive_bias<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<i8, D::Error> {
+    let bias = <i8 as serde::Deserialize>::deserialize(deserializer)?;
+    Ok(bias.clamp(
+        -SnapGrid::ADAPTIVE_BIAS_LIMIT,
+        SnapGrid::ADAPTIVE_BIAS_LIMIT,
+    ))
+}
+
+/// Zoom-adaptive like Ableton, because a fixed default is under a pixel
+/// per step at song zoom and over-coarse when zoomed in. `selected` is the
+/// value a switch to a fixed grid starts from.
+impl Default for GridConfig {
+    fn default() -> Self {
+        Self::new(SnapGrid::EIGHTH, true, true, 0)
+    }
+}
+
+/// One edit to a [`GridConfig`], from a snap list, toggle or shortcut.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GridCommand {
+    Choose(GridChoice),
+    Narrow,
+    Widen,
+    ToggleTriplet,
+    ToggleSnap,
+    ToggleAdaptive,
 }
 
 impl GridConfig {
@@ -920,15 +1220,85 @@ impl GridConfig {
         }
     }
 
-    pub fn effective_grid(self, pixels_per_beat: f32) -> SnapGrid {
+    pub fn apply(&mut self, command: GridCommand) {
+        match command {
+            GridCommand::Choose(choice) => self.choose(choice),
+            GridCommand::Narrow => self.narrow(),
+            GridCommand::Widen => self.widen(),
+            GridCommand::ToggleTriplet => self.toggle_triplet(),
+            GridCommand::ToggleSnap => self.toggle_snap(),
+            GridCommand::ToggleAdaptive => self.toggle_adaptive(),
+        }
+    }
+
+    pub fn narrow(&mut self) {
         if self.adaptive {
-            SnapGrid::adaptive(
-                pixels_per_beat,
-                self.adaptive_bias,
-                self.selected.is_triplet(),
-            )
+            self.adaptive_bias = (self.adaptive_bias + 1).min(SnapGrid::ADAPTIVE_BIAS_LIMIT);
         } else {
-            self.selected
+            self.selected = self.selected.narrower();
+        }
+    }
+
+    pub fn widen(&mut self) {
+        if self.adaptive {
+            self.adaptive_bias = (self.adaptive_bias - 1).max(-SnapGrid::ADAPTIVE_BIAS_LIMIT);
+        } else {
+            self.selected = self.selected.wider();
+        }
+    }
+
+    pub fn toggle_triplet(&mut self) {
+        self.selected = self.selected.toggle_triplet();
+    }
+
+    pub fn toggle_snap(&mut self) {
+        self.snap_enabled = !self.snap_enabled;
+    }
+
+    pub fn toggle_adaptive(&mut self) {
+        self.adaptive = !self.adaptive;
+    }
+
+    pub fn choose(&mut self, choice: GridChoice) {
+        match choice {
+            // The step Auto shows is the one this grid's bias resolves to
+            // now, so keeping the bias is choosing that step.
+            GridChoice::Auto(_) => self.adaptive = true,
+            GridChoice::Fixed(grid) => {
+                self.selected = grid;
+                self.adaptive = false;
+                self.adaptive_bias = 0;
+            }
+        }
+    }
+
+    /// The snap list entry for this grid at this zoom.
+    pub fn choice(self, pixels_per_beat: f32) -> GridChoice {
+        if self.adaptive {
+            self.auto_choice(pixels_per_beat)
+        } else {
+            GridChoice::Fixed(self.selected)
+        }
+    }
+
+    /// Every snap list entry, Auto first.
+    pub fn choices(self, pixels_per_beat: f32) -> Vec<GridChoice> {
+        std::iter::once(self.auto_choice(pixels_per_beat))
+            .chain(SnapGrid::all().iter().copied().map(GridChoice::Fixed))
+            .collect()
+    }
+
+    fn auto_choice(self, pixels_per_beat: f32) -> GridChoice {
+        GridChoice::Auto(SnapGrid::adaptive(
+            pixels_per_beat,
+            self.adaptive_bias,
+            self.selected.is_triplet(),
+        ))
+    }
+
+    pub fn effective_grid(self, pixels_per_beat: f32) -> SnapGrid {
+        match self.choice(pixels_per_beat) {
+            GridChoice::Auto(grid) | GridChoice::Fixed(grid) => grid,
         }
     }
 
@@ -947,6 +1317,24 @@ impl GridConfig {
             self.effective_grid(pixels_per_beat).snap_beat_floor(beat)
         } else {
             beat
+        }
+    }
+}
+
+/// An entry in an editor's snap list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GridChoice {
+    /// Follows the editor's zoom; carries the step it resolves to now so
+    /// the list reads what a drag will snap to.
+    Auto(SnapGrid),
+    Fixed(SnapGrid),
+}
+
+impl std::fmt::Display for GridChoice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Auto(grid) => write!(f, "Auto {}", grid.label()),
+            Self::Fixed(grid) => f.write_str(grid.label()),
         }
     }
 }

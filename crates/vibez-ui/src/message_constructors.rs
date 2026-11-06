@@ -10,6 +10,13 @@ impl Message {
         }
     }
 
+    pub fn set_clip_editor_view(
+        clip_id: ClipId,
+        viewport: crate::timeline_geometry::TimelineViewport,
+    ) -> Self {
+        Self::View(crate::domains::view::ViewMsg::SetClipEditorView { clip_id, viewport })
+    }
+
     pub fn add_effect(t: TrackId, e: EffectType) -> Self {
         Self::Devices(crate::domains::devices::DevicesMsg::AddEffect(t, e))
     }

@@ -4,8 +4,8 @@
 //! Split out of app.rs; inherent methods on [`super::App`].
 
 use iced::widget::{
-    button, center, column, container, horizontal_space, mouse_area, row, scrollable, text,
-    text_input, vertical_space,
+    button, center, column, container, horizontal_space, mouse_area, row, text, text_input,
+    vertical_space,
 };
 use iced::{Element, Length, Theme};
 
@@ -20,6 +20,7 @@ use crate::icons;
 use crate::message::{MenuOverlay, Message};
 use crate::state::ContextMenuTarget;
 use crate::theme as th;
+use crate::widgets::quiet_scroll;
 
 use super::*;
 
@@ -39,8 +40,17 @@ fn context_menu_width(target: &ContextMenuTarget) -> f32 {
         ContextMenuTarget::Clip { .. } => CONTEXT_MENU_CLIP_WIDTH,
         ContextMenuTarget::TimeSelection { .. }
         | ContextMenuTarget::AudioClipDetail { .. }
+        | ContextMenuTarget::TrackHeader { .. }
         | ContextMenuTarget::ArrangementEmpty => 200.0 + CONTEXT_MENU_CARD_PADDING,
     }
+}
+
+fn track_header_menu(track_id: vibez_core::id::TrackId) -> [(char, &'static str, Message); 1] {
+    [(
+        icons::TRASH_2,
+        "Delete Track",
+        Message::remove_track(track_id),
+    )]
 }
 
 fn context_menu_x(requested_x: f32, menu_width: f32, window_width: f32) -> f32 {
@@ -310,7 +320,7 @@ impl App {
                 text("This Project Track is shared. Its channel, devices, and authored content will be removed from:")
                     .size(11)
                     .color(th::text_dim()),
-                scrollable(location_list).height(Length::Fixed(location_list_height)),
+                quiet_scroll::vertical(location_list).height(Length::Fixed(location_list_height)),
                 text("One Undo restores the Track and every listed location.")
                     .size(10)
                     .color(th::text_dim()),
@@ -431,8 +441,11 @@ impl App {
             ..Default::default()
         });
         let positioned = column![
-            vertical_space().height(Length::Fixed(42.0)),
-            row![horizontal_space().width(Length::Fixed(112.0)), card]
+            vertical_space().height(Length::Fixed(super::views_control_bar::MENU_TOP)),
+            row![
+                horizontal_space().width(Length::Fixed(super::views_control_bar::EDIT_MENU_LEFT)),
+                card
+            ]
         ];
         mouse_area(
             container(positioned)
@@ -694,12 +707,8 @@ impl App {
             (220.0, 29.0)
         };
         let est_list_h = (est_rows.max(1) as f32 * row_h).min(MENU_LIST_MAX_H);
-        let items_scroll = container(scrollable(items_col).width(Length::Fill).direction(
-            scrollable::Direction::Vertical(
-                scrollable::Scrollbar::new().width(6).scroller_width(6),
-            ),
-        ))
-        .max_height(MENU_LIST_MAX_H);
+        let items_scroll = container(quiet_scroll::vertical(items_col).width(Length::Fill))
+            .max_height(MENU_LIST_MAX_H);
 
         let menu_content = column![tabs_row, search_input, items_scroll]
             .spacing(6)
@@ -891,13 +900,13 @@ impl App {
                 if is_note_clip {
                     col = col.push(menu_btn(
                         icons::CIRCLE_DOT,
-                        format!("Quantize ({})", self.state.view.snap_grid.label()),
+                        format!("Quantize ({})", self.clip_editor_grid().label()),
                         Message::PianoRoll(PianoRollMsg::QuantizeNoteClip { track_id, clip_id }),
                     ));
                 } else {
                     col = col.push(menu_btn(
                         icons::CIRCLE_DOT,
-                        format!("Quantize ({})", self.state.view.snap_grid.label()),
+                        format!("Quantize ({})", self.clip_editor_grid().label()),
                         Message::QuantizeAudioClip { track_id, clip_id },
                     ));
                 }
@@ -1053,6 +1062,13 @@ impl App {
                 ));
                 col.into()
             }
+            ContextMenuTarget::TrackHeader { track_id } => iced::widget::Column::with_children(
+                track_header_menu(*track_id)
+                    .map(|(icon, label, msg)| menu_btn(icon, label.into(), msg)),
+            )
+            .spacing(0)
+            .width(Length::Fixed(200.0))
+            .into(),
             ContextMenuTarget::ArrangementEmpty => column![
                 menu_btn(
                     icons::AUDIO_WAVEFORM,
@@ -1101,10 +1117,38 @@ impl App {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::{
         context_menu_x, drum_rack_slice_can_create, project_track_deletion_list_height,
-        CONTEXT_MENU_CLIP_WIDTH,
+        track_header_menu, CONTEXT_MENU_CLIP_WIDTH,
     };
+    use crate::domains::view::ViewMsg;
+    use crate::message::{MenuOverlay, Message};
+    use crate::state::{ContextMenuTarget, ProjectTrack};
+    use vibez_core::id::TrackId;
+
+    #[test]
+    fn the_track_header_menu_deletes_that_track() {
+        let mut app = super::super::test_support::app();
+        let track = ProjectTrack::new(TrackId::new(), "Vox".into(), 0);
+        let track_id = track.id;
+        Arc::make_mut(&mut app.state.project_tracks)
+            .tracks
+            .push(track);
+        let _ = app.update(Message::View(ViewMsg::ShowContextMenu {
+            x: 10.0,
+            y: 10.0,
+            target: ContextMenuTarget::TrackHeader { track_id },
+        }));
+        let [(_, label, delete)] = track_header_menu(track_id);
+        assert_eq!(label, "Delete Track");
+
+        let _ = app.update(Message::menu_item(MenuOverlay::ArrangementContext, delete));
+
+        assert!(app.state.view.context_menu.is_none());
+        assert!(app.state.project_tracks.find(track_id).is_none());
+    }
 
     #[test]
     fn deletion_location_list_grows_with_content_then_caps() {

@@ -6,29 +6,34 @@ use iced::widget::{
 use iced::{Color, Element, Length, Theme};
 
 use crate::domains::piano_roll::PianoRollMsg;
-use crate::domains::view::ViewMsg;
+use crate::domains::view::{GridTarget, ViewMsg};
 use vibez_core::id::{ClipId, SectionId, TrackId};
 
 use crate::icons;
 use crate::message::Message;
-use crate::state::{ArrangementSelection, DetailPanelTab, TimelineEditorState};
+use crate::shell_layout::DETAIL_PANEL_MIN_HEIGHT;
+use crate::state::{ArrangementSelection, DetailPanelTab, GridCommand, TimelineEditorState};
 use crate::theme as th;
+use crate::widgets::audio_clip_detail::audio_clip_editor_view;
+use crate::widgets::clip_editor_view::ClipEditorView;
 use crate::widgets::piano_roll::{PianoRollWidget, VelocityLaneWidget};
 
 use super::*;
 
-const DETAIL_PANEL_MIN_HEIGHT: f32 = 180.0;
+const DETAIL_CARD_PADDING: f32 = 10.0;
 const AUDIO_DETAIL_PANEL_PREFERRED_HEIGHT: f32 = 260.0;
 const MIDI_DETAIL_PANEL_PREFERRED_HEIGHT: f32 = 360.0;
-// The transport, workspace tabs and status chrome consume roughly 140 px at
-// the default density. Reserve another 440 px for the actual workspace so a
-// dragged detail panel can never crush Perform or Arrange into a letterbox.
-const APP_CHROME_AND_WORKSPACE_MIN_HEIGHT: f32 = 580.0;
+// Reserve 440 px for the workspace card below the chrome row, above the
+// status bar and between the frame gaps, so a dragged detail panel can never
+// crush Perform or Arrange into a letterbox.
+const APP_CHROME_AND_WORKSPACE_MIN_HEIGHT: f32 = super::views_control_bar_style::BAR_HEIGHT
+    + crate::shell_layout::STATUS_HEIGHT
+    + 2.0 * crate::shell_layout::PANE_GAP
+    + 440.0;
 // The dogfood reference at a 1,920 x 1,040 work area leaves about 364 px for
 // the detail panel. Preserve that 35% composition when a saved drag height is
 // larger than the current window can comfortably show.
 const DETAIL_PANEL_MAX_WINDOW_FRACTION: f32 = 0.35;
-const STATUS_BAR_HEIGHT: f32 = 24.0;
 
 pub(super) fn resolved_detail_playhead_samples(
     editing_perform: bool,
@@ -138,6 +143,20 @@ impl App {
         Some((track_id, clip_id))
     }
 
+    /// The clip whose open editor owns the editor shortcuts: an opened
+    /// note clip, or the one audio clip the audio editor shows.
+    pub(super) fn focused_clip_editor(&self) -> Option<ClipId> {
+        self.focused_piano_roll_clip()
+            .map(|(_, clip_id)| clip_id)
+            .or_else(|| {
+                if self.state.view.detail_panel_tab != DetailPanelTab::Clip {
+                    return None;
+                }
+                let editor = self.state.active_timeline_editor();
+                single_selected_audio_clip_for_track(editor, editor.selected_track?)
+            })
+    }
+
     /// Whether the open piano roll has notes selected: the arrow keys then
     /// move them, ahead of anything else that wants the arrows.
     pub(super) fn piano_roll_has_selected_notes(&self) -> bool {
@@ -151,6 +170,78 @@ impl App {
                     .map(|clip| !clip.selected_notes.is_empty())
             })
             .unwrap_or(false)
+    }
+
+    /// The open clip editor's step on the clip editor grid; quantize uses
+    /// it so it matches the lines the editor draws.
+    pub(super) fn clip_editor_grid(&self) -> crate::state::SnapGrid {
+        self.state
+            .view
+            .clip_grid
+            .effective_grid(self.clip_editor_pixels_per_beat())
+    }
+
+    /// The open clip editor's zoom, measured against the window's width
+    /// until the producer zooms it; with no clip open the timeline's zoom
+    /// stands in.
+    pub(super) fn clip_editor_pixels_per_beat(&self) -> f32 {
+        self.open_clip_editor_view()
+            .map(|view| {
+                crate::widgets::piano_roll::view_geometry(view, self.state.view.window_width)
+                    .pixels_per_beat()
+            })
+            .unwrap_or_else(|| self.timeline_pixels_per_beat())
+    }
+
+    fn open_clip_editor_view(&self) -> Option<ClipEditorView> {
+        let editor = self.state.active_timeline_editor();
+        if let Some((track_id, clip_id)) = editor.selected_note_clip {
+            let clip = self
+                .state
+                .active_timeline_content(track_id)?
+                .note_clips
+                .iter()
+                .find(|clip| clip.id == clip_id)?;
+            return Some(crate::widgets::piano_roll::framed_view(
+                self.state.view.clip_editor_view(clip.id),
+                clip.loop_enabled
+                    .then_some((clip.loop_start_beats, clip.loop_end_beats)),
+                clip.editor_beats(),
+            ));
+        }
+        let track_id = editor.selected_track?;
+        let clip_id = single_selected_audio_clip_for_track(editor, track_id)?;
+        let clip = self
+            .state
+            .active_timeline_content(track_id)?
+            .clips
+            .iter()
+            .find(|clip| clip.id == clip_id)?;
+        Some(audio_clip_editor_view(
+            self.state.view.clip_editor_view(clip.id),
+            self.state.transport.samples_per_beat(),
+            clip.editor_frames(),
+            clip.timeline(),
+        ))
+    }
+
+    /// The Snap list for the clip editor grid, shown in each clip editor.
+    pub(super) fn clip_grid_snap_list(&self) -> Element<'_, Message> {
+        let grid = self.state.view.clip_grid;
+        let pixels_per_beat = self.clip_editor_pixels_per_beat();
+        let snap_picker = pick_list(
+            grid.choices(pixels_per_beat),
+            Some(grid.choice(pixels_per_beat)),
+            |choice| Message::View(ViewMsg::Grid(GridTarget::Clip, GridCommand::Choose(choice))),
+        )
+        .width(Length::Fixed(90.0))
+        .padding([3, 8])
+        .text_size(11);
+        let snap_label = text("Snap:").size(10).color(th::text_dim());
+        row![snap_label, snap_picker]
+            .spacing(4)
+            .align_y(iced::Alignment::Center)
+            .into()
     }
 
     fn midi_clip_editor_visible(&self) -> bool {
@@ -182,62 +273,32 @@ impl App {
             let track_id = track.id;
             let track_color = th::track_color(track.color_index);
 
-            // Tab bar
-            let clip_tab = {
-                let active = self.state.view.detail_panel_tab == DetailPanelTab::Clip;
-                let (bg, text_color, border_color) = if active {
-                    (th::bg_elevated(), th::accent(), th::accent_dim())
-                } else {
-                    (
-                        iced::Color::TRANSPARENT,
-                        th::text_dim(),
-                        iced::Color::TRANSPARENT,
-                    )
-                };
-                button(text("Clip").size(12).color(text_color))
-                    .on_press(Message::View(ViewMsg::SwitchDetailTab(
-                        DetailPanelTab::Clip,
-                    )))
-                    .padding([4, 12])
-                    .style(move |_theme: &Theme, _status| button::Style {
-                        background: Some(bg.into()),
-                        text_color,
-                        border: iced::Border {
-                            color: border_color,
-                            width: if active { 1.0 } else { 0.0 },
-                            radius: 4.0.into(),
-                        },
-                        ..Default::default()
-                    })
-            };
-            let devices_tab = {
-                let active = self.state.view.detail_panel_tab == DetailPanelTab::Devices;
-                let (bg, text_color, border_color) = if active {
-                    (th::bg_elevated(), th::accent(), th::accent_dim())
-                } else {
-                    (
-                        iced::Color::TRANSPARENT,
-                        th::text_dim(),
-                        iced::Color::TRANSPARENT,
-                    )
-                };
-                button(text("Devices").size(12).color(text_color))
-                    .on_press(Message::View(ViewMsg::SwitchDetailTab(
-                        DetailPanelTab::Devices,
-                    )))
-                    .padding([4, 12])
-                    .style(move |_theme: &Theme, _status| button::Style {
-                        background: Some(bg.into()),
-                        text_color,
-                        border: iced::Border {
-                            color: border_color,
-                            width: if active { 1.0 } else { 0.0 },
-                            radius: 4.0.into(),
-                        },
-                        ..Default::default()
-                    })
-            };
-            let tab_bar = row![clip_tab, devices_tab].spacing(4).padding([4, 8]);
+            let tab = self.state.view.detail_panel_tab;
+            let tabs = [
+                ("Clip", DetailPanelTab::Clip),
+                ("Devices", DetailPanelTab::Devices),
+            ]
+            .map(|(label, choice)| crate::widgets::segment_group::Choice {
+                label,
+                shortcut: None,
+                selected: tab == choice,
+                on_press: Message::View(ViewMsg::SwitchDetailTab(choice)),
+            });
+            let tab_bar = row![
+                crate::widgets::segment_group::switch(tabs),
+                text(&track.name)
+                    .size(12)
+                    .font(crate::typography::TRACK_TITLE)
+                    .color(th::text()),
+                horizontal_space(),
+            ]
+            .push_maybe((tab == DetailPanelTab::Devices).then(|| {
+                text("Right-click to add a device")
+                    .size(11)
+                    .color(th::text_muted())
+            }))
+            .spacing(10)
+            .align_y(iced::Alignment::Center);
 
             // Tab content
             let tab_content: Element<'_, Message> = match self.state.view.detail_panel_tab {
@@ -272,7 +333,10 @@ impl App {
                 DetailPanelTab::Devices => self.view_device_chain(track_id, track, track_color),
             };
 
-            column![tab_bar, tab_content].height(Length::Fill).into()
+            column![tab_bar, tab_content]
+                .spacing(DETAIL_CARD_PADDING)
+                .height(Length::Fill)
+                .into()
         } else {
             let label = text("Select a track to view devices")
                 .size(14)
@@ -283,20 +347,16 @@ impl App {
                 .into()
         };
 
-        let panel_height = self.effective_detail_height();
-        container(detail_content)
-            .width(Length::Fill)
-            .height(Length::Fixed(panel_height))
-            .style(|_theme: &Theme| container::Style {
-                background: Some(th::bg_dark().into()),
-                border: iced::Border {
-                    color: th::border(),
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
-            })
-            .into()
+        let height = if self.state.view.workspace == crate::state::Workspace::Mix {
+            Length::Fill
+        } else {
+            Length::Fixed(self.effective_detail_height())
+        };
+        crate::widgets::shell_card::shell_card(
+            container(detail_content).padding(DETAIL_CARD_PADDING),
+        )
+        .height(height)
+        .into()
     }
 
     pub(super) fn detail_playhead_samples(&self) -> Option<u64> {
@@ -329,7 +389,7 @@ impl App {
 
     pub(super) fn detail_panel_drag_height(&self, cursor_y: f32) -> f32 {
         effective_detail_panel_height(
-            self.state.view.window_height - cursor_y - STATUS_BAR_HEIGHT,
+            crate::shell_layout::detail_height_at(cursor_y, self.state.view.window_height),
             self.state.view.window_height,
             self.detail_editor_preferred_height(),
         )
@@ -369,26 +429,26 @@ impl App {
                 content.note_clips.iter().find(|clip| clip.id == clip_id)
             });
 
-        let (mut piano_widget, velocity_widget) = match visible_clip {
+        let (mut piano_widget, mut velocity_widget) = match visible_clip {
             Some(clip) => {
-                let clip_relative_playhead = playhead_beats - clip.position_beats;
+                let content_playhead = clip.content_beat_at(playhead_beats).unwrap_or(-1.0);
                 (
                     PianoRollWidget::from_clip(
                         track_id,
                         clip,
-                        clip_relative_playhead,
-                        clip.duration_beats,
+                        content_playhead,
+                        clip.editor_beats(),
                         track_color,
-                        self.state.view.grid_config(),
+                        self.state.view.clip_grid,
                         self.state.piano_roll.scroll_y,
                         self.state.piano_roll.edit_mode,
                     ),
                     VelocityLaneWidget::from_clip(
                         track_id,
                         clip,
-                        clip.duration_beats,
+                        clip.editor_beats(),
                         track_color,
-                        self.state.view.grid_config(),
+                        self.state.view.clip_grid,
                     ),
                 )
             }
@@ -398,6 +458,9 @@ impl App {
             ),
         };
 
+        let clip_view = visible_clip.and_then(|clip| self.state.view.clip_editor_view(clip.id));
+        piano_widget.view = clip_view;
+        velocity_widget.view = clip_view;
         piano_widget.reserve_arrow_keys = self.state.view.workspace
             == crate::state::Workspace::Perform
             && self.state.perform.layout == vibez_project::PerformLayout::Clips
@@ -592,21 +655,14 @@ impl App {
 
         let mode_row = row![select_btn, draw_btn].spacing(1);
 
-        let snap_picker = pick_list(
-            crate::state::SnapGrid::all(),
-            Some(
-                self.state
-                    .view
-                    .grid_config()
-                    .effective_grid(self.active_editor_pixels_per_beat()),
-            ),
-            |grid| Message::View(ViewMsg::SetSnapGrid(grid)),
-        )
-        .width(Length::Fixed(90.0));
-        let snap_label = text("Snap:").size(10).color(th::text_dim());
-        let header_row = row![label, mode_row, horizontal_space(), snap_label, snap_picker]
-            .spacing(4)
-            .align_y(iced::Alignment::Center);
+        let header_row = row![
+            label,
+            mode_row,
+            horizontal_space(),
+            self.clip_grid_snap_list()
+        ]
+        .spacing(4)
+        .align_y(iced::Alignment::Center);
 
         content_col = content_col
             .push(header_row)
@@ -659,6 +715,13 @@ mod tests {
         assert_eq!(effective_detail_panel_height(280.0, 900.0, 360.0), 315.0);
         assert_eq!(effective_detail_panel_height(420.0, 900.0, 360.0), 315.0);
         assert_eq!(effective_detail_panel_height(280.0, 520.0, 360.0), 180.0);
+    }
+
+    #[test]
+    fn the_slim_shell_gives_a_small_window_s_detail_card_the_room_its_chrome_freed() {
+        // 52 px chrome row, 26 px status bar and two 8 px gaps leave 440 px
+        // for the workspace of a 760 px window above a 226 px detail card.
+        assert_eq!(effective_detail_panel_height(360.0, 760.0, 360.0), 226.0);
     }
 
     #[test]
@@ -763,5 +826,43 @@ mod tests {
             focused_note_clip_for_track(&editor, track_id),
             Some(explicitly_open_clip)
         );
+    }
+}
+
+#[cfg(test)]
+mod clip_editor_zoom_tests {
+    use std::sync::Arc;
+
+    use vibez_core::id::TrackId;
+
+    use crate::state::{ProjectTrack, SnapGrid, UiNoteClip};
+
+    #[test]
+    fn a_trimmed_note_clip_snaps_at_the_zoom_its_piano_roll_shows() {
+        let mut app = crate::app::test_support::app();
+        app.state.view.window_width = 1_052.0;
+        let mut track = ProjectTrack::new(TrackId::new(), "MIDI".into(), 0);
+        track.kind = vibez_core::midi::TrackKind::Midi;
+        let track_id = track.id;
+        Arc::make_mut(&mut app.state.project_tracks)
+            .tracks
+            .push(track);
+        // The piano roll shows its content from beat 0 to beat 32, where
+        // this Clip stops playing.
+        let clip = UiNoteClip {
+            name: "Trimmed".into(),
+            start_marker_beats: 28.0,
+            loop_end_beats: 32.0,
+            ..UiNoteClip::test_clip(0.0, 4.0)
+        };
+        let clip_id = clip.id;
+        app.state
+            .arrange_content_mut(track_id)
+            .note_clips
+            .push(clip);
+        app.state.arrangement.selected_track = Some(track_id);
+        app.state.arrangement.selected_note_clip = Some((track_id, clip_id));
+
+        assert_eq!(app.clip_editor_grid(), SnapGrid::EIGHTH);
     }
 }

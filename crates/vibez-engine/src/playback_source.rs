@@ -286,6 +286,18 @@ impl EngineNoteClip {
         )
     }
 
+    /// Whether a note of `pitch` in this Clip lies under Arrangement `beat`.
+    pub(crate) fn holds_note_at(&self, pitch: u8, beat: f64) -> bool {
+        let local = beat - self.position_beats;
+        if !(0.0..self.duration_beats).contains(&local) {
+            return false;
+        }
+        let source = self.timeline().source_at(local);
+        self.notes.iter().any(|note| {
+            note.pitch == pitch && note.start_beat <= source && source < note.end_beat()
+        })
+    }
+
     #[inline]
     pub(crate) fn next_same_pitch_start_beat(&self, note_index: usize) -> Option<f64> {
         #[cfg(test)]
@@ -334,6 +346,12 @@ impl EngineNoteClip {
         *existing = note;
         self.rebuild_note_end_clamps();
         true
+    }
+
+    /// Off callback only: the note indices grow to fit.
+    pub(crate) fn replace_notes(&mut self, notes: Vec<MidiNote>) {
+        self.notes = notes;
+        self.rebuild_note_end_clamps();
     }
 
     fn rebuild_note_end_clamps(&mut self) {
@@ -607,12 +625,12 @@ impl PreparedPlaybackSource {
                 continue;
             }
             let audio_channels = clip.audio.num_channels();
-            let identity_source_end = clip
-                .source_offset
-                .saturating_add(clip.duration)
-                .min(clip.audio.num_frames() as u64);
-            let source_end = clip.warp_markers.source_end(identity_source_end) as usize;
             let timeline = clip.timeline();
+            let source_end = clip.warp_markers.source_end(timeline.content_end(
+                clip.source_offset,
+                clip.audio.num_frames() as u64,
+                &clip.warp_markers,
+            )) as usize;
             let identity_timeline_end = clip
                 .duration
                 .min((clip.audio.num_frames() as u64).saturating_sub(clip.source_offset));
@@ -691,6 +709,10 @@ pub struct PreparedClipPlayback {
     pub request_id: u64,
     pub length_samples: u64,
     pub looping: bool,
+    pub launch_mode: vibez_core::perform::ClipLaunchMode,
+    /// Written by the engine when this Clip takes over, so a deferred
+    /// acknowledgement can still report where playback began.
+    pub start_position: u64,
     pub source: Box<PreparedPlaybackSource>,
 }
 
@@ -702,6 +724,8 @@ impl PreparedClipPlayback {
             request_id,
             length_samples: 1,
             looping: false,
+            launch_mode: Default::default(),
+            start_position: 0,
             source: Box::default(),
         })
     }

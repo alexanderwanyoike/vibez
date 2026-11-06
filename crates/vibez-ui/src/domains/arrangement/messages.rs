@@ -6,7 +6,9 @@ use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::track::{ClipTranspose, MediaSourceRef};
 
-use crate::state::{ArrangementSelection, AudioClipInspectorField, AudioClipRotaryField};
+use crate::state::{
+    ArrangementSelection, AudioClipInspectorField, AudioClipRotaryField, ClipDragStep,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AudioSliceMarkers {
@@ -218,6 +220,12 @@ pub enum ArrangementMsg {
         anchor: ArrangementSelection,
         new_duration_beats: f64,
     },
+    /// Drag of `anchor`'s left edge: every selected Clip's start moves by
+    /// the same offset while its content keeps its Arrangement time.
+    TrimSelectedClipsStart {
+        anchor: ArrangementSelection,
+        new_start_beats: f64,
+    },
     /// Drag of `anchor`: the whole selection follows it by the same time
     /// offset and lane offset. The anchor is named by Clip id alone because
     /// the drag keeps going after it has changed lanes.
@@ -225,6 +233,18 @@ pub enum ArrangementMsg {
         anchor: ClipId,
         new_position_beats: f64,
         target_track: TrackId,
+    },
+    /// One pointer step of a Clip drag: `edit` changes the Clips and every
+    /// lane draws `step` until the drag drops or is cancelled.
+    DragClips {
+        step: ClipDragStep,
+        edit: Box<ArrangementMsg>,
+    },
+    /// A drag of `anchor` (a move or either edge) was released: the Clips
+    /// it carried overwrite what they landed on. Overwriting waits for the
+    /// release so the drag can pass over other Clips without cutting them.
+    DropClips {
+        anchor: ClipId,
     },
     DuplicateNoteClip(TrackId, ClipId),
     SplitAudioClip {
@@ -341,6 +361,8 @@ impl ArrangementMsg {
                 | Self::SetAudioClipFadeCurve { .. }
                 | Self::SetAudioClipCrossfadeCurve { .. }
                 | Self::MoveSelectedClips { .. }
+                | Self::DragClips { .. }
+                | Self::DropClips { .. }
                 | Self::ToggleClipLoop(..)
                 | Self::ToggleClipReverse(..)
                 | Self::SelectTransientMarker { .. }
@@ -367,6 +389,7 @@ impl ArrangementMsg {
                 | Self::PasteClips
                 | Self::ToggleSelectedClipLoop
                 | Self::ResizeSelectedClips { .. }
+                | Self::TrimSelectedClipsStart { .. }
                 | Self::DuplicateNoteClip(..)
                 | Self::SplitAudioClip { .. }
                 | Self::SliceAudioClipAtMarkers { .. }
@@ -433,7 +456,15 @@ impl ArrangementMsg {
         self.is_clipboard_project_edit()
             || matches!(
                 self,
-                Self::SubmitAudioClipInspectorField { .. }
+                Self::DuplicateSelectedClip
+                    | Self::MoveSelectedClips { .. }
+                    | Self::DragClips { .. }
+                    | Self::DropClips { .. }
+                    | Self::ResizeSelectedClips { .. }
+                    | Self::TrimSelectedClipsStart { .. }
+                    | Self::SplitSelectedAtPlayhead
+                    | Self::JoinSelectedClips
+                    | Self::SubmitAudioClipInspectorField { .. }
                     | Self::SetAudioClipFade { .. }
                     | Self::SetAudioClipFadeCurve { .. }
                     | Self::SetAudioClipCrossfadeCurve { .. }

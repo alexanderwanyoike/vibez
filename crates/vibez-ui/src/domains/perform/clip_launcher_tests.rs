@@ -294,6 +294,47 @@ fn loop_is_default_and_cell_toggle_updates_the_selected_editor_and_prepared_sour
 }
 
 #[test]
+fn cell_loop_toggle_on_resets_a_loop_region_that_no_longer_fits() {
+    let tracks = tracks(1);
+    let track_id = tracks[0].id;
+    let mut state = PerformState {
+        layout: PerformLayout::Clips,
+        ..Default::default()
+    };
+    let ctx = PerformCtx {
+        workspace_visible: true,
+        project_tracks: &tracks,
+        selected_project_track: Some(track_id),
+    };
+    state.update_clips(ClipMsg::CreateMidi { track_id, row: 0 }, ctx);
+    let id = state.clip_editor.selected.unwrap();
+    state.update_clips(ClipMsg::ToggleLoop(id), ctx);
+    let clip = Arc::make_mut(&mut state.clips).by_id_mut(id).unwrap();
+    let part = &mut Arc::make_mut(&mut clip.timeline)
+        .ensure(track_id)
+        .note_clips[0];
+    part.start_marker_beats = 2.0;
+    part.loop_start_beats = 0.0;
+    part.loop_end_beats = 1.0;
+
+    state.update_clips(ClipMsg::ToggleLoop(id), ctx);
+
+    let part = &state
+        .clips
+        .by_id(id)
+        .unwrap()
+        .timeline
+        .get(track_id)
+        .unwrap()
+        .note_clips[0];
+    assert!(part.loop_enabled);
+    assert_eq!(
+        (part.loop_start_beats, part.loop_end_beats),
+        (2.0, part.duration_beats)
+    );
+}
+
+#[test]
 fn clip_triggers_toggle_playing_and_queued_intent_without_changing_the_editor() {
     let tracks = tracks(1);
     let track = tracks[0].id;
@@ -472,6 +513,7 @@ fn resync_preserves_queued_sources_and_newer_intent_while_reclaiming_obsolete_pe
     );
     let store = ClipStore {
         clips: vec![clip.clone(), future.clone()],
+        ..Default::default()
     };
     let mut editor = ClipEditor {
         running: true,
@@ -573,6 +615,7 @@ fn recovery_from_a_previous_project_preserves_a_new_unconsumed_launch() {
         super::super::clip_record::empty_midi_clip(ClipId::new(), track, 0, "Take".into(), 4.0);
     let store = ClipStore {
         clips: vec![clip.clone()],
+        ..Default::default()
     };
     let mut editor = ClipEditor {
         next_request: 40,
@@ -622,4 +665,41 @@ fn recovery_from_a_previous_project_preserves_a_new_unconsumed_launch() {
         .remove(&request)
         .expect("the eventual transition must still resolve its source");
     assert_eq!(acknowledged.id, clip.id);
+}
+
+#[test]
+fn a_stop_lands_where_the_playing_clip_would_launch() {
+    let track = TrackId::new();
+    let mut state = PerformState::default();
+    state.edit_track_launch(track, |options| {
+        options.quantization = MusicalBoundary::OneBeat
+    });
+    assert_eq!(
+        state.stop_quantization(track),
+        MusicalBoundary::OneBeat,
+        "a silent track stops on its own quantization"
+    );
+    let mut clip = crate::domains::perform::clip_record::empty_midi_clip(
+        ClipId::new(),
+        track,
+        0,
+        "Break".into(),
+        4.0,
+    );
+    clip.launch.quantization = Some(MusicalBoundary::Eighth);
+    state.clip_editor.playing.insert(track, clip.clone());
+    assert_eq!(
+        state.stop_quantization(track),
+        MusicalBoundary::Eighth,
+        "a playing clip that was removed keeps its own"
+    );
+    Arc::make_mut(&mut state.clips).clips.push(LauncherClip {
+        launch: Default::default(),
+        ..clip
+    });
+    assert_eq!(
+        state.stop_quantization(track),
+        MusicalBoundary::OneBeat,
+        "the clip's current options win over the playing snapshot"
+    );
 }

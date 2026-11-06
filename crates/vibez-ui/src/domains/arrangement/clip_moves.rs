@@ -1,13 +1,11 @@
 //! Moving Arrangement clips in time and between Project Track lanes.
 
-use std::sync::Arc;
-
 use vibez_core::id::{ClipId, TrackId};
 use vibez_engine::commands::EngineCommand;
 
 use crate::state::{ArrangementSelection, ProjectTracksState, TimelineEditorState};
 
-use super::{ArrangementCtx, EngineHandle};
+use super::{ArrangementAction, ArrangementCtx, EngineHandle};
 
 impl TimelineEditorState {
     pub(super) fn move_audio_clip(
@@ -28,7 +26,7 @@ impl TimelineEditorState {
             clip_id,
             new_position,
         });
-        self.drag_resize_active = true;
+        self.edit_drag.mark_active();
     }
 
     pub(super) fn move_note_clip(
@@ -48,7 +46,7 @@ impl TimelineEditorState {
             clip_id,
             new_position_beats,
         });
-        self.drag_resize_active = true;
+        self.edit_drag.mark_active();
     }
 
     pub(super) fn move_clip_to_track(
@@ -74,26 +72,10 @@ impl TimelineEditorState {
                 // Remove from engine source track
                 engine.send(EngineCommand::RemoveNoteClip(source_track, clip_id));
                 // Add to engine target track
-                engine.send(EngineCommand::AddNoteClip {
-                    track_id: target_track,
-                    insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
-                        clip_id,
-                        clip.position_beats,
-                        clip.duration_beats,
-                        clip.start_marker_beats,
-                        clip.loop_enabled,
-                        clip.loop_start_beats,
-                        clip.loop_end_beats,
-                        clip.groove_grid,
-                    ),
-                });
-                for note in &clip.notes {
-                    engine.send(EngineCommand::AddNote {
-                        track_id: target_track,
-                        clip_id,
-                        insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(*note),
-                    });
-                }
+                let resident = self
+                    .find_content(target_track)
+                    .map_or(0, |track| track.note_clips.len());
+                engine.send(clip.add_command_beside(target_track, resident));
                 // Add to UI target track
                 if let Some(track) = self.find_content_mut(target_track) {
                     track.note_clips.push(clip);
@@ -122,23 +104,10 @@ impl TimelineEditorState {
                 // Remove from engine source track
                 engine.send(EngineCommand::RemoveClip(source_track, clip_id));
                 // Add to engine target track
-                engine.send(EngineCommand::AddClip {
-                    insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
-                    track_id: target_track,
-                    clip_id,
-                    audio: Arc::clone(&clip.audio),
-                    position: clip.position,
-                    source_offset: clip.source_offset,
-                    start_marker: clip.start_marker,
-                    duration: clip.duration,
-                    loop_enabled: clip.loop_enabled,
-                    loop_start: clip.loop_start,
-                    loop_end: clip.loop_end,
-                    linear_gain: clip.gain_db.linear(),
-                    fades: clip.fades,
-                    playback_direction: clip.playback_direction,
-                    warp_markers: clip.warp_markers.clone(),
-                });
+                let resident = self
+                    .find_content(target_track)
+                    .map_or(0, |track| track.clips.len());
+                engine.send(clip.add_command_beside(target_track, resident));
                 // Add to UI target track
                 if let Some(track) = self.find_content_mut(target_track) {
                     track.clips.push(clip);
@@ -166,30 +135,20 @@ impl TimelineEditorState {
         anchor: ClipId,
         new_position_beats: f64,
         target_track: TrackId,
-    ) {
+    ) -> ArrangementAction {
         if ctx.samples_per_beat <= 0.0 {
-            return;
+            return ArrangementAction::default();
         }
         let Some(anchor) = self.locate_clip(anchor) else {
-            return;
+            return ArrangementAction::default();
         };
-        let targets: Vec<ArrangementSelection> = if self.selected_clips.contains(&anchor) {
-            self.selected_clips.iter().copied().collect()
-        } else {
-            vec![anchor]
-        };
-        let beats_of = |this: &Self, selection: ArrangementSelection| match selection {
-            ArrangementSelection::AudioClip { track_id, clip_id } => this
-                .find_content(track_id)
-                .and_then(|content| content.clips.iter().find(|clip| clip.id == clip_id))
-                .map(|clip| clip.position as f64 / ctx.samples_per_beat),
-            ArrangementSelection::NoteClip { track_id, clip_id } => this
-                .find_content(track_id)
-                .and_then(|content| content.note_clips.iter().find(|clip| clip.id == clip_id))
-                .map(|clip| clip.position_beats),
+        let targets = self.gesture_targets(anchor);
+        let beats_of = |this: &Self, selection: ArrangementSelection| {
+            this.clip_span(selection, ctx.samples_per_beat)
+                .map(|span| span.start_beats)
         };
         let Some(anchor_beats) = beats_of(self, anchor) else {
-            return;
+            return ArrangementAction::default();
         };
         let earliest = targets
             .iter()
@@ -221,6 +180,16 @@ impl TimelineEditorState {
                     .collect()
             })
             .flatten();
+        let moves_in_time = targets.iter().any(|selection| {
+            if selection.is_note_clip() {
+                delta_beats != 0.0
+            } else {
+                delta_samples != 0
+            }
+        });
+        if !moves_in_time && destinations.is_none() {
+            return ArrangementAction::default();
+        }
 
         for (index, selection) in targets.iter().enumerate() {
             match *selection {
@@ -259,9 +228,13 @@ impl TimelineEditorState {
         if destinations.is_some() {
             self.selected_track = Some(target_track);
         }
+        ArrangementAction {
+            mark_dirty: true,
+            ..Default::default()
+        }
     }
 
-    fn locate_clip(&self, clip_id: ClipId) -> Option<ArrangementSelection> {
+    pub(super) fn locate_clip(&self, clip_id: ClipId) -> Option<ArrangementSelection> {
         self.timeline
             .by_track
             .iter()

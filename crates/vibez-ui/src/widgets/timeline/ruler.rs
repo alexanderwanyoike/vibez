@@ -1,49 +1,78 @@
-//! Beat ruler: bar numbers, loop-region drag, seek clicks.
+//! The beat ruler's pointer gestures: loop brace drags, seek clicks, zoom
+//! drags and wheel navigation.
+
+use std::time::{Duration, Instant};
 
 use iced::mouse;
 use iced::widget::canvas;
-use iced::{Rectangle, Renderer, Theme};
+use iced::{Point, Rectangle, Renderer, Theme};
 
-use crate::domains::arrangement::ArrangementMsg;
+use super::ruler_drag::{brace_grab, BraceDrag};
 use crate::domains::transport::TransportMsg;
 use crate::domains::view::ViewMsg;
 use crate::message::Message;
-use crate::state::{ContextMenuTarget, GridConfig};
-use crate::theme;
-use crate::timeline_geometry::TimelineGeometry;
+use crate::state::{ContextMenuTarget, GridConfig, UndoGestureId};
+use crate::timeline_geometry::{TimelineGeometry, TimelineViewport};
+use crate::timeline_snap::{SnapContext, SnapTargets};
+use crate::widgets::clip_loop_markers::LoopMarker;
+use crate::widgets::double_click::DoubleClick;
+use crate::widgets::drag_phase::{DragPhase, CLICK_SLOP_PX};
+
+/// Height of the Arrange ruler: the loop strip over the number strip.
+pub const ARRANGE_RULER_HEIGHT: f32 = 36.0;
+pub(super) const LOOP_STRIP_HEIGHT: f32 = 13.0;
+const DOUBLE_CLICK_WINDOW: Duration = Duration::from_millis(300);
 
 /// Canvas widget that draws a beat-based ruler with bar.beat labels.
 pub struct RulerWidget {
     pub playhead_beats: f64,
-    pub bpm: f64,
+    /// Arrange's play-start marker; Section rulers have none.
+    pub play_start_beats: Option<f64>,
     pub zoom_level: f32,
     pub grid: GridConfig,
     pub scroll_offset_beats: f64,
-    pub total_beats: f64,
+    /// Arrange edits its loop with a brace in a strip above the numbers;
+    /// a Section loops over its whole length and has no strip.
+    pub loop_brace: bool,
     pub loop_enabled: bool,
     pub loop_start_beats: f64,
     pub loop_end_beats: f64,
     pub time_selection_active: bool,
     pub selection_start_beats: f64,
     pub selection_end_beats: f64,
+    /// Clip edges and markers a seek click locks onto.
+    pub snap_targets: std::sync::Arc<SnapTargets>,
 }
 
 /// Active drag action on the ruler.
 #[derive(Debug, Clone)]
 enum RulerDragAction {
-    PendingSeek { beat: f64, start_x: f32 },
-    RegionSelect { anchor_beat: f64 },
+    /// A press on the numbers sets the play start when released as a click
+    /// and zooms and pans once dragged.
+    Numbers {
+        beat: f64,
+        start: Point,
+        view: TimelineViewport,
+        phase: DragPhase,
+    },
+    Brace {
+        drag: BraceDrag,
+        gesture: UndoGestureId,
+    },
 }
 
 /// Interaction state for the ruler widget.
 #[derive(Debug, Default)]
 pub struct RulerInteractionState {
     drag: Option<RulerDragAction>,
+    double_click: DoubleClick,
     shift_held: bool,
+    /// Bypasses all snapping, as Alt does in Ableton.
+    alt_held: bool,
 }
 
 impl RulerWidget {
-    fn geometry(&self) -> TimelineGeometry {
+    pub(super) fn geometry(&self) -> TimelineGeometry {
         TimelineGeometry::from_zoom(self.zoom_level, self.scroll_offset_beats)
     }
 
@@ -51,16 +80,46 @@ impl RulerWidget {
         self.geometry().pixels_per_beat()
     }
 
-    fn visible_beats(&self, width: f32) -> f64 {
-        self.geometry().visible_beats(width)
+    /// `free` bypasses all snapping, as holding Alt does.
+    fn snap_context(&self, free: bool) -> SnapContext {
+        self.grid.snap_context(self.pixels_per_beat(), free)
     }
 
-    pub(crate) fn beat_to_x(&self, beat: f64, _width: f32) -> f32 {
-        self.geometry().beat_to_x(beat)
+    /// Where the number strip starts, below the loop strip if there is one.
+    pub(super) fn numbers_top(&self) -> f32 {
+        if self.loop_brace {
+            LOOP_STRIP_HEIGHT
+        } else {
+            0.0
+        }
     }
 
-    fn snapped_beat(&self, beat: f64) -> f64 {
-        self.grid.snap_beat(beat, self.pixels_per_beat())
+    fn brace_grab_at(&self, x: f32) -> Option<LoopMarker> {
+        let geometry = self.geometry();
+        brace_grab(
+            x,
+            geometry.beat_to_x(self.loop_start_beats),
+            geometry.beat_to_x(self.loop_end_beats),
+        )
+    }
+
+    /// The loop edit for the pointer at `beat`, if it changes the loop.
+    fn brace_edit(
+        &self,
+        drag: BraceDrag,
+        gesture: UndoGestureId,
+        beat: f64,
+        free: bool,
+    ) -> Option<Message> {
+        let context = self.snap_context(free);
+        let (start_beats, end_beats) = drag.loop_at(beat, &self.snap_targets, context)?;
+        ((start_beats, end_beats) != (self.loop_start_beats, self.loop_end_beats)).then(|| {
+            Message::Transport(TransportMsg::SetArrangementLoopRegion {
+                start_beats,
+                end_beats,
+            })
+            .in_undo_gesture(gesture)
+        })
     }
 }
 
@@ -75,259 +134,7 @@ impl canvas::Program<Message> for RulerWidget {
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
-        let mut frame = canvas::Frame::new(renderer, bounds.size());
-        let w = bounds.width;
-        let h = bounds.height;
-
-        // Background
-        frame.fill_rectangle(
-            iced::Point::ORIGIN,
-            iced::Size::new(w, h),
-            theme::ruler_bg(),
-        );
-
-        if self.bpm > 0.0 {
-            let beats_per_bar = 4.0_f64;
-            let visible = self.visible_beats(w);
-            let start_beat = self.scroll_offset_beats.floor().max(0.0) as i64;
-            let end_beat = (self.scroll_offset_beats + visible).ceil() as i64 + 1;
-
-            // Adaptive label density based on zoom
-            let ppb = self.pixels_per_beat();
-            let pixels_per_bar = ppb * beats_per_bar as f32;
-
-            // Adaptive: ensure ~60px minimum between labeled bars
-            let bar_step: i64 = if pixels_per_bar >= 60.0 {
-                1
-            } else if pixels_per_bar >= 30.0 {
-                2
-            } else if pixels_per_bar >= 15.0 {
-                4
-            } else if pixels_per_bar >= 8.0 {
-                8
-            } else if pixels_per_bar >= 4.0 {
-                16
-            } else {
-                32
-            };
-
-            for beat_i in start_beat..end_beat {
-                let beat = beat_i as f64;
-                let x = self.beat_to_x(beat, w);
-
-                if x < -10.0 || x > w + 10.0 {
-                    continue;
-                }
-
-                let bar_index = (beat / beats_per_bar).floor() as i64;
-                let beat_in_bar = (beat % beats_per_bar) as usize;
-                let is_bar = beat_in_bar == 0;
-
-                if is_bar {
-                    let show_label = (bar_index % bar_step) == 0;
-                    let show_tick = show_label || pixels_per_bar >= 10.0;
-
-                    if show_tick {
-                        // Bar line (thick)
-                        let tick = canvas::Path::line(
-                            iced::Point::new(x, h * 0.3),
-                            iced::Point::new(x, h),
-                        );
-                        frame.stroke(
-                            &tick,
-                            canvas::Stroke::default()
-                                .with_color(theme::border())
-                                .with_width(1.5),
-                        );
-                    }
-
-                    if show_label {
-                        // Bar label
-                        if ppb < 40.0 {
-                            // Low zoom: bar numbers only ("1", "2", "3")
-                            let label = format!("{}", bar_index + 1);
-                            frame.fill_text(canvas::Text {
-                                content: label,
-                                position: iced::Point::new(x + 4.0, 3.0),
-                                color: theme::ruler_text(),
-                                size: iced::Pixels(12.0),
-                                ..Default::default()
-                            });
-                        } else {
-                            // Medium/high zoom: bar.beat ("1.1", "2.1")
-                            let label = format!("{}.1", bar_index + 1);
-                            frame.fill_text(canvas::Text {
-                                content: label,
-                                position: iced::Point::new(x + 4.0, 3.0),
-                                color: theme::ruler_text(),
-                                size: iced::Pixels(12.0),
-                                ..Default::default()
-                            });
-                        }
-                    }
-                } else if ppb >= 40.0 {
-                    // Beat ticks only at medium+ zoom
-                    let tick =
-                        canvas::Path::line(iced::Point::new(x, h * 0.65), iced::Point::new(x, h));
-                    frame.stroke(
-                        &tick,
-                        canvas::Stroke::default()
-                            .with_color(theme::divider())
-                            .with_width(0.5),
-                    );
-
-                    // Beat labels only at high zoom (≥80 ppb)
-                    if ppb >= 80.0 {
-                        let label = format!("{}.{}", bar_index + 1, beat_in_bar + 1);
-                        frame.fill_text(canvas::Text {
-                            content: label,
-                            position: iced::Point::new(x + 2.0, 6.0),
-                            color: theme::text_muted(),
-                            size: iced::Pixels(9.0),
-                            ..Default::default()
-                        });
-                    }
-                }
-
-                // Sub-beat ticks at very high zoom (>120 ppb)
-                if ppb > 120.0 {
-                    for sub in 1..4 {
-                        let sub_beat = beat + sub as f64 * 0.25;
-                        let sub_x = self.beat_to_x(sub_beat, w);
-                        if sub_x > 0.0 && sub_x < w {
-                            let sub_tick = canvas::Path::line(
-                                iced::Point::new(sub_x, h * 0.8),
-                                iced::Point::new(sub_x, h),
-                            );
-                            frame.stroke(
-                                &sub_tick,
-                                canvas::Stroke::default()
-                                    .with_color(theme::divider())
-                                    .with_width(0.3),
-                            );
-                        }
-                    }
-                }
-            }
-
-            // Ruler bottom border
-            let bottom_border =
-                canvas::Path::line(iced::Point::new(0.0, h - 1.0), iced::Point::new(w, h - 1.0));
-            frame.stroke(
-                &bottom_border,
-                canvas::Stroke::default()
-                    .with_color(theme::border())
-                    .with_width(1.0),
-            );
-        }
-
-        // Loop region overlay
-        if self.loop_enabled && self.loop_end_beats > self.loop_start_beats {
-            let loop_x1 = self.beat_to_x(self.loop_start_beats, w);
-            let loop_x2 = self.beat_to_x(self.loop_end_beats, w);
-
-            let fill_x = loop_x1.max(0.0);
-            let fill_w = loop_x2.min(w) - fill_x;
-            if fill_w > 0.0 {
-                frame.fill_rectangle(
-                    iced::Point::new(fill_x, 0.0),
-                    iced::Size::new(fill_w, h),
-                    theme::with_alpha(theme::accent(), 0.15),
-                );
-
-                // REPEAT icon centered in the loop region
-                let center_x = fill_x + fill_w / 2.0;
-                frame.fill_text(canvas::Text {
-                    content: crate::icons::REPEAT.to_string(),
-                    position: iced::Point::new(center_x - 6.0, (h - 12.0) / 2.0),
-                    color: theme::with_alpha(theme::accent(), 0.7),
-                    size: iced::Pixels(12.0),
-                    font: crate::icons::ICON_FONT,
-                    ..Default::default()
-                });
-            }
-
-            // Bracket lines at boundaries
-            if loop_x1 >= 0.0 && loop_x1 <= w {
-                let bracket = canvas::Path::line(
-                    iced::Point::new(loop_x1, 0.0),
-                    iced::Point::new(loop_x1, h),
-                );
-                frame.stroke(
-                    &bracket,
-                    canvas::Stroke::default()
-                        .with_color(theme::accent())
-                        .with_width(2.0),
-                );
-            }
-            if loop_x2 >= 0.0 && loop_x2 <= w {
-                let bracket = canvas::Path::line(
-                    iced::Point::new(loop_x2, 0.0),
-                    iced::Point::new(loop_x2, h),
-                );
-                frame.stroke(
-                    &bracket,
-                    canvas::Stroke::default()
-                        .with_color(theme::accent())
-                        .with_width(2.0),
-                );
-            }
-        }
-
-        // Selection region overlay (separate from loop)
-        if self.time_selection_active && self.selection_end_beats > self.selection_start_beats {
-            let sel_x1 = self.beat_to_x(self.selection_start_beats, w);
-            let sel_x2 = self.beat_to_x(self.selection_end_beats, w);
-
-            let fill_x = sel_x1.max(0.0);
-            let fill_w = sel_x2.min(w) - fill_x;
-            if fill_w > 0.0 {
-                frame.fill_rectangle(
-                    iced::Point::new(fill_x, 0.0),
-                    iced::Size::new(fill_w, h),
-                    theme::with_alpha(theme::accent(), 0.10),
-                );
-            }
-
-            // Thinner bracket lines
-            if sel_x1 >= 0.0 && sel_x1 <= w {
-                let bracket =
-                    canvas::Path::line(iced::Point::new(sel_x1, 0.0), iced::Point::new(sel_x1, h));
-                frame.stroke(
-                    &bracket,
-                    canvas::Stroke::default()
-                        .with_color(theme::accent())
-                        .with_width(1.0),
-                );
-            }
-            if sel_x2 >= 0.0 && sel_x2 <= w {
-                let bracket =
-                    canvas::Path::line(iced::Point::new(sel_x2, 0.0), iced::Point::new(sel_x2, h));
-                frame.stroke(
-                    &bracket,
-                    canvas::Stroke::default()
-                        .with_color(theme::accent())
-                        .with_width(1.0),
-                );
-            }
-        }
-
-        // Playhead
-        let playhead_x = self.beat_to_x(self.playhead_beats, w);
-        if playhead_x >= 0.0 && playhead_x <= w {
-            let playhead_line = canvas::Path::line(
-                iced::Point::new(playhead_x, 0.0),
-                iced::Point::new(playhead_x, h),
-            );
-            frame.stroke(
-                &playhead_line,
-                canvas::Stroke::default()
-                    .with_color(theme::playhead())
-                    .with_width(2.0),
-            );
-        }
-
-        vec![frame.into_geometry()]
+        vec![self.paint(renderer, bounds.size())]
     }
 
     fn update(
@@ -338,112 +145,89 @@ impl canvas::Program<Message> for RulerWidget {
         cursor: mouse::Cursor,
     ) -> (canvas::event::Status, Option<Message>) {
         match event {
-            // Left-click: PendingSeek (may become RegionSelect on drag)
             canvas::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)) => {
                 if let Some(pos) = cursor.position_in(bounds) {
                     let beat = self.geometry().x_to_beat(pos.x);
-                    state.drag = Some(RulerDragAction::PendingSeek {
+                    if pos.y < self.numbers_top() {
+                        state.drag = Some(RulerDragAction::Brace {
+                            drag: BraceDrag {
+                                grab: self.brace_grab_at(pos.x),
+                                original: (self.loop_start_beats, self.loop_end_beats),
+                                pressed_beat: beat,
+                            },
+                            gesture: UndoGestureId::new(),
+                        });
+                        return (canvas::event::Status::Captured, None);
+                    }
+                    if state.double_click.press(
+                        Instant::now(),
+                        pos,
+                        DOUBLE_CLICK_WINDOW,
+                        Some(CLICK_SLOP_PX),
+                    ) {
+                        state.double_click.clear();
+                        state.drag = None;
+                        return (
+                            canvas::event::Status::Captured,
+                            Some(Message::View(ViewMsg::ZoomToFit)),
+                        );
+                    }
+                    state.drag = Some(RulerDragAction::Numbers {
                         beat,
-                        start_x: pos.x,
+                        start: pos,
+                        view: TimelineViewport::new(self.zoom_level, self.scroll_offset_beats),
+                        phase: DragPhase::Pending,
                     });
                     return (canvas::event::Status::Captured, None);
                 }
             }
-            // Mouse move: transition PendingSeek→RegionSelect, or update region
             canvas::Event::Mouse(iced::mouse::Event::CursorMoved { .. }) => {
-                if let Some(ref drag) = state.drag {
-                    if let Some(pos) = cursor.position() {
-                        let local_x = pos.x - bounds.x;
-                        let beat = self.geometry().x_to_beat(local_x);
-
-                        // Auto-scroll when dragging near ruler edges
-                        if matches!(drag, RulerDragAction::RegionSelect { .. }) {
-                            let edge_zone = 50.0_f32;
-                            if local_x > bounds.width - edge_zone {
-                                let overshoot = ((local_x - (bounds.width - edge_zone))
-                                    / edge_zone)
-                                    .clamp(0.0, 3.0);
-                                return (
-                                    canvas::event::Status::Captured,
-                                    Some(Message::View(ViewMsg::ScrollArrangement(
-                                        overshoot as f64 * 2.0,
-                                    ))),
-                                );
-                            }
-                            if local_x < edge_zone && self.scroll_offset_beats > 0.0 {
-                                let overshoot = ((edge_zone - local_x) / edge_zone).clamp(0.0, 3.0);
-                                return (
-                                    canvas::event::Status::Captured,
-                                    Some(Message::View(ViewMsg::ScrollArrangement(
-                                        -(overshoot as f64 * 2.0),
-                                    ))),
-                                );
-                            }
+                let (Some(drag), Some(pos)) = (state.drag.clone(), cursor.position()) else {
+                    return (canvas::event::Status::Ignored, None);
+                };
+                let local = Point::new(pos.x - bounds.x, pos.y - bounds.y);
+                let message = match drag {
+                    RulerDragAction::Brace { drag, gesture } => self.brace_edit(
+                        drag,
+                        gesture,
+                        self.geometry().x_to_beat(local.x),
+                        state.alt_held,
+                    ),
+                    RulerDragAction::Numbers {
+                        beat,
+                        start,
+                        view,
+                        mut phase,
+                    } => {
+                        if !phase.follow(start, local) {
+                            return (canvas::event::Status::Captured, None);
                         }
-
-                        match drag {
-                            RulerDragAction::PendingSeek {
-                                beat: anchor,
-                                start_x,
-                            } => {
-                                let dx = (local_x - start_x).abs();
-                                if dx > 4.0 {
-                                    let anchor = self.snapped_beat(*anchor);
-                                    let current = self.snapped_beat(beat);
-                                    let start = anchor.min(current);
-                                    let end = anchor.max(current);
-                                    state.drag = Some(RulerDragAction::RegionSelect {
-                                        anchor_beat: anchor,
-                                    });
-                                    if end > start {
-                                        return (
-                                            canvas::event::Status::Captured,
-                                            Some(Message::Arrangement(
-                                                ArrangementMsg::SetTimeSelection {
-                                                    start_beats: start,
-                                                    end_beats: end,
-                                                    track_id: None,
-                                                },
-                                            )),
-                                        );
-                                    }
-                                }
-                            }
-                            RulerDragAction::RegionSelect { anchor_beat } => {
-                                let current = self.snapped_beat(beat);
-                                let start = anchor_beat.min(current);
-                                let end = anchor_beat.max(current);
-                                if end > start {
-                                    return (
-                                        canvas::event::Status::Captured,
-                                        Some(Message::Arrangement(
-                                            ArrangementMsg::SetTimeSelection {
-                                                start_beats: start,
-                                                end_beats: end,
-                                                track_id: None,
-                                            },
-                                        )),
-                                    );
-                                }
-                            }
-                        }
+                        state.double_click.clear();
+                        state.drag = Some(RulerDragAction::Numbers {
+                            beat,
+                            start,
+                            view,
+                            phase,
+                        });
+                        Some(zoom_drag(view, beat, start, local))
                     }
-                }
+                };
+                return (canvas::event::Status::Captured, message);
             }
-            // Mouse release
             canvas::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => {
-                if let Some(ref drag) = state.drag {
+                if let Some(drag) = state.drag.take() {
                     let msg = match drag {
-                        RulerDragAction::PendingSeek { beat, .. } => {
-                            // Short click → seek + clear selection
-                            Some(Message::Transport(TransportMsg::SeekToBeat(*beat)))
+                        RulerDragAction::Numbers {
+                            beat,
+                            phase: DragPhase::Pending,
+                            ..
+                        } => {
+                            let context = self.snap_context(state.alt_held);
+                            let beat = self.snap_targets.click(beat, context).beat;
+                            Some(Message::Transport(TransportMsg::SeekToBeat(beat)))
                         }
-                        RulerDragAction::RegionSelect { .. } => {
-                            // Completed region select
-                            Some(Message::set_time_selection_active(true))
-                        }
+                        RulerDragAction::Numbers { .. } | RulerDragAction::Brace { .. } => None,
                     };
-                    state.drag = None;
                     return (canvas::event::Status::Captured, msg);
                 }
             }
@@ -520,6 +304,7 @@ impl canvas::Program<Message> for RulerWidget {
             // Track shift key state for zoom
             canvas::Event::Keyboard(iced::keyboard::Event::ModifiersChanged(modifiers)) => {
                 state.shift_held = modifiers.shift();
+                state.alt_held = modifiers.alt();
             }
             _ => {}
         }
@@ -534,15 +319,35 @@ impl canvas::Program<Message> for RulerWidget {
     ) -> mouse::Interaction {
         if let Some(ref drag) = state.drag {
             return match drag {
-                RulerDragAction::RegionSelect { .. } => mouse::Interaction::Crosshair,
-                RulerDragAction::PendingSeek { .. } => mouse::Interaction::Pointer,
+                RulerDragAction::Numbers { .. } => mouse::Interaction::ZoomIn,
+                RulerDragAction::Brace { drag, .. } => brace_interaction(drag.grab, true),
             };
         }
-        if cursor.is_over(bounds) {
-            return mouse::Interaction::Pointer;
+        match cursor.position_in(bounds) {
+            Some(pos) if pos.y < self.numbers_top() => {
+                brace_interaction(self.brace_grab_at(pos.x), false)
+            }
+            Some(_) => mouse::Interaction::ZoomIn,
+            None => mouse::Interaction::default(),
         }
-        mouse::Interaction::default()
     }
 }
 
-// ── TrackClipCanvas ──
+/// The ruler drag message for the pointer at `at`, from a press at `start`.
+fn zoom_drag(view: TimelineViewport, grabbed_beat: f64, start: Point, at: Point) -> Message {
+    Message::View(ViewMsg::SetViewport(view.ruler_dragged(
+        grabbed_beat,
+        at.x,
+        at.y - start.y,
+    )))
+}
+
+fn brace_interaction(grab: Option<LoopMarker>, dragging: bool) -> mouse::Interaction {
+    grab.map_or(mouse::Interaction::Crosshair, |marker| {
+        marker.interaction(dragging)
+    })
+}
+
+#[cfg(test)]
+#[path = "ruler_tests.rs"]
+mod tests;

@@ -25,6 +25,7 @@ async fn clip_project_reopens_audio_midi_and_independent_arrange_content() {
         track_id: project.tracks[0].id,
         row: 13,
         timeline: midi,
+        launch: Default::default(),
     });
     let audio_id = ClipId::new();
     let audio = vibez_core::track::ClipInfo {
@@ -60,13 +61,20 @@ async fn clip_project_reopens_audio_midi_and_independent_arrange_content() {
             clips: vec![audio],
             ..Default::default()
         },
+        launch: Default::default(),
     });
     let destination = directory.path().join("Clip project.vzp");
     save_project_async(destination.clone(), None, project)
         .await
         .unwrap();
     std::fs::remove_file(source).unwrap();
-    let loaded = load_project_async(destination.clone(), None).await.unwrap();
+    let loaded = load_project_async(
+        destination.clone(),
+        None,
+        vibez_core::constants::DEFAULT_SAMPLE_RATE,
+    )
+    .await
+    .unwrap();
     assert_eq!(loaded.project.perform_layout, PerformLayout::Clips);
     assert!(loaded.project.sections.is_empty());
     assert_eq!(loaded.project.launcher_clips.len(), 2);
@@ -101,6 +109,7 @@ fn legacy_documents_keep_sections_and_discover_launcher_ids() {
         track_id,
         row: 5,
         timeline: Default::default(),
+        launch: Default::default(),
     });
     assert!(project.max_persisted_id() >= id.raw().max(track_id.raw()));
     assert!(project
@@ -154,6 +163,7 @@ async fn recorded_audio_cells_require_container_saves_and_reopen_with_embedded_m
         };
         let project = Project {
             reduced_latency_monitoring: false,
+            sample_rate: 48_000,
             perform_layout: PerformLayout::Clips,
             tracks: vec![track.clone()],
             launcher_clips: vec![LauncherClipInfo {
@@ -164,6 +174,7 @@ async fn recorded_audio_cells_require_container_saves_and_reopen_with_embedded_m
                     clips: vec![info],
                     ..Default::default()
                 },
+                launch: Default::default(),
             }],
             ..Default::default()
         };
@@ -181,7 +192,7 @@ async fn recorded_audio_cells_require_container_saves_and_reopen_with_embedded_m
         save_project_async(path.clone(), None, project)
             .await
             .unwrap();
-        let reopened = load_project_async(path, None).await.unwrap();
+        let reopened = load_project_async(path, None, 48_000).await.unwrap();
         assert!(reopened.unresolved_clips.is_empty());
         assert_eq!(reopened.clips.len(), 1);
         assert_eq!(

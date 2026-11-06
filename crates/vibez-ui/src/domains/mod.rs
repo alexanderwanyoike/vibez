@@ -15,6 +15,7 @@ pub mod auto_pan;
 pub mod automation;
 pub mod bitcrush;
 pub mod browser;
+mod clip_commands;
 pub mod compensation;
 pub mod compressor;
 pub mod delay;
@@ -45,11 +46,13 @@ pub mod saturator;
 pub mod sidechain;
 pub mod synth;
 pub mod timeline_editor;
+pub mod track_heights;
 pub mod transport;
 pub mod view;
 pub mod wavetable;
 
 use vibez_engine::commands::EngineCommand;
+use vibez_engine::transport_ring::{TransportCommand, TransportSender};
 
 /// The one way domains talk to the audio engine. A trait (interface)
 /// instead of the concrete channel so tests can inject a recorder
@@ -84,15 +87,17 @@ pub trait EngineHandle {
     }
 }
 
-/// Ordered UI-side delivery for the bounded real-time engine queue.
+/// Ordered UI-side delivery for the bounded real-time engine queues.
 ///
 /// Large edits such as a long Perform Capture can expand into more commands
 /// than fit in one audio callback's ring buffer. Overflow stays on the UI
 /// thread and is retried on later ticks; new commands join the back of the
-/// same queue so transport actions cannot overtake unfinished project sync.
+/// same queue. Transport commands take the transport ring instead, so Play
+/// and Stop never wait for unfinished content edits.
 pub struct EngineCommandQueue {
-    producer: Option<rtrb::Producer<EngineCommand>>,
+    rings: Option<EngineRings>,
     pending: VecDeque<EngineCommand>,
+    pending_transport: VecDeque<TransportCommand>,
     device_owners: std::collections::HashMap<
         (vibez_core::id::TrackId, Option<vibez_core::id::EffectId>),
         usize,
@@ -101,11 +106,17 @@ pub struct EngineCommandQueue {
     sample_rate: u32,
 }
 
+struct EngineRings {
+    commands: rtrb::Producer<EngineCommand>,
+    transport: TransportSender,
+}
+
 impl Default for EngineCommandQueue {
     fn default() -> Self {
         Self {
-            producer: None,
+            rings: None,
             pending: VecDeque::new(),
+            pending_transport: VecDeque::new(),
             device_owners: Default::default(),
             effect_chain_edited: false,
             sample_rate: vibez_engine::engine::DEFAULT_SAMPLE_RATE,
@@ -114,9 +125,12 @@ impl Default for EngineCommandQueue {
 }
 
 impl EngineCommandQueue {
-    pub fn new(producer: rtrb::Producer<EngineCommand>) -> Self {
+    pub fn new(commands: rtrb::Producer<EngineCommand>, transport: TransportSender) -> Self {
         Self {
-            producer: Some(producer),
+            rings: Some(EngineRings {
+                commands,
+                transport,
+            }),
             ..Self::default()
         }
     }
@@ -169,12 +183,19 @@ impl EngineCommandQueue {
     }
 
     pub fn flush(&mut self) {
-        let Some(producer) = self.producer.as_mut() else {
+        let Some(rings) = self.rings.as_mut() else {
             self.pending.clear();
+            self.pending_transport.clear();
             return;
         };
+        while let Some(command) = self.pending_transport.pop_front() {
+            if let Err(command) = rings.transport.push(command) {
+                self.pending_transport.push_front(command);
+                break;
+            }
+        }
         while let Some(command) = self.pending.pop_front() {
-            match producer.push(command) {
+            match rings.commands.push(command) {
                 Ok(()) => {}
                 Err(rtrb::PushError::Full(command)) => {
                     self.pending.push_front(command);
@@ -203,17 +224,59 @@ impl EngineHandle for EngineCommandQueue {
         if let EngineCommand::SetSampleRate(rate) = &cmd {
             self.sample_rate = *rate;
         }
-        let Some(producer) = self.producer.as_mut() else {
+        let Some(rings) = self.rings.as_mut() else {
             return;
         };
-        if !self.pending.is_empty() {
-            self.pending.push_back(cmd);
+        if cmd.is_transport() {
+            let stamped = rings.transport.stamp(cmd);
+            if !self.pending_transport.is_empty() {
+                self.pending_transport.push_back(stamped);
+                return;
+            }
+            if let Err(stamped) = rings.transport.push(stamped) {
+                self.pending_transport.push_back(stamped);
+            }
             return;
         }
-        if let Err(rtrb::PushError::Full(cmd)) = producer.push(cmd) {
+        if !self.pending.is_empty() {
+            if let Some(cmd) = supersede_waiting(&mut self.pending, cmd) {
+                rings.transport.record_main_command(&cmd);
+                self.pending.push_back(cmd);
+            }
+            return;
+        }
+        rings.transport.record_main_command(&cmd);
+        if let Err(rtrb::PushError::Full(cmd)) = rings.commands.push(cmd) {
             self.pending.push_back(cmd);
         }
     }
+}
+
+/// Overwrites the waiting edit `cmd` makes redundant, so a drag stalled
+/// behind a content edit leaves one edit per clip in the queue, not one per
+/// mouse move. Returns `cmd` when nothing waiting can take its place.
+///
+/// Edits already pushed to the engine ring stay, since a pushed slot cannot be
+/// rewritten, and each is a cheap in-place edit the callback applies in one
+/// pass once the ring moves again.
+fn supersede_waiting(
+    pending: &mut VecDeque<EngineCommand>,
+    cmd: EngineCommand,
+) -> Option<EngineCommand> {
+    let Some(key) = cmd.clip_geometry_key() else {
+        return Some(cmd);
+    };
+    for waiting in pending.iter_mut().rev() {
+        match waiting.clip_geometry_key() {
+            Some(waiting_key) if waiting_key == key => {
+                *waiting = cmd;
+                return None;
+            }
+            Some(_) => {}
+            None => break,
+        }
+    }
+    Some(cmd)
 }
 
 /// Production implementation: wraps the real lock-free command queue.
@@ -250,7 +313,8 @@ mod engine_command_queue_tests {
     #[test]
     fn built_in_devices_use_the_rate_last_forwarded_to_the_engine() {
         let (producer, mut consumer) = rtrb::RingBuffer::new(4);
-        let mut queue = EngineCommandQueue::new(producer);
+        let mut queue =
+            EngineCommandQueue::new(producer, vibez_engine::transport_ring::transport_ring().0);
         assert_eq!(
             queue.sample_rate(),
             vibez_engine::engine::DEFAULT_SAMPLE_RATE
@@ -275,11 +339,12 @@ mod engine_command_queue_tests {
     #[test]
     fn overflow_and_new_commands_keep_fifo_order_across_flushes() {
         let (producer, mut consumer) = rtrb::RingBuffer::new(1);
-        let mut queue = EngineCommandQueue::new(producer);
+        let mut queue =
+            EngineCommandQueue::new(producer, vibez_engine::transport_ring::transport_ring().0);
 
         queue.send(EngineCommand::SetBpm(100.0));
         queue.send(EngineCommand::SetBpm(110.0));
-        queue.send(EngineCommand::Play);
+        queue.send(EngineCommand::SetBpm(120.0));
         assert_eq!(queue.pending_len(), 2);
 
         assert!(matches!(consumer.pop(), Ok(EngineCommand::SetBpm(100.0))));
@@ -288,7 +353,114 @@ mod engine_command_queue_tests {
         assert!(matches!(consumer.pop(), Ok(EngineCommand::SetBpm(110.0))));
         queue.flush();
         assert_eq!(queue.pending_len(), 0);
-        assert!(matches!(consumer.pop(), Ok(EngineCommand::Play)));
+        assert!(matches!(consumer.pop(), Ok(EngineCommand::SetBpm(120.0))));
+    }
+
+    #[test]
+    fn play_and_stop_skip_thousands_of_queued_content_edits() {
+        let (producer, _consumer) = rtrb::RingBuffer::new(1);
+        let (transport, mut sent_transport) = vibez_engine::transport_ring::transport_ring();
+        let mut queue = EngineCommandQueue::new(producer, transport);
+        let track_id = vibez_core::id::TrackId::new();
+        let clip_id = vibez_core::id::ClipId::new();
+        for _ in 0..3_000 {
+            queue.send(EngineCommand::AddNote {
+                track_id,
+                clip_id,
+                insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(
+                    vibez_core::midi::MidiNote {
+                        pitch: 60,
+                        velocity: 100,
+                        start_beat: 0.0,
+                        duration_beats: 1.0,
+                    },
+                ),
+            });
+        }
+        assert_eq!(queue.pending_len(), 2_999);
+
+        queue.send(EngineCommand::Play);
+        queue.send(EngineCommand::Stop);
+        assert!(matches!(
+            sent_transport.pop().as_ref().map(|sent| sent.command()),
+            Ok(EngineCommand::Play)
+        ));
+        assert!(matches!(
+            sent_transport.pop().as_ref().map(|sent| sent.command()),
+            Ok(EngineCommand::Stop)
+        ));
+        assert_eq!(queue.pending_len(), 2_999);
+    }
+
+    #[test]
+    fn waiting_drag_edits_for_one_clip_keep_only_the_latest() {
+        let (producer, mut consumer) = rtrb::RingBuffer::new(1);
+        let mut queue =
+            EngineCommandQueue::new(producer, vibez_engine::transport_ring::transport_ring().0);
+        let track_id = vibez_core::id::TrackId::new();
+        let [dragged, beside] = [(); 2].map(|_| vibez_core::id::ClipId::new());
+        let step = |clip_id, beats: f64| {
+            [
+                EngineCommand::MoveNoteClip {
+                    track_id,
+                    clip_id,
+                    new_position_beats: beats,
+                },
+                EngineCommand::SetNoteClipBounds {
+                    track_id,
+                    clip_id,
+                    duration_beats: beats + 4.0,
+                    start_marker_beats: 0.0,
+                    loop_start_beats: 0.0,
+                    loop_end_beats: beats + 4.0,
+                },
+            ]
+        };
+        queue.send(EngineCommand::SetBpm(120.0));
+        for beats in 1..=100 {
+            for command in step(dragged, f64::from(beats))
+                .into_iter()
+                .chain(step(beside, f64::from(beats) / 2.0))
+            {
+                queue.send(command);
+            }
+        }
+        assert_eq!(queue.pending_len(), 4);
+
+        let mut delivered = Vec::new();
+        while delivered.len() < 5 {
+            delivered.extend(consumer.pop());
+            queue.flush();
+        }
+        assert!(matches!(
+            delivered.as_slice(),
+            [
+                EngineCommand::SetBpm(_),
+                EngineCommand::MoveNoteClip { clip_id: a, new_position_beats: 100.0, .. },
+                EngineCommand::SetNoteClipBounds { clip_id: b, duration_beats: 104.0, .. },
+                EngineCommand::MoveNoteClip { clip_id: c, new_position_beats: 50.0, .. },
+                EngineCommand::SetNoteClipBounds { clip_id: d, duration_beats: 54.0, .. },
+            ] if [*a, *b] == [dragged; 2] && [*c, *d] == [beside; 2]
+        ));
+    }
+
+    #[test]
+    fn a_drag_edit_never_jumps_ahead_of_another_edit_of_its_clip() {
+        let (producer, _consumer) = rtrb::RingBuffer::new(1);
+        let mut queue =
+            EngineCommandQueue::new(producer, vibez_engine::transport_ring::transport_ring().0);
+        let track_id = vibez_core::id::TrackId::new();
+        let clip_id = vibez_core::id::ClipId::new();
+        let moved = |new_position_beats| EngineCommand::MoveNoteClip {
+            track_id,
+            clip_id,
+            new_position_beats,
+        };
+        queue.send(EngineCommand::SetBpm(120.0));
+        queue.send(moved(1.0));
+        queue.send(EngineCommand::RemoveNoteClip(track_id, clip_id));
+        queue.send(moved(2.0));
+        assert_eq!(queue.pending_len(), 3);
     }
 }
 

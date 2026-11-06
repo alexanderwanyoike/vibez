@@ -154,6 +154,61 @@ fn loop_end_marker_drag_snaps_and_keeps_the_start_fixed() {
 }
 
 #[test]
+fn loop_end_drags_past_the_clip_end_when_the_pointer_leaves_the_editor() {
+    let track_id = TrackId::new();
+    let clip = UiNoteClip {
+        id: ClipId::new(),
+        name: "Two bars".into(),
+        position_beats: 0.0,
+        duration_beats: 8.0,
+        notes: Vec::new(),
+        selected_notes: HashSet::new(),
+        start_marker_beats: 0.0,
+        loop_enabled: true,
+        loop_start_beats: 2.0,
+        loop_end_beats: 6.0,
+        groove_grid: vibez_core::perform::GrooveGrid::Off,
+    };
+    let widget = PianoRollWidget::from_clip(
+        track_id,
+        &clip,
+        0.0,
+        8.0,
+        Color::WHITE,
+        GridConfig::new(SnapGrid::SIXTEENTH, true, false, 0),
+        0.0,
+        PianoRollEditMode::Select,
+    );
+    let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(852.0, 400.0));
+    let end = Point::new(widget.beat_to_x(6.0, &bounds), 5.0);
+    let target = Point::new(widget.beat_to_x(10.0, &bounds), 5.0);
+    let mut state = PianoRollState::default();
+
+    widget.update(
+        &mut state,
+        canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+        bounds,
+        mouse::Cursor::Available(end),
+    );
+    let message = widget
+        .update(
+            &mut state,
+            canvas::Event::Mouse(mouse::Event::CursorMoved { position: target }),
+            bounds,
+            mouse::Cursor::Available(target),
+        )
+        .1;
+    assert!(matches!(
+        piano_roll_message(message),
+        Some(PianoRollMsg::SetNoteClipLoopRegion {
+            loop_start_beats: 2.0,
+            loop_end_beats: 10.0,
+            ..
+        })
+    ));
+}
+
+#[test]
 fn start_marker_has_its_own_row_when_it_overlaps_loop_start() {
     let track_id = TrackId::new();
     let clip = UiNoteClip {
@@ -433,7 +488,7 @@ fn dragging_a_selection_moves_every_note_together_in_one_undo_step() {
     moves.sort_by_key(|(index, ..)| *index);
     assert_eq!(moves, vec![(0, 1.0, 62), (1, 3.0, 66)]);
 
-    let further = Point::new(target.x + 1.0, target.y);
+    let further = Point::new(widget.beat_to_x(1.75, &bounds), target.y);
     let second = widget
         .update(
             &mut state,
@@ -587,4 +642,212 @@ fn shift_with_up_or_down_moves_selected_notes_an_octave() {
             "{named:?} {modifiers:?}: {message:?}"
         );
     }
+}
+
+#[test]
+fn resizing_an_off_grid_note_ends_it_on_the_grid_line_under_the_pointer() {
+    let clip = UiNoteClip {
+        name: "Off grid".into(),
+        notes: vec![MidiNote {
+            pitch: 60,
+            start_beat: 0.3,
+            duration_beats: 1.0,
+            velocity: 100,
+        }],
+        ..UiNoteClip::test_clip(0.0, 8.0)
+    };
+    let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(852.0, 400.0));
+    let widget = PianoRollWidget::from_clip(
+        TrackId::new(),
+        &clip,
+        0.0,
+        8.0,
+        Color::WHITE,
+        GridConfig::new(SnapGrid::SIXTEENTH, true, false, 0),
+        default_scroll_y(bounds.height),
+        PianoRollEditMode::Select,
+    );
+    let y = widget.pitch_to_y(60) + KEY_HEIGHT / 2.0;
+    let edge = Point::new(widget.beat_to_x(1.3, &bounds) - 2.0, y);
+    let target = Point::new(widget.beat_to_x(2.0, &bounds) - 2.0, y);
+    let mut state = PianoRollState::default();
+    widget.update(
+        &mut state,
+        canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+        bounds,
+        mouse::Cursor::Available(edge),
+    );
+
+    let moved = widget
+        .update(
+            &mut state,
+            canvas::Event::Mouse(mouse::Event::CursorMoved { position: target }),
+            bounds,
+            mouse::Cursor::Available(target),
+        )
+        .1;
+
+    let Some(PianoRollMsg::SetNoteDurations { durations, .. }) = piano_roll_message(moved.clone())
+    else {
+        panic!("dragging the edge resizes the note: {moved:?}");
+    };
+    let [(0, duration)] = durations[..] else {
+        panic!("only the grabbed note resizes: {durations:?}");
+    };
+    let end = 0.3 + duration;
+    assert!((end - 2.0).abs() < 1e-4, "ended at beat {end}");
+}
+
+#[test]
+fn a_group_note_resize_stops_every_note_at_the_shortest_length() {
+    let note = |start_beat, duration_beats| MidiNote {
+        pitch: 60,
+        start_beat,
+        duration_beats,
+        velocity: 100,
+    };
+    let clip = UiNoteClip {
+        name: "Group".into(),
+        notes: vec![note(0.0, 2.0), note(4.0, 0.5)],
+        selected_notes: HashSet::from([0, 1]),
+        ..UiNoteClip::test_clip(0.0, 8.0)
+    };
+    let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(852.0, 400.0));
+    let widget = PianoRollWidget::from_clip(
+        TrackId::new(),
+        &clip,
+        0.0,
+        8.0,
+        Color::WHITE,
+        GridConfig::new(SnapGrid::SIXTEENTH, false, false, 0),
+        default_scroll_y(bounds.height),
+        PianoRollEditMode::Select,
+    );
+    let y = widget.pitch_to_y(60) + KEY_HEIGHT / 2.0;
+    let edge = Point::new(widget.beat_to_x(2.0, &bounds) - 2.0, y);
+    let target = Point::new(widget.beat_to_x(0.05, &bounds), y);
+    let mut state = PianoRollState::default();
+    widget.update(
+        &mut state,
+        canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+        bounds,
+        mouse::Cursor::Available(edge),
+    );
+
+    let moved = widget
+        .update(
+            &mut state,
+            canvas::Event::Mouse(mouse::Event::CursorMoved { position: target }),
+            bounds,
+            mouse::Cursor::Available(target),
+        )
+        .1;
+
+    let Some(PianoRollMsg::SetNoteDurations { durations, .. }) = piano_roll_message(moved.clone())
+    else {
+        panic!("dragging the edge resizes the notes: {moved:?}");
+    };
+    for (index, duration) in durations {
+        assert!(
+            (duration - 0.125).abs() < 1e-9,
+            "note {index} shrank to {duration} beats"
+        );
+    }
+}
+
+fn drag_with_alt(widget: &PianoRollWidget, from: Point, to: Point) -> Option<PianoRollMsg> {
+    let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(852.0, 400.0));
+    let mut state = PianoRollState::default();
+    widget.update(
+        &mut state,
+        canvas::Event::Keyboard(iced::keyboard::Event::ModifiersChanged(
+            iced::keyboard::Modifiers::ALT,
+        )),
+        bounds,
+        mouse::Cursor::Available(from),
+    );
+    widget.update(
+        &mut state,
+        canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+        bounds,
+        mouse::Cursor::Available(from),
+    );
+    piano_roll_message(
+        widget
+            .update(
+                &mut state,
+                canvas::Event::Mouse(mouse::Event::CursorMoved { position: to }),
+                bounds,
+                mouse::Cursor::Available(to),
+            )
+            .1,
+    )
+}
+
+fn looped_two_bars() -> UiNoteClip {
+    UiNoteClip {
+        id: ClipId::new(),
+        name: "Two bars".into(),
+        position_beats: 0.0,
+        duration_beats: 8.0,
+        notes: Vec::new(),
+        selected_notes: HashSet::new(),
+        start_marker_beats: 0.0,
+        loop_enabled: true,
+        loop_start_beats: 2.0,
+        loop_end_beats: 6.0,
+        groove_grid: vibez_core::perform::GrooveGrid::Off,
+    }
+}
+
+fn snapping_editor(clip: &UiNoteClip) -> PianoRollWidget {
+    PianoRollWidget::from_clip(
+        TrackId::new(),
+        clip,
+        0.0,
+        8.0,
+        Color::WHITE,
+        GridConfig::new(SnapGrid::QUARTER, true, false, 0),
+        0.0,
+        PianoRollEditMode::Select,
+    )
+}
+
+#[test]
+fn alt_drags_a_loop_handle_off_the_grid() {
+    let clip = looped_two_bars();
+    let widget = snapping_editor(&clip);
+    let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(852.0, 400.0));
+    let end = Point::new(widget.beat_to_x(6.0, &bounds), 5.0);
+    let target = Point::new(widget.beat_to_x(7.1, &bounds), 5.0);
+
+    let message = drag_with_alt(&widget, end, target);
+
+    let Some(PianoRollMsg::SetNoteClipLoopRegion { loop_end_beats, .. }) = message else {
+        panic!("dragging the handle moves the loop end: {message:?}");
+    };
+    assert!((loop_end_beats - 7.1).abs() < 1e-3, "{loop_end_beats}");
+}
+
+#[test]
+fn alt_drags_the_start_marker_off_the_grid() {
+    let mut clip = looped_two_bars();
+    clip.start_marker_beats = 2.0;
+    let widget = snapping_editor(&clip);
+    let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(852.0, 400.0));
+    let start = Point::new(widget.beat_to_x(2.0, &bounds), 15.0);
+    let target = Point::new(widget.beat_to_x(3.3, &bounds), 15.0);
+
+    let message = drag_with_alt(&widget, start, target);
+
+    let Some(PianoRollMsg::SetNoteClipStartMarker {
+        start_marker_beats, ..
+    }) = message
+    else {
+        panic!("dragging the start marker moves it: {message:?}");
+    };
+    assert!(
+        (start_marker_beats - 3.3).abs() < 1e-3,
+        "{start_marker_beats}"
+    );
 }

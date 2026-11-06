@@ -1,6 +1,6 @@
 //! Shared preset selection and file actions for native device panels.
 
-use iced::widget::{button, pick_list, row, text, tooltip};
+use iced::widget::{pick_list, row, text};
 use iced::{Color, Element, Length, Theme};
 use vibez_core::device_preset::DevicePreset;
 use vibez_core::id::TrackId;
@@ -10,6 +10,8 @@ use crate::domains::device_presets::presentation;
 use crate::domains::device_presets::DevicePresetMsg;
 use crate::message::Message;
 use crate::theme as th;
+use crate::widgets::control_style;
+use crate::widgets::device_chrome::tiny_button;
 
 #[derive(Clone, Debug, PartialEq)]
 struct PresetChoice {
@@ -35,15 +37,14 @@ impl std::fmt::Display for PresetChoice {
     }
 }
 
-/// The label and four icon buttons with their spacing; the selector gets the rest.
-const FIXED_W: f32 = 140.0;
-
+/// The preset selector `selector_width` wide, then previous, next, load
+/// and save, as a device card's header carries them.
 pub(crate) fn view<'a>(
     track_id: TrackId,
     device: impl Into<DeviceParams<'a>>,
     remembered: Option<&DevicePreset>,
     accent: Color,
-    available_width: f32,
+    selector_width: f32,
 ) -> Element<'a, Message> {
     let device = device.into();
     let presentation = presentation(device, remembered);
@@ -70,96 +71,45 @@ pub(crate) fn view<'a>(
         Message::ApplyDevicePreset(track_id, slot, choice.preset)
     })
     .placeholder("Custom")
-    .width(Length::Fixed(
-        (available_width - FIXED_W).clamp(72.0, 220.0),
-    ))
-    .padding([2, 5])
+    .width(Length::Fixed(selector_width))
+    .padding([4, 8])
     .text_size(11)
-    .style(selector_style(accent))
+    .style(control_style::list(accent))
     .menu_style(menu_style(accent));
-    let mut selection = row![text("Preset").size(10).color(th::text_dim()), selector,]
-        .spacing(3)
-        .align_y(iced::Alignment::Center);
-    selection = selection
-        .push(preset_button(
+    row![
+        selector,
+        tiny_button(
             crate::icons::CHEVRON_LEFT,
             "Previous preset",
             previous,
-            accent,
-        ))
-        .push(preset_button(
+            None,
+            accent
+        ),
+        tiny_button(
             crate::icons::CHEVRON_RIGHT,
             "Next preset",
             next,
-            accent,
-        ));
-    let files = row![
-        preset_button(
+            None,
+            accent
+        ),
+        tiny_button(
             crate::icons::FOLDER_OPEN,
             "Load preset file",
             Some(Message::DevicePreset(DevicePresetMsg::Load(track_id, slot))),
+            None,
             accent
         ),
-        preset_button(
+        tiny_button(
             crate::icons::SAVE,
             "Save preset file",
             Some(Message::DevicePreset(DevicePresetMsg::Save(track_id, slot))),
+            None,
             accent
         ),
     ]
-    .spacing(3)
-    .align_y(iced::Alignment::Center);
-    row![selection, files]
-        .spacing(6)
-        .align_y(iced::Alignment::Center)
-        .into()
-}
-
-fn preset_button<'a>(
-    icon: char,
-    help: &'static str,
-    message: Option<Message>,
-    accent: Color,
-) -> Element<'a, Message> {
-    let control = button(crate::icons::icon(icon).size(11))
-        .on_press_maybe(message)
-        .padding([3, 6])
-        .style(move |_theme: &Theme, status| button::Style {
-            background: Some(th::bg_surface().into()),
-            text_color: if matches!(status, button::Status::Hovered | button::Status::Pressed) {
-                accent
-            } else {
-                th::text_dim()
-            },
-            border: iced::Border {
-                color: th::border(),
-                width: 1.0,
-                radius: 3.0.into(),
-            },
-            ..Default::default()
-        });
-    tooltip(control, text(help).size(9), tooltip::Position::Top).into()
-}
-
-fn selector_style(accent: Color) -> impl Fn(&Theme, pick_list::Status) -> pick_list::Style {
-    move |_theme: &Theme, status| pick_list::Style {
-        text_color: th::text(),
-        placeholder_color: th::text_dim(),
-        handle_color: th::text_dim(),
-        background: th::bg_dark().into(),
-        border: iced::Border {
-            color: if matches!(
-                status,
-                pick_list::Status::Opened | pick_list::Status::Hovered
-            ) {
-                accent
-            } else {
-                th::border()
-            },
-            width: 1.0,
-            radius: 3.0.into(),
-        },
-    }
+    .spacing(2)
+    .align_y(iced::Alignment::Center)
+    .into()
 }
 
 fn menu_style(accent: Color) -> impl Fn(&Theme) -> iced::widget::overlay::menu::Style {
@@ -212,23 +162,25 @@ pub(crate) fn kit_bar<'a>(
     .width(Length::Fixed(
         (available_width - KIT_FIXED_W).clamp(72.0, 220.0),
     ))
-    .padding([2, 5])
+    .padding([4, 8])
     .text_size(11)
-    .style(selector_style(accent))
+    .style(control_style::list(accent))
     .menu_style(menu_style(accent));
     row![
         text("Kit").size(10).color(th::text_dim()),
         selector,
-        preset_button(
+        tiny_button(
             crate::icons::FOLDER_OPEN,
             "Open kit folder",
             Some(Message::OpenDrumKit(track_id)),
+            None,
             accent
         ),
-        preset_button(
+        tiny_button(
             crate::icons::SAVE,
             "Save kit folder",
             Some(Message::SaveDrumKit(track_id)),
+            None,
             accent
         ),
     ]
@@ -238,4 +190,4 @@ pub(crate) fn kit_bar<'a>(
 }
 
 /// The label and two icon buttons with their spacing.
-const KIT_FIXED_W: f32 = 80.0;
+const KIT_FIXED_W: f32 = 72.0;

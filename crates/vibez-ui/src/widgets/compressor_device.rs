@@ -16,13 +16,11 @@ use crate::state::UiEffect;
 use crate::theme as th;
 use crate::widgets::compressor_display::{ReductionHistory, ReductionMeter, TransferPlot};
 use crate::widgets::device_controls::{
-    disclosure, heading, level_column, plot_band, rule, segmented, vertical_rule, Param,
-    LABEL_SIZE, METER_W,
+    heading, level_column, plot_band, rule, segmented, vertical_rule, Param, LABEL_SIZE, METER_W,
 };
 use crate::widgets::device_layout::{stack, KNOB_ROW_H};
 
 const PAD: f32 = 10.0;
-const PRESET_ROW_H: f32 = 28.0;
 const KNOB: f32 = 32.0;
 const KNOB_COL_W: f32 = 68.0;
 const PLOT_MIN_H: f32 = 72.0;
@@ -79,7 +77,7 @@ pub struct Arrangement {
 }
 
 pub fn arrange(size: Size, advanced: bool) -> Arrangement {
-    let below = (size.height - PRESET_ROW_H - 1.0).max(0.0);
+    let below = size.height.max(0.0);
     let knobs = if size.width >= FULL_W {
         Knobs::All
     } else if size.width >= MEDIUM_W {
@@ -104,10 +102,6 @@ pub fn arrange(size: Size, advanced: bool) -> Arrangement {
     }
 }
 
-pub fn preset_bar_width(size: Size) -> f32 {
-    size.width - PAD * 2.0 - 90.0
-}
-
 pub struct CompressorView<'a> {
     pub track_id: TrackId,
     pub effect: &'a UiEffect,
@@ -129,22 +123,9 @@ impl<'a> CompressorView<'a> {
         Param::new(self.track_id, self.effect, index, self.accent(), self.entry)
     }
 
-    pub fn view(self, preset_bar: Element<'a, Message>, size: Size) -> Element<'a, Message> {
+    pub fn view(self, size: Size) -> Element<'a, Message> {
         let layout = arrange(size, self.panel.advanced);
-        let top = row![
-            preset_bar,
-            Space::with_width(Length::Fill),
-            self.disclosure()
-        ]
-        .spacing(6)
-        .align_y(Alignment::Center);
-        let mut body = column![
-            container(top)
-                .padding([0.0, PAD])
-                .height(PRESET_ROW_H)
-                .align_y(Alignment::Center),
-            rule(),
-        ];
+        let mut body = column![];
         if layout.advanced_only {
             let height = layout.advanced.unwrap_or(0.0);
             body = body.push(self.advanced(layout, height));
@@ -483,8 +464,9 @@ impl<'a> CompressorView<'a> {
         .into()
     }
 
-    fn disclosure(&self) -> Element<'a, Message> {
-        disclosure(
+    /// The card header's Advanced switch.
+    pub fn advanced_switch(&self) -> crate::widgets::device_chrome::Action {
+        crate::widgets::device_chrome::advanced(
             self.panel.advanced,
             Message::Compressor(CompressorMsg::ToggleAdvanced(self.effect.id)),
             self.accent(),
@@ -498,7 +480,7 @@ mod tests {
     use crate::widgets::device_layout::LINE_H;
 
     fn used(layout: Arrangement) -> f32 {
-        let mut used = PRESET_ROW_H + 1.0;
+        let mut used = 0.0;
         if layout.advanced_only {
             return used + layout.advanced.unwrap();
         }
@@ -553,12 +535,12 @@ mod tests {
 
     #[test]
     fn short_cards_drop_the_plots_before_the_knobs() {
-        let short = arrange(Size::new(FULL_W, 120.0), false);
+        let short = arrange(Size::new(FULL_W, 91.0), false);
         assert_eq!(short.plots, 0.0);
         assert_eq!(short.knob_row, KNOB_ROW_H);
-        let shortest = arrange(Size::new(FULL_W, 70.0), false);
+        let shortest = arrange(Size::new(FULL_W, 41.0), false);
         assert_eq!(shortest.knob_row, LINE_H);
-        assert!(arrange(Size::new(COMPACT_W, 150.0), true).advanced_only);
+        assert!(arrange(Size::new(COMPACT_W, 121.0), true).advanced_only);
     }
 
     #[test]

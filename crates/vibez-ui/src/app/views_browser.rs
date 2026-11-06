@@ -1,9 +1,8 @@
 //! Split out of app.rs; inherent methods on [`super::App`].
 
-use iced::widget::{
-    button, column, container, horizontal_space, mouse_area, row, scrollable, text, text_input,
-};
-use iced::{Element, Length, Theme};
+use iced::widget::text_input;
+use iced::widget::{button, column, container, horizontal_space, mouse_area, row, text};
+use iced::{Element, Length};
 
 use crate::domains::browser::BrowserMsg;
 use crate::icons;
@@ -25,106 +24,78 @@ impl App {
             .browser
             .places_pane_width(self.state.view.window_width);
 
-        let close = button(icons::icon(icons::X).size(11).color(th::text_dim()))
+        let close = button(icons::icon(icons::X).size(12))
             .on_press(Message::Browser(BrowserMsg::ToggleSampleBrowser))
-            .padding([3, 6])
+            .padding([4, 6])
             .style(browser_icon_button_style);
-
-        let title_row = row![
-            text("BROWSER").size(12).color(th::text()),
-            horizontal_space(),
-            close
-        ]
-        .spacing(5)
-        .align_y(iced::Alignment::Center);
-
-        let search = text_input("Search this location…", &self.state.browser.search)
-            .on_input(|value| Message::Browser(BrowserMsg::SampleBrowserSearchChanged(value)))
-            .size(12)
-            .padding([7, 9])
-            .width(Length::Fill)
-            .style(|_theme: &Theme, _status| iced::widget::text_input::Style {
-                background: th::bg_dark().into(),
-                border: iced::Border {
-                    color: th::border(),
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                icon: th::text_dim(),
-                placeholder: th::text_dim(),
-                value: th::text(),
-                selection: th::accent(),
-            });
-
-        let search_context: Element<'_, Message> = match self.state.browser.mode {
-            SampleBrowserMode::Local => {
-                let scope = button(
-                    row![
-                        text("SCOPE").size(9).color(th::text_muted()),
-                        text(self.state.browser.search_scope_label())
-                            .size(9)
-                            .color(th::text())
-                    ]
-                    .spacing(5)
-                    .align_y(iced::Alignment::Center),
-                )
-                .on_press(Message::Browser(BrowserMsg::CycleSearchScope))
-                .padding([3, 0])
-                .style(browser_utility_action_style);
-                let location = self
-                    .state
+        let (scope_label, location) = match self.state.browser.mode {
+            SampleBrowserMode::Local => (
+                self.state.browser.search_scope_label(),
+                self.state
                     .browser
                     .current_folder
                     .as_ref()
                     .and_then(|folder| folder.file_name())
                     .map(|name| name.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| "All Roots".into());
-                row![
-                    scope,
-                    horizontal_space(),
-                    text(location)
-                        .size(9)
-                        .color(th::text_dim())
-                        .wrapping(iced::widget::text::Wrapping::None)
-                ]
-                .align_y(iced::Alignment::Center)
-                .into()
-            }
-            SampleBrowserMode::Remote => {
-                let scope_label = match self.state.browser.search_scope {
+                    .unwrap_or_else(|| "All Roots".into()),
+            ),
+            SampleBrowserMode::Remote => (
+                match self.state.browser.search_scope {
                     crate::state::BrowserSearchScope::SelectedFolder => "THIS FOLDER",
                     crate::state::BrowserSearchScope::Root => "THIS CONNECTION",
                     crate::state::BrowserSearchScope::Everywhere => "EVERYWHERE",
-                };
-                let location = self
-                    .state
+                },
+                self.state
                     .browser
                     .remote
                     .current_path
                     .rsplit('/')
                     .find(|part| !part.is_empty())
-                    .unwrap_or(crate::remote_provider::DROPBOX_CONNECTION_NAME);
-                row![
-                    button(
-                        row![
-                            text("SCOPE").size(9).color(th::text_muted()),
-                            text(scope_label).size(9).color(th::text())
-                        ]
-                        .spacing(5)
-                    )
-                    .on_press(Message::Browser(BrowserMsg::CycleSearchScope))
-                    .padding([3, 0])
-                    .style(browser_utility_action_style),
-                    horizontal_space(),
-                    text(location)
-                        .size(9)
-                        .color(th::text_dim())
-                        .wrapping(iced::widget::text::Wrapping::None)
-                ]
-                .align_y(iced::Alignment::Center)
-                .into()
-            }
+                    .unwrap_or(crate::remote_provider::DROPBOX_CONNECTION_NAME)
+                    .to_string(),
+            ),
         };
+        let scope = button(
+            text(scope_label)
+                .size(9.5)
+                .font(iced::Font {
+                    weight: iced::font::Weight::Bold,
+                    ..iced::Font::DEFAULT
+                })
+                .color(th::text_muted()),
+        )
+        .on_press(Message::Browser(BrowserMsg::CycleSearchScope))
+        .padding([4, 6])
+        .style(browser_utility_action_style);
+
+        let title_row = row![
+            text("Browser")
+                .size(12)
+                .font(iced::Font {
+                    weight: iced::font::Weight::Semibold,
+                    ..iced::Font::DEFAULT
+                })
+                .color(th::text()),
+            horizontal_space(),
+            scope,
+            close
+        ]
+        .spacing(4)
+        .align_y(iced::Alignment::Center);
+
+        let search = text_input(&format!("Search {location}"), &self.state.browser.search)
+            .on_input(|value| Message::Browser(BrowserMsg::SampleBrowserSearchChanged(value)))
+            .icon(text_input::Icon {
+                font: icons::ICON_FONT,
+                code_point: icons::SEARCH,
+                size: Some(13.0.into()),
+                spacing: 7.0,
+                side: text_input::Side::Left,
+            })
+            .size(12)
+            .padding([7, 10])
+            .width(Length::Fill)
+            .style(browser_search_style);
 
         let body: Element<'_, Message> = match self.state.browser.mode {
             SampleBrowserMode::Local
@@ -141,34 +112,28 @@ impl App {
         let content: Element<'_, Message> = row![
             container(self.view_browser_places())
                 .width(Length::Fixed(places_width))
-                .height(Length::Fill)
-                .style(browser_places_style),
+                .height(Length::Fill),
+            browser_column_rule(),
             body
         ]
         .height(Length::Fill)
         .into();
 
-        let panel = container(
+        let panel = crate::widgets::shell_card::shell_card(
             column![
-                container(column![title_row, search, search_context].spacing(6))
-                    .padding([8, 10])
-                    .style(browser_header_style),
+                container(column![title_row, search].spacing(8)).padding(iced::Padding {
+                    top: 10.0,
+                    right: 10.0,
+                    bottom: 6.0,
+                    left: 10.0,
+                }),
                 content,
                 self.view_browser_audition_footer()
             ]
             .height(Length::Fill),
         )
         .width(Length::Fixed(width))
-        .height(Length::Fill)
-        .style(|_theme: &Theme| container::Style {
-            background: Some(th::bg_surface().into()),
-            border: iced::Border {
-                color: th::border(),
-                width: 1.0,
-                radius: 0.0.into(),
-            },
-            ..Default::default()
-        });
+        .height(Length::Fill);
         crate::widgets::on_blur::on_blur(
             panel,
             self.state.browser.keyboard_focus,
@@ -193,7 +158,7 @@ impl App {
                 .style(browser_transport_button_style);
             return container(
                 column![
-                    text("RESULTS").size(9).color(th::text_muted()),
+                    browser_caption("RESULTS"),
                     text("Your Local Place is empty").size(13).color(th::text()),
                     text("Choose a folder to begin indexing supported audio.")
                         .size(11)
@@ -205,7 +170,6 @@ impl App {
             )
             .width(Length::Fill)
             .height(Length::Fill)
-            .style(browser_results_style)
             .into();
         }
 
@@ -272,7 +236,6 @@ impl App {
                 left: 10.0,
             })
             .width(Length::Fill)
-            .style(browser_table_header_style)
             .into()
         } else {
             container(
@@ -296,14 +259,13 @@ impl App {
                 left: 10.0,
             })
             .width(Length::Fill)
-            .style(browser_table_header_style)
             .into()
         };
         let total_results =
             root_results.len() + local_results.folders.len() + local_results.entries.len();
         let visible_results = self.state.browser.visible_result_count(total_results);
         let mut remaining = visible_results;
-        let mut entries_col = column![].spacing(1);
+        let mut entries_col = column![].spacing(2);
 
         let notice = self
             .state
@@ -345,33 +307,24 @@ impl App {
         }
 
         for root in root_results.into_iter().take(remaining) {
-            entries_col = entries_col
-                .push(self.view_local_folder_result(
-                    browser_root_name(root),
-                    format!("LOCAL ROOT · {}", root.display()),
-                    self.state.browser.root_catalog_label(root).to_string(),
-                    root.clone(),
-                    wide_columns,
-                ))
-                .push(browser_row_divider());
+            entries_col = entries_col.push(self.view_local_folder_result(
+                browser_root_name(root),
+                format!("LOCAL ROOT · {}", root.display()),
+                self.state.browser.root_catalog_label(root).to_string(),
+                root.clone(),
+                wide_columns,
+            ));
             remaining = remaining.saturating_sub(1);
         }
         for &index in local_results.folders.iter().take(remaining) {
             let folder = &self.state.browser.folders[index];
-            entries_col = entries_col
-                .push(self.view_local_folder_result(
-                    folder.name.clone(),
-                    browser_folder_context(
-                        &folder.root_path,
-                        &folder.relative_path,
-                        "FOLDER",
-                        None,
-                    ),
-                    "FOLDER".into(),
-                    folder.path.clone(),
-                    wide_columns,
-                ))
-                .push(browser_row_divider());
+            entries_col = entries_col.push(self.view_local_folder_result(
+                folder.name.clone(),
+                browser_folder_context(&folder.root_path, &folder.relative_path, "FOLDER", None),
+                "FOLDER".into(),
+                folder.path.clone(),
+                wide_columns,
+            ));
             remaining = remaining.saturating_sub(1);
         }
         for &index in local_results.entries.iter().take(remaining) {
@@ -453,7 +406,13 @@ impl App {
                 .align_y(iced::Alignment::Center)
                 .into()
             };
-            let entry_body = container(table_cells).padding([6, 8]).width(Length::Fill);
+            let entry_body = container(
+                row![browser_result_icon(false, selected), table_cells]
+                    .spacing(9)
+                    .align_y(iced::Alignment::Center),
+            )
+            .padding([6, 8])
+            .width(Length::Fill);
             let entry_dragger: Element<'_, Message> = mouse_area(entry_body)
                 .on_press(Message::BeginPendingBrowserDrag(
                     entry.source.clone(),
@@ -461,24 +420,7 @@ impl App {
                 ))
                 .on_release(Message::ClickLocalBrowserEntry(entry.source.clone()))
                 .into();
-            let selection_marker = container(text(""))
-                .width(Length::Fixed(2.0))
-                .height(Length::Fixed(43.0))
-                .style(move |_theme: &Theme| container::Style {
-                    background: selected.then(|| th::accent().into()),
-                    ..Default::default()
-                });
-            let flat_row = container(
-                row![selection_marker, entry_dragger]
-                    .spacing(0)
-                    .align_y(iced::Alignment::Center),
-            )
-            .width(Length::Fill)
-            .style(move |_theme: &Theme| container::Style {
-                background: selected.then(|| th::accent_dim().into()),
-                ..Default::default()
-            });
-            entries_col = entries_col.push(flat_row).push(browser_row_divider());
+            entries_col = entries_col.push(browser_result_row(entry_dragger, selected));
         }
 
         if total_results == 0 && notice.is_none() {
@@ -498,7 +440,7 @@ impl App {
 
         if self.state.browser.has_more_results(total_results) {
             let hidden = total_results.saturating_sub(visible_results);
-            entries_col = entries_col.push(browser_row_divider()).push(
+            entries_col = entries_col.push(
                 button(
                     text(format!(
                         "SHOW {} MORE",
@@ -530,17 +472,17 @@ impl App {
         container(
             column![
                 row![
-                    text("RESULTS").size(9).color(th::text_muted()),
+                    browser_caption("RESULTS"),
                     horizontal_space(),
                     text(count).size(9).color(th::text_dim())
                 ]
                 .align_y(iced::Alignment::Center),
                 table_header,
-                scrollable(
+                crate::widgets::quiet_scroll::vertical(
                     container(entries_col)
                         .width(Length::Fill)
                         .padding(iced::Padding {
-                            right: 12.0,
+                            right: 8.0,
                             ..Default::default()
                         })
                 )
@@ -548,15 +490,18 @@ impl App {
                     SampleBrowserMode::Local,
                 ))
                 .height(Length::Fill)
-                .direction(scrollable::Direction::Vertical(browser_vertical_scrollbar()))
             ]
             .spacing(0)
-            .padding(8)
+            .padding(iced::Padding {
+                top: 0.0,
+                right: 8.0,
+                bottom: 8.0,
+                left: 8.0,
+            })
             .height(Length::Fill),
         )
         .width(Length::Fill)
         .height(Length::Fill)
-        .style(browser_results_style)
         .into()
     }
 
@@ -569,7 +514,7 @@ impl App {
         wide_columns: bool,
     ) -> Element<'_, Message> {
         let name_cell = column![
-            text(format!("› {name}"))
+            text(name)
                 .size(12)
                 .color(th::text())
                 .width(Length::Fill)
@@ -615,13 +560,21 @@ impl App {
             .into()
         };
 
-        button(container(cells).padding([6, 8]).width(Length::Fill))
-            .on_press(Message::Browser(BrowserMsg::SelectLocalFolder(Some(
-                destination,
-            ))))
-            .padding(0)
-            .width(Length::Fill)
-            .style(browser_utility_action_style)
-            .into()
+        button(
+            container(
+                row![browser_result_icon(true, false), cells]
+                    .spacing(9)
+                    .align_y(iced::Alignment::Center),
+            )
+            .padding([6, 8])
+            .width(Length::Fill),
+        )
+        .on_press(Message::Browser(BrowserMsg::SelectLocalFolder(Some(
+            destination,
+        ))))
+        .padding(0)
+        .width(Length::Fill)
+        .style(|_theme: &iced::Theme, status| browser_place_button_style(false, status))
+        .into()
     }
 }

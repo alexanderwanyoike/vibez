@@ -50,14 +50,11 @@ impl App {
         track_color: Color,
     ) -> Element<'_, Message> {
         let playhead_samples = self.detail_playhead_samples();
-        let playhead_normalized = playhead_samples
+        let playhead_frame = playhead_samples
             .filter(|playhead| {
-                clip.duration > 0
-                    && *playhead >= clip.position
-                    && *playhead < clip.position + clip.duration
+                *playhead >= clip.position && *playhead < clip.position + clip.duration
             })
-            .map(|playhead| (playhead - clip.position) as f64 / clip.duration as f64)
-            .unwrap_or(-1.0);
+            .map(|playhead| playhead - clip.position);
 
         let waveform_widget = AudioClipDetailWidget {
             location: self.active_timeline_location(),
@@ -69,12 +66,14 @@ impl App {
             start_marker: clip.start_marker,
             sample_rate: clip.audio.sample_rate,
             bpm: self.state.transport.bpm,
-            grid: self.state.view.grid_config(),
+            grid: self.state.view.clip_grid,
             track_color,
-            playhead_normalized,
+            playhead_frame,
             loop_enabled: clip.loop_enabled,
             loop_start: clip.loop_start,
             loop_end: clip.loop_end,
+            loop_content_end: clip.loop_content_end(),
+            editor_frames: clip.editor_frames(),
             playback_direction: clip.playback_direction,
             transient_markers: clip.transient_markers.clone(),
             selected_transient_marker: self
@@ -94,6 +93,7 @@ impl App {
                     *selected_track == track_id && *selected_clip == clip.id
                 })
                 .map(|(_, _, source_frame)| source_frame),
+            view: self.state.view.clip_editor_view(clip.id),
         };
 
         let waveform_canvas: Element<'_, Message> = canvas(waveform_widget)
@@ -116,10 +116,16 @@ impl App {
             clip.warp_markers.interior().len(),
         ))
         .size(8)
-        .color(th::text_muted());
-        let header_row = row![label, marker_summary, horizontal_space(), clip_info]
-            .spacing(4)
-            .align_y(iced::Alignment::Center);
+        .color(th::text_dim());
+        let header_row = row![
+            label,
+            marker_summary,
+            horizontal_space(),
+            clip_info,
+            self.clip_grid_snap_list()
+        ]
+        .spacing(4)
+        .align_y(iced::Alignment::Center);
 
         let sample_rate = f64::from(clip.audio.sample_rate.max(1));
         let source_start = clip.source_offset as f64 / sample_rate;
@@ -161,7 +167,7 @@ impl App {
             container(
                 row![
                     column![
-                        text(label_text).size(8).color(th::text_muted()),
+                        text(label_text).size(8).color(th::text_dim()),
                         row![
                             self.view_audio_clip_field_input(
                                 track_id,
@@ -292,7 +298,7 @@ impl App {
                 .size(13)
                 .color(track_color),
             column![
-                text("AUDIO CLIP").size(8).color(th::text_muted()),
+                text("AUDIO CLIP").size(8).color(th::text_dim()),
                 text(clip.name.clone())
                     .size(11)
                     .color(th::text())
@@ -305,7 +311,7 @@ impl App {
         .align_y(iced::Alignment::Center);
         let source_bounds = column![
             row![
-                text("SOURCE").size(8).color(th::text_muted()),
+                text("SOURCE").size(8).color(th::text_dim()),
                 horizontal_space(),
                 {
                     let reversed = clip.playback_direction
@@ -410,7 +416,7 @@ impl App {
         ]
         .spacing(3);
         let fade_bounds = column![
-            text("FADES").size(8).color(th::text_muted()),
+            text("FADES").size(8).color(th::text_dim()),
             range_row(
                 "FADE IN",
                 AudioClipInspectorField::FadeIn,
@@ -621,7 +627,7 @@ impl App {
             .spacing(6)
             .align_y(iced::Alignment::Center),
             row![
-                text("SOURCE BPM").size(8).color(th::text_muted()),
+                text("SOURCE BPM").size(8).color(th::text_dim()),
                 horizontal_space(),
                 bpm_input,
                 detect_btn,

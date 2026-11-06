@@ -1,8 +1,8 @@
 //! Clip Project creation and grid authoring use the shared Vibez shell.
 
 use iced::widget::{
-    button, canvas, center, column, container, horizontal_space, mouse_area, pick_list, row,
-    scrollable, stack, text, text_input, tooltip,
+    button, canvas, center, column, container, horizontal_space, mouse_area, pick_list, row, stack,
+    text, text_input, tooltip,
 };
 use iced::{Color, Element, Length, Theme};
 use vibez_project::PerformLayout;
@@ -13,6 +13,7 @@ use crate::icons;
 use crate::message::Message;
 use crate::theme as th;
 use crate::typography::{PERFORM_DISPLAY, PERFORM_LABEL, PERFORM_TECH};
+use crate::widgets::control_style;
 
 use super::App;
 
@@ -48,6 +49,64 @@ fn choice_style(selected: bool, status: button::Status) -> button::Style {
         },
         ..Default::default()
     }
+}
+
+/// A selected Clip's launch option: its Track's, shown with the value it
+/// resolves to, or its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ClipLaunchChoice<T> {
+    Track(T),
+    Own(T),
+}
+
+impl<T: std::fmt::Display> std::fmt::Display for ClipLaunchChoice<T> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Track(value) => write!(formatter, "Track ({value})"),
+            Self::Own(value) => write!(formatter, "{value}"),
+        }
+    }
+}
+
+fn clip_launch_picker<'a, T>(
+    track: T,
+    own: Option<T>,
+    all: impl IntoIterator<Item = T>,
+    on_select: impl Fn(Option<T>) -> Message + 'a,
+) -> Element<'a, Message>
+where
+    T: Copy + PartialEq + std::fmt::Display + 'static,
+{
+    let track = ClipLaunchChoice::Track(track);
+    let mut choices = vec![track];
+    choices.extend(all.into_iter().map(ClipLaunchChoice::Own));
+    let selected = own.map_or(track, ClipLaunchChoice::Own);
+    pick_list(choices, Some(selected), move |choice| {
+        on_select(match choice {
+            ClipLaunchChoice::Track(_) => None,
+            ClipLaunchChoice::Own(value) => Some(value),
+        })
+    })
+    .text_size(10)
+    .padding([3, 6])
+    .style(control_style::list(th::accent()))
+    .into()
+}
+
+fn track_launch_picker<'a, T, L>(
+    all: L,
+    selected: T,
+    on_select: impl Fn(T) -> Message + 'a,
+) -> Element<'a, Message>
+where
+    T: Clone + PartialEq + std::fmt::Display + 'static,
+    L: std::borrow::Borrow<[T]> + 'a,
+{
+    pick_list(all, Some(selected), on_select)
+        .text_size(9)
+        .padding([1, 4])
+        .style(control_style::list(th::accent()))
+        .into()
 }
 
 pub(super) const MIN_CLIP_DOCK_WIDTH: f32 = 900.0;
@@ -156,7 +215,7 @@ impl App {
     }
 
     pub(super) fn view_clip_perform(&self) -> Element<'_, Message> {
-        let width = self.perform_workspace_width();
+        let width = self.browser_workspace_width();
         let content = if self.state.perform.mode == PerformMode::Sections {
             self.view_clip_grid(width)
         } else {
@@ -166,9 +225,8 @@ impl App {
                 dock_width,
             );
             let pad_width = self.clip_pad_surface_width(pad_width);
-            let grid_width =
-                dock_width - pad_width - super::views_shell::HORIZONTAL_PANE_SPLITTER_WIDTH;
-            scrollable::Scrollable::with_direction(
+            let grid_width = dock_width - pad_width - crate::shell_layout::PANE_GAP;
+            crate::widgets::quiet_scroll::horizontal(
                 row![
                     self.view_pad_surface(pad_width),
                     self.view_perform_surface_splitter(),
@@ -176,24 +234,15 @@ impl App {
                 ]
                 .width(dock_width)
                 .height(Length::Fill),
-                scrollable::Direction::Horizontal(scrollable::Scrollbar::default()),
             )
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
         };
-        container(column![
-            self.view_perform_mode_selector(width),
-            self.view_clip_record_controls(),
-            content
-        ])
-        .width(Length::Fill)
-        .height(Length::FillPortion(5))
-        .style(surface)
-        .into()
+        self.perform_cards(self.clip_record_group(), content)
     }
 
-    fn view_clip_record_controls(&self) -> Element<'_, Message> {
+    fn clip_record_group(&self) -> super::views_perform_header::RecordGroup<'_> {
         use crate::domains::perform::clip_record::{ClipRecordMsg, RecordLength};
         use crate::domains::perform::loop_record::{
             LoopRecordCountIn, LoopRecordMode, LoopRecordQuantization,
@@ -219,51 +268,117 @@ impl App {
                 )
             })
             .unwrap_or_else(|| "Record inside a cell".into());
-        let controls = row![
+        let controls: Vec<Element<'_, Message>> = vec![
             text("NEW CLIP")
                 .font(PERFORM_TECH)
                 .size(9)
-                .color(th::text_dim()),
-            pick_list(RecordLength::ALL, Some(record.length), move |v| msg(
-                ClipRecordMsg::SetLength(v)
-            ))
-            .text_size(10)
-            .padding([4, 6]),
+                .color(th::text_dim())
+                .into(),
+            pick_list(RecordLength::ALL, Some(record.length), move |v| {
+                msg(ClipRecordMsg::SetLength(v))
+            })
+            .text_size(9)
+            .padding(super::views_perform_record::RECORD_CONTROL_PADDING)
+            .style(control_style::list(th::accent()))
+            .into(),
             pick_list(
                 LoopRecordCountIn::ALL,
                 Some(record.notes.count_in),
-                move |v| msg(ClipRecordMsg::SetCountIn(v))
+                move |v| msg(ClipRecordMsg::SetCountIn(v)),
             )
-            .text_size(10)
-            .padding([4, 6]),
+            .text_size(9)
+            .padding(super::views_perform_record::RECORD_CONTROL_PADDING)
+            .style(control_style::list(th::accent()))
+            .into(),
             text("MIDI")
                 .font(PERFORM_TECH)
                 .size(9)
-                .color(th::text_dim()),
-            pick_list(LoopRecordMode::ALL, Some(record.notes.mode), move |v| msg(
-                ClipRecordMsg::SetMode(v)
-            ))
-            .text_size(10)
-            .padding([4, 6]),
+                .color(th::text_dim())
+                .into(),
+            pick_list(LoopRecordMode::ALL, Some(record.notes.mode), move |v| {
+                msg(ClipRecordMsg::SetMode(v))
+            })
+            .text_size(9)
+            .padding(super::views_perform_record::RECORD_CONTROL_PADDING)
+            .style(control_style::list(th::accent()))
+            .into(),
             pick_list(
                 LoopRecordQuantization::ALL,
                 Some(record.notes.quantization),
-                move |v| msg(ClipRecordMsg::SetQuantization(v))
+                move |v| msg(ClipRecordMsg::SetQuantization(v)),
             )
-            .text_size(10)
-            .padding([4, 6]),
-            text(status)
+            .text_size(9)
+            .padding(super::views_perform_record::RECORD_CONTROL_PADDING)
+            .style(control_style::list(th::accent()))
+            .into(),
+        ];
+        super::views_perform_header::RecordGroup {
+            status: text(status)
                 .font(PERFORM_TECH)
                 .size(9)
+                .wrapping(iced::widget::text::Wrapping::None)
                 .color(if record.is_active() {
                     th::danger()
                 } else {
                     th::text_dim()
-                }),
+                })
+                .into(),
+            controls,
+        }
+    }
+
+    fn view_selected_clip_launch_options(&self) -> Element<'_, Message> {
+        let clips = &self.state.perform.clips;
+        let Some(clip) = self
+            .state
+            .perform
+            .clip_editor
+            .selected
+            .and_then(|id| clips.by_id(id))
+        else {
+            return iced::widget::Space::new(0, 0).into();
+        };
+        let clip_id = clip.id;
+        row![
+            container(
+                text(clip.name())
+                    .size(10)
+                    .color(th::text())
+                    .wrapping(iced::widget::text::Wrapping::None),
+            )
+            .max_width(140)
+            .clip(true),
+            text("LAUNCH")
+                .font(PERFORM_TECH)
+                .size(9)
+                .color(th::text_dim()),
+            clip_launch_picker(
+                clips.launch_mode(clip.track_id),
+                clip.launch.mode,
+                vibez_core::perform::ClipLaunchMode::ALL,
+                move |mode| {
+                    Message::Perform(PerformMsg::Clips(ClipMsg::SetClipLaunchMode {
+                        clip_id,
+                        mode,
+                    }))
+                },
+            ),
+            clip_launch_picker(
+                clips.launch_quantization(clip.track_id),
+                clip.launch.quantization,
+                vibez_core::perform::MusicalBoundary::ALL,
+                move |quantization| {
+                    Message::Perform(PerformMsg::Clips(ClipMsg::SetClipLaunchQuantization {
+                        clip_id,
+                        quantization,
+                    }))
+                },
+            ),
         ]
-        .spacing(8)
-        .align_y(iced::Alignment::Center);
-        container(controls).padding([5, 12]).into()
+        .spacing(6)
+        .padding([0, 10])
+        .align_y(iced::Alignment::Center)
+        .into()
     }
 
     fn view_clip_grid(&self, width: f32) -> Element<'_, Message> {
@@ -282,7 +397,7 @@ impl App {
                     rows,
                 })))
                 .padding([6, 10])
-                .style(|_theme, status| choice_style(false, status))
+                .style(control_style::style(None))
         };
         let heading = row![
             text(if width < 780.0 { "" } else { "CLIPS" })
@@ -298,6 +413,7 @@ impl App {
             .font(PERFORM_TECH)
             .size(9)
             .color(th::text_dim()),
+            self.view_selected_clip_launch_options(),
             horizontal_space(),
         ]
         .spacing(6)
@@ -305,15 +421,15 @@ impl App {
         let actions = row![
             button(text("+ Audio").size(11))
                 .padding([6, 10])
-                .style(|_theme, status| choice_style(false, status))
+                .style(control_style::style(None))
                 .on_press(Message::Arrangement(ArrangementMsg::AddTrack)),
             button(text("+ MIDI").size(11))
                 .padding([6, 10])
-                .style(|_theme, status| choice_style(false, status))
+                .style(control_style::style(None))
                 .on_press(Message::Arrangement(ArrangementMsg::AddMidiTrack)),
             button(text(if width < 780.0 { "■" } else { "Stop clips" }).size(11))
                 .padding([6, 10])
-                .style(|_theme, status| choice_style(false, status))
+                .style(control_style::style(None))
                 .on_press(Message::Perform(PerformMsg::Clips(ClipMsg::StopAll))),
             move_window("←", -4, 0),
             move_window("→", 4, 0),
@@ -372,7 +488,10 @@ impl App {
                             .size(10)
                             .color(th::text_dim()),
                     )
-                    .padding([if compact { 3 } else { 8 }, 0])
+                    .padding(iced::Padding {
+                        top: crate::widgets::clip_slot::BUTTON_INSET,
+                        ..Default::default()
+                    })
                     .height(slot_height),
                 );
             }
@@ -400,22 +519,58 @@ impl App {
                         .height(20)
                         .into()
                     };
-                let mut header = column![track_name].spacing(3);
-                if !compact {
-                    header = header.push(
-                        text(if track.kind.is_midi() {
-                            "MIDI"
-                        } else {
-                            "AUDIO"
-                        })
-                        .font(PERFORM_TECH)
-                        .size(9)
-                        .color(th::text_dim()),
-                    );
-                }
-                let mut lane = column![container(header).padding([3, 8]).height(header_height)]
-                    .spacing(0)
-                    .width(Length::Fixed(lane_width));
+                let track_id = track.id;
+                let clips = &self.state.perform.clips;
+                let launch = track_launch_picker(
+                    vibez_core::perform::MusicalBoundary::ALL,
+                    clips.launch_quantization(track_id),
+                    move |quantization| {
+                        Message::Perform(PerformMsg::Clips(ClipMsg::SetLaunchQuantization {
+                            track_id,
+                            quantization,
+                        }))
+                    },
+                );
+                let mode = track_launch_picker(
+                    vibez_core::perform::ClipLaunchMode::ALL,
+                    clips.launch_mode(track_id),
+                    move |mode| {
+                        Message::Perform(PerformMsg::Clips(ClipMsg::SetLaunchMode {
+                            track_id,
+                            mode,
+                        }))
+                    },
+                );
+                let header = if compact {
+                    column![row![track_name, mode, launch]
+                        .spacing(4)
+                        .align_y(iced::Alignment::Center)]
+                } else {
+                    column![
+                        track_name,
+                        row![
+                            text(track.kind.label())
+                                .font(PERFORM_TECH)
+                                .size(9)
+                                .color(th::text_dim()),
+                            horizontal_space(),
+                            text("LAUNCH")
+                                .font(PERFORM_TECH)
+                                .size(9)
+                                .color(th::text_dim()),
+                            mode,
+                            launch,
+                        ]
+                        .spacing(4)
+                        .align_y(iced::Alignment::Center)
+                    ]
+                    .spacing(3)
+                };
+                let mut lane = column![container(header)
+                    .padding([3.0, crate::widgets::clip_slot::TILE_GAP / 2.0])
+                    .height(header_height)]
+                .spacing(0)
+                .width(Length::Fixed(lane_width));
                 for offset in 0..6u32 {
                     let slot_row = first_row + offset;
                     let recording =
@@ -608,7 +763,7 @@ impl App {
                             .width(Length::Fill)
                         )
                         .align_bottom(Length::Fill)
-                        .padding(crate::widgets::clip_slot::FILM_INSET + 1.0),
+                        .padding(crate::widgets::clip_slot::BUTTON_INSET),
                     ]
                     .into();
                     let cell: Element<'_, Message> = if let Some(clip) = slot {
@@ -622,7 +777,7 @@ impl App {
                                 false,
                             ))
                             .align_right(Length::Fill)
-                            .padding(crate::widgets::clip_slot::FILM_INSET + 1.0)
+                            .padding(crate::widgets::clip_slot::BUTTON_INSET)
                         ]
                         .into()
                     } else {
@@ -647,25 +802,8 @@ impl App {
                 grid = grid.push(lane);
             }
             workspace = workspace.push(
-                scrollable(
-                    container(container(grid).padding(2).width(Length::Fill).style(|_| {
-                        container::Style {
-                            background: Some(
-                                iced::gradient::Linear::new(std::f32::consts::PI)
-                                    .add_stop(0.0, th::blend(th::bg_dark(), th::text(), 0.012))
-                                    .add_stop(1.0, th::darken(th::bg_dark(), 0.82))
-                                    .into(),
-                            ),
-                            border: iced::Border {
-                                color: th::with_alpha(th::text(), 0.05),
-                                width: 1.0,
-                                radius: 4.0.into(),
-                            },
-                            ..Default::default()
-                        }
-                    }))
-                    .padding([0, 12])
-                    .width(Length::Fill),
+                crate::widgets::quiet_scroll::vertical(
+                    container(grid).padding([0, 12]).width(Length::Fill),
                 )
                 .width(Length::Fill)
                 .height(Length::Fill),
@@ -685,14 +823,7 @@ impl App {
         .spacing(8)
         .align_y(iced::Alignment::Center);
         workspace = workspace.push(container(footer).padding([if compact { 4 } else { 8 }, 12]));
-        container(workspace)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .style(|_| container::Style {
-                background: Some(Color::BLACK.into()),
-                ..Default::default()
-            })
-            .into()
+        crate::widgets::shell_card::shell_card(workspace).into()
     }
 }
 
@@ -763,7 +894,7 @@ impl App {
             .align_y(iced::Alignment::Center),
         )
         .padding([6, 10])
-        .style(move |_, status| choice_style(active, status))
+        .style(control_style::style(active.then(th::accent)))
         .on_press(Message::Perform(PerformMsg::Capture(
             crate::domains::perform::CaptureMsg::Toggle,
         )))

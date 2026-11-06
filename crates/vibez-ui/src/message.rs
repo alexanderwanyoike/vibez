@@ -41,7 +41,7 @@ impl std::fmt::Debug for ResidentSection {
 }
 
 use crate::domains::audio_settings::{AudioDeviceChoice, AudioSampleRate};
-use crate::state::{AuditionImportInput, AuditionMode, SettingsTab, UndoGestureId};
+use crate::state::{AuditionImportInput, AuditionMode, GridCommand, SettingsTab, UndoGestureId};
 
 /// Menus and dialogs whose lifecycle is owned by their overlay rather than
 /// inferred from unrelated application messages.
@@ -76,6 +76,9 @@ pub enum Message {
         id: UndoGestureId,
         edit: Box<Message>,
     },
+    /// A lane drag cancelled by Escape: its gesture's edits are taken back
+    /// and leave no undo step.
+    CancelUndoGesture(UndoGestureId),
     /// Transport domain (playback, tempo, arrangement loop).
     Transport(crate::domains::transport::TransportMsg),
     /// Devices domain (effect chain, instruments, drum pads, menu).
@@ -122,6 +125,7 @@ pub enum Message {
     Browser(crate::domains::browser::BrowserMsg),
     Project(crate::domains::project::ProjectMsg),
     Automation(crate::domains::automation::AutomationMsg),
+    TrackHeight(crate::domains::track_heights::TrackHeightMsg),
     Perform(crate::domains::perform::PerformMsg),
     SectionResidencyReady {
         request_id: u64,
@@ -220,6 +224,8 @@ pub enum Message {
     /// Command+A. Context-resolved in `update`, like [`Self::DeleteKeyPressed`]:
     /// the open piano roll's notes first, then the active timeline's clips.
     SelectAllPressed,
+    /// Command+1 to 5, for the grid of the editor with focus.
+    GridShortcutPressed(GridCommand),
 
     // File menu
     NewProject,
@@ -240,6 +246,7 @@ pub enum Message {
         result: Box<Result<ProjectLoadResult, ProjectLoadError>>,
     },
     ProjectSaved(Box<ProjectSaveCompleted>),
+    ProjectSampleRateConverted(Box<ConvertedProject>),
 
     // Window close protection. The window is configured not to exit on its
     // own close request, so every one of these arrives here first.
@@ -264,6 +271,8 @@ pub enum Message {
     /// Settings: resize the whole interface. Distinct from timeline
     /// zoom, which changes visible musical time instead.
     SetInterfaceScale(f32),
+    /// Settings: how strongly track colours show over the active theme.
+    SetColourStrength(crate::theme::ColourStrength),
     /// Settings: opt in or out of the startup release check. Takes
     /// effect at the next launch; it never triggers a check itself.
     ToggleCheckForUpdates,
@@ -316,9 +325,10 @@ pub enum Message {
     /// dropped instead of starting playback.
     LocalSamplePreviewReady(MediaSourceRef, u64, Result<AnalysedBrowserAudio, String>),
     BrowserWaveformReady(MediaSourceRef, Result<AnalysedBrowserAudio, String>),
-    BrowserAuditionWarpReady {
+    BrowserAuditionReady {
         source: MediaSourceRef,
         generation: u64,
+        mode: crate::state::AuditionMode,
         project_bpm: f64,
         result: Result<Arc<DecodedAudio>, String>,
     },

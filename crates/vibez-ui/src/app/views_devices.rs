@@ -1,11 +1,10 @@
 //! Split out of app.rs; inherent methods on [`super::App`].
 
-use iced::widget::{column, container, horizontal_space, mouse_area, row, scrollable, text};
+use iced::widget::{column, container, mouse_area, row, scrollable, text};
 use iced::{Color, Element, Length};
 
 use vibez_core::id::TrackId;
 
-use crate::icons;
 use crate::message::Message;
 use crate::state::UiTrack;
 use crate::theme as th;
@@ -14,7 +13,7 @@ use crate::widgets::effect_slot::{view_effect_slot, view_sidechain, DeviceBody};
 use super::*;
 
 const CHAIN_SPACING: f32 = 6.0;
-const PLACEHOLDER_W: f32 = 120.0;
+const PLACEHOLDER_W: f32 = 150.0;
 
 /// Native devices that lay themselves out from the width they are given.
 #[derive(Clone, Copy, Debug)]
@@ -108,32 +107,10 @@ impl App {
         track: &'a UiTrack,
         track_color: Color,
     ) -> Element<'a, Message> {
-        // Header: track name + right-click hint
-        let track_label = text(format!("{} - Devices", track.name))
-            .size(13)
-            .color(th::text());
-
-        let hint_label = text("Right-click to add").size(10).color(th::text_muted());
-
-        let header = row![track_label, horizontal_space(), hint_label]
-            .spacing(8)
-            .align_y(iced::Alignment::Center);
-
-        let chain = iced::widget::responsive(move |size| {
+        // The chain keeps the room under its cards itself, for its scrollbar.
+        let content = iced::widget::responsive(move |size| {
             self.device_chain_row(track_id, track, track_color, size.width)
         });
-
-        // The chain keeps the room under its cards itself, for its scrollbar.
-        let content = column![header, chain]
-            .spacing(6)
-            .padding(iced::Padding {
-                top: 8.0,
-                right: 8.0,
-                bottom: 0.0,
-                left: 8.0,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill);
 
         // Wrap in mouse_area for right-click context menu
         mouse_area(content)
@@ -294,26 +271,17 @@ impl App {
             .spacing(CHAIN_SPACING)
             .height(Length::Fill);
 
-        // Built with its direction: the default vertical check rejects the
-        // full-height cards before a later `.direction` could apply.
-        use crate::widgets::device_chrome::{
-            chain_bar_room, CHAIN_BAR_GAP, CHAIN_BAR_W, CHAIN_PAD_BELOW,
-        };
+        use crate::widgets::device_chrome::{chain_bar_room, CHAIN_BAR_GAP, CHAIN_PAD_BELOW};
+        use crate::widgets::quiet_scroll;
         let overflows = chain_bar_room(chain_width, available_width) > 0.0;
-        let bar = scrollable::Scrollbar::new()
-            .width(CHAIN_BAR_W)
-            .scroller_width(CHAIN_BAR_W);
         let bar = if overflows {
-            bar.spacing(CHAIN_BAR_GAP)
+            quiet_scroll::scrollbar().spacing(CHAIN_BAR_GAP)
         } else {
-            bar
+            quiet_scroll::scrollbar()
         };
-        let chain = scrollable::Scrollable::with_direction(
-            devices_row,
-            scrollable::Direction::Horizontal(bar),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill);
+        let chain = quiet_scroll::scroll(devices_row, scrollable::Direction::Horizontal(bar))
+            .width(Length::Fill)
+            .height(Length::Fill);
         if overflows {
             chain.into()
         } else {
@@ -358,26 +326,44 @@ impl App {
             .panels
             .get(&effect.id)
             .unwrap_or(&self.gain_devices.empty_panel);
-        let content = iced::widget::responsive(move |size| {
-            crate::widgets::gain_device::view(
-                track_id,
-                effect,
-                accent,
-                panel,
-                self.param_entry.as_ref(),
-                self.view_device_preset_bar(
+        self.native_device_body(
+            track_id,
+            effect,
+            accent,
+            width,
+            crate::widgets::gain_device::advanced(effect, panel.advanced, accent),
+            move |size| {
+                crate::widgets::gain_device::view(
                     track_id,
                     effect,
                     accent,
-                    crate::widgets::gain_device::preset_bar_width(size),
-                ),
-                size,
-            )
-        });
+                    panel,
+                    self.param_entry.as_ref(),
+                    size,
+                )
+            },
+        )
+    }
+
+    /// A native effect's body, its preset controls and its Advanced switch
+    /// for the card's header.
+    fn native_device_body<'a>(
+        &'a self,
+        track_id: TrackId,
+        effect: &'a crate::state::UiEffect,
+        accent: Color,
+        width: f32,
+        advanced: crate::widgets::device_chrome::Action,
+        body: impl Fn(iced::Size) -> Element<'a, Message> + 'a,
+    ) -> DeviceBody<'a> {
         DeviceBody {
-            content: content.into(),
+            content: iced::widget::responsive(body).into(),
             width,
             padding: iced::Padding::ZERO,
+            preset: Some(Box::new(move |selector_w| {
+                self.view_device_preset_bar(track_id, effect, accent, selector_w)
+            })),
+            advanced: Some(advanced),
         }
     }
 
@@ -388,29 +374,21 @@ impl App {
         accent: Color,
         width: f32,
     ) -> DeviceBody<'a> {
-        let content = iced::widget::responsive(move |size| {
-            crate::widgets::compressor_device::CompressorView {
-                track_id,
-                effect,
-                accent,
-                panel: self.compressor_devices.panel(effect.id),
-                entry: self.param_entry.as_ref(),
-            }
-            .view(
-                self.view_device_preset_bar(
-                    track_id,
-                    effect,
-                    accent,
-                    crate::widgets::compressor_device::preset_bar_width(size),
-                ),
-                size,
-            )
-        });
-        DeviceBody {
-            content: content.into(),
+        let view = move || crate::widgets::compressor_device::CompressorView {
+            track_id,
+            effect,
+            accent,
+            panel: self.compressor_devices.panel(effect.id),
+            entry: self.param_entry.as_ref(),
+        };
+        self.native_device_body(
+            track_id,
+            effect,
+            accent,
             width,
-            padding: iced::Padding::ZERO,
-        }
+            view().advanced_switch(),
+            move |size| view().view(size),
+        )
     }
 
     fn reverb_device_body<'a>(
@@ -420,30 +398,22 @@ impl App {
         accent: Color,
         width: f32,
     ) -> DeviceBody<'a> {
-        let content = iced::widget::responsive(move |size| {
-            crate::widgets::reverb_device::ReverbView {
-                track_id,
-                effect,
-                accent,
-                panel: self.card_panels.panel(effect.id),
-                entry: self.param_entry.as_ref(),
-                bpm: self.state.transport.bpm,
-            }
-            .view(
-                self.view_device_preset_bar(
-                    track_id,
-                    effect,
-                    accent,
-                    crate::widgets::reverb_device::preset_bar_width(size),
-                ),
-                size,
-            )
-        });
-        DeviceBody {
-            content: content.into(),
+        let view = move || crate::widgets::reverb_device::ReverbView {
+            track_id,
+            effect,
+            accent,
+            panel: self.card_panels.panel(effect.id),
+            entry: self.param_entry.as_ref(),
+            bpm: self.state.transport.bpm,
+        };
+        self.native_device_body(
+            track_id,
+            effect,
+            accent,
             width,
-            padding: iced::Padding::ZERO,
-        }
+            view().advanced_switch(),
+            move |size| view().view(size),
+        )
     }
 
     fn phaser_device_body<'a>(
@@ -453,30 +423,22 @@ impl App {
         accent: Color,
         width: f32,
     ) -> DeviceBody<'a> {
-        let content = iced::widget::responsive(move |size| {
-            crate::widgets::phaser_device::PhaserView {
-                track_id,
-                effect,
-                accent,
-                panel: self.card_panels.panel(effect.id),
-                entry: self.param_entry.as_ref(),
-                bpm: self.state.transport.bpm,
-            }
-            .view(
-                self.view_device_preset_bar(
-                    track_id,
-                    effect,
-                    accent,
-                    crate::widgets::phaser_device::preset_bar_width(size),
-                ),
-                size,
-            )
-        });
-        DeviceBody {
-            content: content.into(),
+        let view = move || crate::widgets::phaser_device::PhaserView {
+            track_id,
+            effect,
+            accent,
+            panel: self.card_panels.panel(effect.id),
+            entry: self.param_entry.as_ref(),
+            bpm: self.state.transport.bpm,
+        };
+        self.native_device_body(
+            track_id,
+            effect,
+            accent,
             width,
-            padding: iced::Padding::ZERO,
-        }
+            view().advanced_switch(),
+            move |size| view().view(size),
+        )
     }
 
     fn auto_pan_device_body<'a>(
@@ -486,30 +448,22 @@ impl App {
         accent: Color,
         width: f32,
     ) -> DeviceBody<'a> {
-        let content = iced::widget::responsive(move |size| {
-            crate::widgets::auto_pan_device::AutoPanView {
-                track_id,
-                effect,
-                accent,
-                panel: self.card_panels.panel(effect.id),
-                entry: self.param_entry.as_ref(),
-                bpm: self.state.transport.bpm,
-            }
-            .view(
-                self.view_device_preset_bar(
-                    track_id,
-                    effect,
-                    accent,
-                    crate::widgets::auto_pan_device::preset_bar_width(size),
-                ),
-                size,
-            )
-        });
-        DeviceBody {
-            content: content.into(),
+        let view = move || crate::widgets::auto_pan_device::AutoPanView {
+            track_id,
+            effect,
+            accent,
+            panel: self.card_panels.panel(effect.id),
+            entry: self.param_entry.as_ref(),
+            bpm: self.state.transport.bpm,
+        };
+        self.native_device_body(
+            track_id,
+            effect,
+            accent,
             width,
-            padding: iced::Padding::ZERO,
-        }
+            view().advanced_switch(),
+            move |size| view().view(size),
+        )
     }
 
     fn delay_device_body<'a>(
@@ -519,30 +473,22 @@ impl App {
         accent: Color,
         width: f32,
     ) -> DeviceBody<'a> {
-        let content = iced::widget::responsive(move |size| {
-            crate::widgets::delay_device::DelayView {
-                track_id,
-                effect,
-                accent,
-                panel: self.card_panels.panel(effect.id),
-                entry: self.param_entry.as_ref(),
-                bpm: self.state.transport.bpm,
-            }
-            .view(
-                self.view_device_preset_bar(
-                    track_id,
-                    effect,
-                    accent,
-                    crate::widgets::delay_device::preset_bar_width(size),
-                ),
-                size,
-            )
-        });
-        DeviceBody {
-            content: content.into(),
+        let view = move || crate::widgets::delay_device::DelayView {
+            track_id,
+            effect,
+            accent,
+            panel: self.card_panels.panel(effect.id),
+            entry: self.param_entry.as_ref(),
+            bpm: self.state.transport.bpm,
+        };
+        self.native_device_body(
+            track_id,
+            effect,
+            accent,
             width,
-            padding: iced::Padding::ZERO,
-        }
+            view().advanced_switch(),
+            move |size| view().view(size),
+        )
     }
 
     fn limiter_device_body<'a>(
@@ -553,30 +499,22 @@ impl App {
         width: f32,
     ) -> DeviceBody<'a> {
         let now = std::time::Instant::now();
-        let content = iced::widget::responsive(move |size| {
-            crate::widgets::limiter_device::LimiterView {
-                track_id,
-                effect,
-                accent,
-                panel: self.card_panels.panel(effect.id),
-                entry: self.param_entry.as_ref(),
-                now,
-            }
-            .view(
-                self.view_device_preset_bar(
-                    track_id,
-                    effect,
-                    accent,
-                    crate::widgets::limiter_device::preset_bar_width(size),
-                ),
-                size,
-            )
-        });
-        DeviceBody {
-            content: content.into(),
+        let view = move || crate::widgets::limiter_device::LimiterView {
+            track_id,
+            effect,
+            accent,
+            panel: self.card_panels.panel(effect.id),
+            entry: self.param_entry.as_ref(),
+            now,
+        };
+        self.native_device_body(
+            track_id,
+            effect,
+            accent,
             width,
-            padding: iced::Padding::ZERO,
-        }
+            view().advanced_switch(),
+            move |size| view().view(size),
+        )
     }
 
     fn echo_device_body<'a>(
@@ -586,30 +524,22 @@ impl App {
         accent: Color,
         width: f32,
     ) -> DeviceBody<'a> {
-        let content = iced::widget::responsive(move |size| {
-            crate::widgets::echo_device::EchoView {
-                track_id,
-                effect,
-                accent,
-                panel: self.card_panels.panel(effect.id),
-                entry: self.param_entry.as_ref(),
-                bpm: self.state.transport.bpm,
-            }
-            .view(
-                self.view_device_preset_bar(
-                    track_id,
-                    effect,
-                    accent,
-                    crate::widgets::echo_device::preset_bar_width(size),
-                ),
-                size,
-            )
-        });
-        DeviceBody {
-            content: content.into(),
+        let view = move || crate::widgets::echo_device::EchoView {
+            track_id,
+            effect,
+            accent,
+            panel: self.card_panels.panel(effect.id),
+            entry: self.param_entry.as_ref(),
+            bpm: self.state.transport.bpm,
+        };
+        self.native_device_body(
+            track_id,
+            effect,
+            accent,
             width,
-            padding: iced::Padding::ZERO,
-        }
+            view().advanced_switch(),
+            move |size| view().view(size),
+        )
     }
 
     fn saturator_device_body<'a>(
@@ -619,29 +549,21 @@ impl App {
         accent: Color,
         width: f32,
     ) -> DeviceBody<'a> {
-        let content = iced::widget::responsive(move |size| {
-            crate::widgets::saturator_device::SaturatorView {
-                track_id,
-                effect,
-                accent,
-                panel: self.card_panels.panel(effect.id),
-                entry: self.param_entry.as_ref(),
-            }
-            .view(
-                self.view_device_preset_bar(
-                    track_id,
-                    effect,
-                    accent,
-                    crate::widgets::saturator_device::preset_bar_width(size),
-                ),
-                size,
-            )
-        });
-        DeviceBody {
-            content: content.into(),
+        let view = move || crate::widgets::saturator_device::SaturatorView {
+            track_id,
+            effect,
+            accent,
+            panel: self.card_panels.panel(effect.id),
+            entry: self.param_entry.as_ref(),
+        };
+        self.native_device_body(
+            track_id,
+            effect,
+            accent,
             width,
-            padding: iced::Padding::ZERO,
-        }
+            view().advanced_switch(),
+            move |size| view().view(size),
+        )
     }
 
     fn bitcrush_device_body<'a>(
@@ -651,30 +573,22 @@ impl App {
         accent: Color,
         width: f32,
     ) -> DeviceBody<'a> {
-        let content = iced::widget::responsive(move |size| {
-            crate::widgets::bitcrush_device::BitcrushView {
-                track_id,
-                effect,
-                accent,
-                panel: self.card_panels.panel(effect.id),
-                entry: self.param_entry.as_ref(),
-                host_rate: self.state.transport.sample_rate,
-            }
-            .view(
-                self.view_device_preset_bar(
-                    track_id,
-                    effect,
-                    accent,
-                    crate::widgets::bitcrush_device::preset_bar_width(size),
-                ),
-                size,
-            )
-        });
-        DeviceBody {
-            content: content.into(),
+        let view = move || crate::widgets::bitcrush_device::BitcrushView {
+            track_id,
+            effect,
+            accent,
+            panel: self.card_panels.panel(effect.id),
+            entry: self.param_entry.as_ref(),
+            host_rate: self.state.transport.sample_rate,
+        };
+        self.native_device_body(
+            track_id,
+            effect,
+            accent,
             width,
-            padding: iced::Padding::ZERO,
-        }
+            view().advanced_switch(),
+            move |size| view().view(size),
+        )
     }
 
     fn drive_device_body<'a>(
@@ -684,29 +598,21 @@ impl App {
         accent: Color,
         width: f32,
     ) -> DeviceBody<'a> {
-        let content = iced::widget::responsive(move |size| {
-            crate::widgets::drive_device::DriveView {
-                track_id,
-                effect,
-                accent,
-                panel: self.card_panels.panel(effect.id),
-                entry: self.param_entry.as_ref(),
-            }
-            .view(
-                self.view_device_preset_bar(
-                    track_id,
-                    effect,
-                    accent,
-                    crate::widgets::drive_device::preset_bar_width(size),
-                ),
-                size,
-            )
-        });
-        DeviceBody {
-            content: content.into(),
+        let view = move || crate::widgets::drive_device::DriveView {
+            track_id,
+            effect,
+            accent,
+            panel: self.card_panels.panel(effect.id),
+            entry: self.param_entry.as_ref(),
+        };
+        self.native_device_body(
+            track_id,
+            effect,
+            accent,
             width,
-            padding: iced::Padding::ZERO,
-        }
+            view().advanced_switch(),
+            move |size| view().view(size),
+        )
     }
 
     fn gate_device_body<'a>(
@@ -716,29 +622,21 @@ impl App {
         accent: Color,
         width: f32,
     ) -> DeviceBody<'a> {
-        let content = iced::widget::responsive(move |size| {
-            crate::widgets::gate_device::GateView {
-                track_id,
-                effect,
-                accent,
-                panel: self.gate_panels.panel(effect.id),
-                entry: self.param_entry.as_ref(),
-            }
-            .view(
-                self.view_device_preset_bar(
-                    track_id,
-                    effect,
-                    accent,
-                    crate::widgets::gate_device::preset_bar_width(size),
-                ),
-                size,
-            )
-        });
-        DeviceBody {
-            content: content.into(),
+        let view = move || crate::widgets::gate_device::GateView {
+            track_id,
+            effect,
+            accent,
+            panel: self.gate_panels.panel(effect.id),
+            entry: self.param_entry.as_ref(),
+        };
+        self.native_device_body(
+            track_id,
+            effect,
+            accent,
             width,
-            padding: iced::Padding::ZERO,
-        }
+            view().advanced_switch(),
+            move |size| view().view(size),
+        )
     }
 
     fn filter_device_body<'a>(
@@ -748,30 +646,22 @@ impl App {
         accent: Color,
         width: f32,
     ) -> DeviceBody<'a> {
-        let content = iced::widget::responsive(move |size| {
-            crate::widgets::filter_device::FilterView {
-                track_id,
-                effect,
-                accent,
-                panel: self.filter_panels.panel(effect.id),
-                entry: self.param_entry.as_ref(),
-                sample_rate: self.state.transport.sample_rate as f32,
-            }
-            .view(
-                self.view_device_preset_bar(
-                    track_id,
-                    effect,
-                    accent,
-                    crate::widgets::filter_device::preset_bar_width(size),
-                ),
-                size,
-            )
-        });
-        DeviceBody {
-            content: content.into(),
+        let view = move || crate::widgets::filter_device::FilterView {
+            track_id,
+            effect,
+            accent,
+            panel: self.filter_panels.panel(effect.id),
+            entry: self.param_entry.as_ref(),
+            sample_rate: self.state.transport.sample_rate as f32,
+        };
+        self.native_device_body(
+            track_id,
+            effect,
+            accent,
             width,
-            padding: iced::Padding::ZERO,
-        }
+            view().advanced_switch(),
+            move |size| view().view(size),
+        )
     }
 
     fn eq_device_body<'a>(
@@ -781,77 +671,23 @@ impl App {
         accent: Color,
         width: f32,
     ) -> DeviceBody<'a> {
-        let content = iced::widget::responsive(move |size| {
-            crate::widgets::eq_device::EqView {
-                track_id,
-                effect,
-                accent,
-                panel: self.eq_devices.panel(effect.id),
-                entry: self.param_entry.as_ref(),
-                spectrum: self.eq_devices.spectrum_for(effect.id),
-                sample_rate: self.state.transport.sample_rate as f32,
-            }
-            .view(
-                self.view_device_preset_bar(
-                    track_id,
-                    effect,
-                    accent,
-                    crate::widgets::eq_device::preset_bar_width(size),
-                ),
-                size,
-            )
-        });
-        DeviceBody {
-            content: content.into(),
+        let view = move || crate::widgets::eq_device::EqView {
+            track_id,
+            effect,
+            accent,
+            panel: self.eq_devices.panel(effect.id),
+            entry: self.param_entry.as_ref(),
+            spectrum: self.eq_devices.spectrum_for(effect.id),
+            sample_rate: self.state.transport.sample_rate as f32,
+        };
+        self.native_device_body(
+            track_id,
+            effect,
+            accent,
             width,
-            padding: iced::Padding::ZERO,
-        }
-    }
-
-    // ── Shared device card helpers ──────────────────────────────────
-
-    /// Dark title bar used by all device cards.
-    pub(super) fn device_title_bar<'a>(
-        content: impl Into<Element<'a, Message>>,
-    ) -> iced::widget::Container<'a, Message> {
-        crate::widgets::device_chrome::title_bar(content)
-    }
-
-    /// Standard device title row: colored dot, name, and the remove button
-    /// at the far right, where the effect cards keep theirs.
-    pub(super) fn device_title_row(
-        name: &str,
-        track_color: Color,
-        remove: Option<Message>,
-    ) -> iced::widget::Row<'_, Message> {
-        let dot = text("\u{25CF}").size(8).color(track_color);
-        let name = text(name.to_string()).size(11).color(th::text());
-        let mut r = row![dot, name]
-            .spacing(5)
-            .width(Length::Fill)
-            .align_y(iced::Alignment::Center);
-        if let Some(msg) = remove {
-            let remove_btn: Element<'_, Message> =
-                Self::device_icon_btn(icons::X, th::text_dim(), th::danger(), msg).into();
-            r = r.push(horizontal_space());
-            r = r.push(remove_btn);
-        }
-        r
-    }
-
-    /// Wrap card content in the standard device card container.
-    pub(super) fn device_card(content: iced::widget::Column<'_, Message>) -> Element<'_, Message> {
-        crate::widgets::device_chrome::card(content)
-    }
-
-    /// Small icon-only button for device card actions.
-    pub(super) fn device_icon_btn(
-        icon_char: char,
-        color: Color,
-        hover_color: Color,
-        msg: Message,
-    ) -> iced::widget::Button<'static, Message> {
-        crate::widgets::device_chrome::icon_button(icon_char, color, hover_color, msg)
+            view().advanced_switch(),
+            move |size| view().view(size),
+        )
     }
 
     /// Device card for an external plugin instrument.
@@ -879,16 +715,15 @@ impl App {
 
     /// Placeholder card for MIDI tracks with no instrument attached.
     pub(super) fn view_add_instrument_placeholder(&self) -> Element<'_, Message> {
-        let title = Self::device_title_bar(text("No Instrument").size(11).color(th::text_dim()));
+        let header = crate::widgets::device_chrome::Header::new(
+            "No Instrument",
+            th::text_muted(),
+            "Right-click the device panel to add an instrument".into(),
+        );
         let body = container(text("Right-click to add").size(9).color(th::text_muted()))
-            .padding([8, 6])
+            .padding([8, 12])
             .width(Length::Fill);
-
-        Self::device_card(
-            column![title, body]
-                .width(Length::Fixed(PLACEHOLDER_W))
-                .align_x(iced::Alignment::Center),
-        )
+        crate::widgets::device_chrome::shell(header, body, PLACEHOLDER_W)
     }
 }
 
@@ -963,6 +798,19 @@ mod width_tests {
             ));
         }
         all
+    }
+
+    #[test]
+    fn every_device_header_fits_its_narrowest_card() {
+        use crate::widgets::device_chrome::{header_min_w, MOST_ACTIONS};
+        for (name, _, widths) in every_device() {
+            assert!(
+                widths.compact >= header_min_w(MOST_ACTIONS),
+                "{name}: {} under {}",
+                widths.compact,
+                header_min_w(MOST_ACTIONS)
+            );
+        }
     }
 
     #[test]

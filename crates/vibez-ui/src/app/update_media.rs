@@ -152,7 +152,7 @@ impl App {
                 .unwrap_or_default();
             self.state.status_text = format!("Loading {file_name}...");
             return Task::perform(
-                decode_and_stage_local_async(path),
+                decode_and_stage_local_async(path, self.state.transport.sample_rate),
                 move |result| match result {
                     Ok((audio, source)) => Message::SamplerSampleDecoded(
                         track_id,
@@ -505,10 +505,10 @@ impl App {
         };
         let beat = match self.state.browser.drag_target.take() {
             Some(crate::state::BrowserDropTarget::EmptyArrangement { beat }) => beat,
-            _ => self.state.position_beats(),
+            _ => self.state.transport.position_beats(),
         };
         self.state.browser.cancel_media_drag();
-        let position_samples = self.state.beats_to_samples(beat);
+        let position_samples = self.state.transport.beats_to_samples(beat);
         self.dispatch_drop_for_target(
             source,
             BrowserImportTarget::ArrangementNewTrackAt { position_samples },
@@ -568,26 +568,28 @@ impl App {
         Task::none()
     }
 
-    pub(super) fn on_browser_audition_warp_ready(
+    pub(super) fn on_browser_audition_ready(
         &mut self,
         source: MediaSourceRef,
         generation: u64,
+        mode: crate::state::AuditionMode,
         project_bpm: f64,
         result: Result<Arc<vibez_core::audio_buffer::DecodedAudio>, String>,
     ) -> Task<Message> {
         let current = self.state.browser.audition_request_is_current(generation)
             && self.state.browser.selected_source.as_ref() == Some(&source)
-            && self.state.browser.audition_mode == crate::state::AuditionMode::Warp
-            && (self.state.transport.bpm - project_bpm).abs() < f64::EPSILON;
+            && self.state.browser.audition_mode == mode
+            && (mode == crate::state::AuditionMode::Raw
+                || (self.state.transport.bpm - project_bpm).abs() < f64::EPSILON);
         if !current {
             return Task::none();
         }
         self.state.browser.audition_loading = false;
         match result {
-            Ok(audio) => self.start_browser_audition(audio, crate::state::AuditionMode::Warp),
+            Ok(audio) => self.start_browser_audition(audio, mode),
             Err(error) => {
                 self.state.browser.stop_audition_state();
-                self.state.status_text = format!("WARP Audition error: {error}");
+                self.state.status_text = format!("{} Audition error: {error}", mode.label());
             }
         }
         Task::none()

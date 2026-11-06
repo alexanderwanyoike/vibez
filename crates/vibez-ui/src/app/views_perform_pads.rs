@@ -339,7 +339,7 @@ impl App {
                     rail_width
                 }));
             let rail: Element<'_, Message> = if clip_layout {
-                iced::widget::scrollable(controls)
+                crate::widgets::quiet_scroll::vertical(controls)
                     .height(Length::Fixed(pad_grid_height))
                     .width(Length::Fixed(rail_width))
                     .into()
@@ -350,19 +350,9 @@ impl App {
         } else {
             column![header, grid].spacing(12)
         };
-        let surface = container(content)
+        let surface = crate::widgets::shell_card::shell_card(container(content).padding(14))
             .width(Length::Fixed(surface_width))
-            .height(Length::Fill)
-            .padding(14)
-            .style(|_theme: &Theme| container::Style {
-                background: Some(th::perform_inset().into()),
-                border: iced::Border {
-                    color: th::border(),
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
-                ..Default::default()
-            });
+            .height(Length::Fill);
 
         mouse_area(surface)
             .on_press(Message::Perform(PerformMsg::FocusEditor(
@@ -493,15 +483,7 @@ impl App {
                     };
                     (
                         track.name.clone(),
-                        format!(
-                            "{} · {}",
-                            if track.kind.is_midi() {
-                                "MIDI"
-                            } else {
-                                "AUDIO"
-                            },
-                            state
-                        ),
+                        format!("{} · {}", track.kind.label(), state),
                         th::track_color(track.color_index),
                         track.mute,
                     )
@@ -569,6 +551,7 @@ impl App {
                 &title,
                 pad_size - if small { 4.0 } else { 16.0 },
                 title_size,
+                PERFORM_DISPLAY,
             )
         } else {
             title

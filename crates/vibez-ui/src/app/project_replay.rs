@@ -7,7 +7,7 @@ use vibez_core::id::{EffectId, TrackId};
 use vibez_core::midi::{InstrumentKind, TrackKind};
 use vibez_engine::commands::EngineCommand;
 
-use crate::state::ProjectTrack;
+use crate::state::{ProjectTrack, UndoGestureId};
 
 use super::*;
 
@@ -89,7 +89,21 @@ impl App {
         true
     }
 
-    pub(super) fn apply_snapshot(&mut self, mut snapshot: crate::state::ProjectSnapshot) {
+    /// Escape during a lane drag: what the drag `gesture` edited, the
+    /// engine and a clip drag's selection go back to how the drag found
+    /// them, and no undo step is left.
+    pub(super) fn cancel_drag(&mut self, gesture: UndoGestureId) {
+        self.state.arrangement.editor.cancel_clip_drag();
+        self.state.perform.timeline_editor_mut().cancel_clip_drag();
+        if let Some(snapshot) = self.state.project.history.revert_gesture(gesture) {
+            self.apply_snapshot(snapshot);
+        }
+        self.state.arrangement.end_drag_resize();
+        self.state.perform.timeline_editor_mut().end_drag_resize();
+        self.state.status_text = "Drag cancelled".into();
+    }
+
+    pub(super) fn apply_snapshot(&mut self, snapshot: crate::state::ProjectSnapshot) {
         self.restart_device_metering();
         self.cancel_device_preset_load();
         if clip_only_snapshot(&self.state, &snapshot) {
@@ -109,6 +123,22 @@ impl App {
             .section_editor
             .editor_mut()
             .discard_audio_clip_inspector_edits();
+        self.send_command(EngineCommand::BeginContentRebuild);
+        if self
+            .state
+            .project_tracks
+            .same_channel_layout(&snapshot.project_tracks)
+        {
+            self.swap_changed_values(snapshot);
+        } else {
+            self.replay_snapshot(snapshot);
+        }
+        self.send_command(EngineCommand::EndContentRebuild);
+    }
+
+    /// Tears down every channel and replays the snapshot into the engine,
+    /// reloading its plugins.
+    fn replay_snapshot(&mut self, mut snapshot: crate::state::ProjectSnapshot) {
         self.plugin_load_requests.reset();
         self.sidechain_sync_inputs = None;
         self.track_meter_peaks.clear();
@@ -169,46 +199,11 @@ impl App {
             self.send_command(EngineCommand::RemoveBus(bus_id));
         }
 
-        self.state.project_tracks = snapshot.project_tracks;
+        self.state.project_tracks = Arc::clone(&snapshot.project_tracks);
         self.state
             .perform
             .sync_project_tracks(&self.state.project_tracks.tracks);
-        self.state.arrangement.timeline = snapshot.arrange_timeline;
-        self.state.perform.sections = snapshot.sections;
-        self.state.perform.clips = snapshot.launcher_clips;
-        self.state.transport.bpm = snapshot.bpm;
-        self.state.transport.bpm_text = format!("{:.0}", snapshot.bpm);
-        self.state.perform.set_project_swing(snapshot.project_swing);
-        self.state.transport.loop_enabled = snapshot.loop_enabled;
-        self.state.transport.loop_start_beats = snapshot.loop_start_beats;
-        self.state.transport.loop_end_beats = snapshot.loop_end_beats;
-        self.state
-            .perform
-            .sync_selected_timeline_editor(self.state.arrangement.selected_track);
-        self.state.perform.section_name_edit = self
-            .state
-            .perform
-            .selected_section
-            .and_then(|id| self.state.perform.sections.by_id(id))
-            .map(|section| section.name.clone())
-            .unwrap_or_default();
-        self.state.perform.editing_section_name = None;
-        self.state.perform.duplicate_source = None;
-
-        self.send_command(EngineCommand::SetBpm(self.state.transport.bpm));
-        self.send_command(EngineCommand::SetProjectSwing(snapshot.project_swing));
-        self.send_command(EngineCommand::SetArrangementLoop(
-            self.state.transport.loop_enabled,
-        ));
-        if self.state.transport.loop_enabled {
-            let start = self
-                .state
-                .beats_to_samples(self.state.transport.loop_start_beats);
-            let end = self
-                .state
-                .beats_to_samples(self.state.transport.loop_end_beats);
-            self.send_command(EngineCommand::SetArrangementLoopRegion { start, end });
-        }
+        self.restore_snapshot_state(snapshot);
 
         let tracks = self.state.project_tracks.tracks.clone();
         for track in &tracks {
@@ -239,6 +234,85 @@ impl App {
             .or_else(|| self.persisted_monitor_on_track());
         if let Err(error) = self.sync_audio_input_runtime() {
             eprintln!("vibez: Audio Input could not follow project restore: {error}");
+        }
+    }
+
+    /// Tracks, devices and plugins are unchanged, so they keep running; only
+    /// the mixer and device values and the timeline content that differ are
+    /// sent to the engine.
+    fn swap_changed_values(&mut self, snapshot: crate::state::ProjectSnapshot) {
+        let current_tracks = std::mem::replace(
+            &mut self.state.project_tracks,
+            Arc::clone(&snapshot.project_tracks),
+        );
+        self.state
+            .perform
+            .sync_project_tracks(&self.state.project_tracks.tracks);
+        let target_tracks = Arc::clone(&self.state.project_tracks);
+        for (current, target) in current_tracks.channels().zip(target_tracks.channels()) {
+            crate::domains::arrangement::swap_changed_controls(&mut self.cmd_tx, current, target);
+        }
+        let current = Arc::clone(&self.state.arrangement.timeline);
+        self.restore_snapshot_state(snapshot);
+        let target = Arc::clone(&self.state.arrangement.timeline);
+        let empty = crate::state::TrackTimelineContent::default();
+        for channel in self.state.project_tracks.channels() {
+            crate::domains::arrangement::swap_changed_content(
+                &mut self.cmd_tx,
+                channel.id,
+                current.get(channel.id).unwrap_or(&empty),
+                target.get(channel.id).unwrap_or(&empty),
+            );
+        }
+    }
+
+    /// Everything but the Project Tracks follows the snapshot, and the engine
+    /// gets its tempo and loop; channels and their content are the caller's.
+    fn restore_snapshot_state(&mut self, snapshot: crate::state::ProjectSnapshot) {
+        self.state.arrangement.timeline = snapshot.arrange_timeline;
+        self.state.perform.sections = snapshot.sections;
+        self.state.perform.clips = snapshot.launcher_clips;
+        // Neither may be overtaken, so an unchanged one would hold the next
+        // Play behind every content edit still waiting.
+        if self.state.transport.bpm != snapshot.bpm {
+            self.state.transport.retempo(
+                snapshot.bpm,
+                &mut crate::domains::EngineTx(&mut self.cmd_tx),
+            );
+        }
+        if self.state.perform.project_swing() != snapshot.project_swing {
+            self.send_command(EngineCommand::SetProjectSwing(snapshot.project_swing));
+        }
+        self.state.perform.set_project_swing(snapshot.project_swing);
+        self.state.transport.loop_enabled = snapshot.loop_enabled;
+        self.state.transport.loop_start_beats = snapshot.loop_start_beats;
+        self.state.transport.loop_end_beats = snapshot.loop_end_beats;
+        self.state
+            .perform
+            .sync_selected_timeline_editor(self.state.arrangement.selected_track);
+        self.state.perform.section_name_edit = self
+            .state
+            .perform
+            .selected_section
+            .and_then(|id| self.state.perform.sections.by_id(id))
+            .map(|section| section.name.clone())
+            .unwrap_or_default();
+        self.state.perform.editing_section_name = None;
+        self.state.perform.duplicate_source = None;
+
+        self.send_command(EngineCommand::SetArrangementLoop(
+            self.state.transport.loop_enabled,
+        ));
+        if self.state.transport.loop_enabled {
+            let start = self
+                .state
+                .transport
+                .beats_to_samples(self.state.transport.loop_start_beats);
+            let end = self
+                .state
+                .transport
+                .beats_to_samples(self.state.transport.loop_end_beats);
+            self.send_command(EngineCommand::SetArrangementLoopRegion { start, end });
         }
     }
 
@@ -342,46 +416,11 @@ impl App {
         }
 
         for clip in &content.clips {
-            self.send_command(EngineCommand::AddClip {
-                insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
-                track_id: track.id,
-                clip_id: clip.id,
-                audio: Arc::clone(&clip.audio),
-                position: clip.position,
-                source_offset: clip.source_offset,
-                start_marker: clip.start_marker,
-                duration: clip.duration,
-                loop_enabled: clip.loop_enabled,
-                loop_start: clip.loop_start,
-                loop_end: clip.loop_end,
-                linear_gain: clip.gain_db.linear(),
-                fades: clip.fades,
-                playback_direction: clip.playback_direction,
-                warp_markers: clip.warp_markers.clone(),
-            });
+            self.send_command(clip.add_command(track.id));
         }
 
         for clip in &content.note_clips {
-            self.send_command(EngineCommand::AddNoteClip {
-                track_id: track.id,
-                insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
-                    clip.id,
-                    clip.position_beats,
-                    clip.duration_beats,
-                    clip.start_marker_beats,
-                    clip.loop_enabled,
-                    clip.loop_start_beats,
-                    clip.loop_end_beats,
-                    clip.groove_grid,
-                ),
-            });
-            for note in &clip.notes {
-                self.send_command(EngineCommand::AddNote {
-                    track_id: track.id,
-                    clip_id: clip.id,
-                    insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(*note),
-                });
-            }
+            self.send_command(clip.add_command(track.id));
         }
     }
 

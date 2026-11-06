@@ -76,6 +76,9 @@ pub struct UndoHistory {
     pub undo: VecDeque<ProjectSnapshot>,
     pub redo: VecDeque<ProjectSnapshot>,
     last_gesture: Option<UndoGestureId>,
+    /// A gesture taken back while the pointer was still down. Its later
+    /// edits are refused so the pointer cannot bring it back.
+    reverted_gesture: Option<UndoGestureId>,
     transaction: Option<ProjectTransaction>,
 }
 
@@ -111,6 +114,21 @@ impl UndoHistory {
     pub fn pop_undo(&mut self) -> Option<ProjectSnapshot> {
         self.last_gesture = None;
         self.undo.pop_back()
+    }
+
+    /// Takes back `gesture` as if it never happened: returns its pre-gesture
+    /// snapshot for the caller to restore when it is the latest step, keeps
+    /// it off the redo stack, and refuses its later edits.
+    pub fn revert_gesture(&mut self, gesture: UndoGestureId) -> Option<ProjectSnapshot> {
+        self.reverted_gesture = Some(gesture);
+        if self.transaction.is_some() || self.last_gesture != Some(gesture) {
+            return None;
+        }
+        self.pop_undo()
+    }
+
+    pub fn is_reverted(&self, gesture: UndoGestureId) -> bool {
+        self.reverted_gesture == Some(gesture)
     }
 
     pub fn push_redo(&mut self, snapshot: ProjectSnapshot) {

@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use iced::Task;
 use vibez_core::id::{ClipId, TrackId};
+use vibez_core::perform::MusicalBoundary;
 use vibez_project::{PerformLayout, TimelineLocation};
 
 use crate::domains::perform::LauncherClip;
@@ -71,6 +72,7 @@ impl App {
                 track_id,
                 row,
                 timeline: Arc::new(timeline),
+                launch: Default::default(),
             });
         self.state.perform.select_launcher_clip(id);
         self.state.view.detail_panel_tab = crate::state::DetailPanelTab::Clip;
@@ -157,8 +159,20 @@ impl App {
             return;
         }
         let samples_per_beat = self.state.transport.samples_per_beat();
-        let mut prepared = Vec::new();
+        let mut batches: Vec<(MusicalBoundary, Vec<_>)> = Vec::new();
         for (track_id, clip) in targets {
+            let quantization = match &clip {
+                Some(clip) => self.state.perform.clips.clip_launch_quantization(clip),
+                None => self.state.perform.stop_quantization(track_id),
+            };
+            let batch = match batches.iter().position(|(q, _)| *q == quantization) {
+                Some(index) => index,
+                None => {
+                    batches.push((quantization, Vec::new()));
+                    batches.len() - 1
+                }
+            };
+            let prepared = &mut batches[batch].1;
             self.state.perform.clip_editor.next_request += 1;
             let request_id = self.state.perform.clip_editor.next_request;
             // Reflect intent before the callback without letting an older engine
@@ -169,7 +183,11 @@ impl App {
                 request_id,
             );
             if let Some(clip) = clip {
-                prepared.push(clip.prepare(request_id, samples_per_beat));
+                prepared.push(self.state.perform.clips.prepare_launch(
+                    &clip,
+                    request_id,
+                    samples_per_beat,
+                ));
                 self.state
                     .perform
                     .clip_editor
@@ -179,11 +197,13 @@ impl App {
                 prepared.push(PreparedClipPlayback::stop(track_id, request_id));
             }
         }
-        if !prepared.is_empty() {
+        if !batches.is_empty() {
             self.state.perform.clip_editor.running = true;
+        }
+        for (quantization, clips) in batches {
             self.send_command(EngineCommand::QueueClips {
-                clips: prepared,
-                quantization: vibez_core::perform::MusicalBoundary::OneBar,
+                clips,
+                quantization,
             });
         }
     }
@@ -208,6 +228,7 @@ pub(super) fn refresh_edited_clips(
         .iter()
         .filter(|clip| perform.clips.by_id(clip.id).is_none())
     {
+        let quantization = perform.stop_quantization(removed.track_id);
         let editor = &mut perform.clip_editor;
         if editor.queued.get(&removed.track_id) == Some(&None) {
             continue;
@@ -225,7 +246,7 @@ pub(super) fn refresh_edited_clips(
                     removed.track_id,
                     editor.next_request,
                 )],
-                quantization: vibez_core::perform::MusicalBoundary::OneBar,
+                quantization,
             });
         }
     }
@@ -255,7 +276,7 @@ pub(super) fn refresh_edited_clips(
         let active = clip.prepare(editor.next_request, spb);
         editor.pending.insert(editor.next_request, clip.clone());
         editor.next_request += 1;
-        let queued = clip.prepare(editor.next_request, spb);
+        let queued = perform.clips.prepare_launch(clip, editor.next_request, spb);
         editor.pending.insert(editor.next_request, clip.clone());
         engine.send(EngineCommand::EditClip { active, queued });
     }
@@ -315,6 +336,37 @@ mod live_edit_tests {
     }
 
     #[test]
+    fn a_live_edit_keeps_a_queued_clips_own_launch_mode() {
+        use vibez_core::perform::ClipLaunchMode;
+        let track = TrackId::new();
+        let mut clip = crate::domains::perform::clip_record::empty_midi_clip(
+            ClipId::new(),
+            track,
+            0,
+            "Take".into(),
+            4.0,
+        );
+        clip.launch.mode = Some(ClipLaunchMode::AtEnd);
+        let mut state = crate::domains::perform::PerformState::default();
+        state.layout = PerformLayout::Clips;
+        Arc::make_mut(&mut state.clips).clips.push(clip.clone());
+        state.edit_track_launch(track, |options| options.mode = ClipLaunchMode::Legato);
+        state.clip_editor.running = true;
+        state.clip_editor.queued.insert(track, Some(clip.id));
+        let before = Arc::clone(&state.clips);
+        Arc::make_mut(&mut Arc::make_mut(&mut state.clips).clips[0].timeline)
+            .ensure(track)
+            .note_clips[0]
+            .name = "Edited".into();
+        let mut engine = RecordingEngine::default();
+        refresh_edited_clips(&before, &mut state, None, 100.0, &mut engine);
+        assert!(matches!(
+            &engine.0[..],
+            [EngineCommand::EditClip { queued, .. }] if queued.launch_mode == ClipLaunchMode::AtEnd
+        ));
+    }
+
+    #[test]
     fn deleting_the_part_in_the_shared_editor_stops_its_resident_clip() {
         let track = TrackId::new();
         let clip = crate::domains::perform::clip_record::empty_midi_clip(
@@ -341,6 +393,37 @@ mod live_edit_tests {
         assert!(
             matches!(&engine.0[..], [EngineCommand::QueueClips { clips, .. }] if clips.len() == 1 && clips[0].track_id == track && clips[0].clip_id.is_none())
         );
+    }
+
+    #[test]
+    fn removing_a_queued_clip_stops_on_the_playing_clips_quantization() {
+        use crate::domains::perform::clip_record::empty_midi_clip;
+        use vibez_core::perform::MusicalBoundary;
+        let track = TrackId::new();
+        let playing = empty_midi_clip(ClipId::new(), track, 0, "Break".into(), 4.0);
+        let mut fill = empty_midi_clip(ClipId::new(), track, 1, "Fill".into(), 4.0);
+        fill.launch.quantization = Some(MusicalBoundary::Sixteenth);
+        let mut state = crate::domains::perform::PerformState::default();
+        state.layout = PerformLayout::Clips;
+        Arc::make_mut(&mut state.clips)
+            .clips
+            .extend([playing.clone(), fill.clone()]);
+        state.clip_editor.running = true;
+        state.clip_editor.playing.insert(track, playing);
+        state.clip_editor.queued.insert(track, Some(fill.id));
+        let before = Arc::clone(&state.clips);
+        Arc::make_mut(&mut state.clips)
+            .clips
+            .retain(|clip| clip.id != fill.id);
+        let mut engine = RecordingEngine::default();
+        refresh_edited_clips(&before, &mut state, None, 100.0, &mut engine);
+        assert!(matches!(
+            &engine.0[..],
+            [EngineCommand::QueueClips {
+                quantization: MusicalBoundary::OneBar,
+                ..
+            }]
+        ));
     }
 
     #[test]

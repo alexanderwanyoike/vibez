@@ -25,7 +25,7 @@ fn audio_recording_transport_guard(
     message: &TransportMsg,
 ) -> AudioRecordingTransportGuard {
     match message {
-        TransportMsg::Stop | TransportMsg::TogglePlayback
+        TransportMsg::Stop | TransportMsg::TogglePlayback | TransportMsg::ContinuePlayback
             if phase == crate::domains::audio_recording::AudioRecordingPhase::Recording =>
         {
             AudioRecordingTransportGuard::StopRecording
@@ -49,6 +49,26 @@ fn audio_recording_transport_guard(
 }
 
 impl App {
+    pub(super) fn transport_ctx(&self) -> crate::domains::transport::TransportCtx {
+        let perform_playback_active = self.state.perform.clip_editor.running
+            || self.state.perform.playing_section.is_some()
+            || self.state.perform.queued_section.is_some()
+            || self.state.perform.section_record.is_active();
+        crate::domains::transport::TransportCtx {
+            total_duration_samples: self.state.total_duration_samples(),
+            time_selection: if self.state.arrangement.time_selection_active {
+                Some((
+                    self.state.arrangement.selection_start_beats,
+                    self.state.arrangement.selection_end_beats,
+                ))
+            } else {
+                None
+            },
+            perform_tempo_locked: perform_playback_active,
+            perform_playback_active,
+        }
+    }
+
     pub(super) fn update_and_refresh_clips(&mut self, message: Message) -> Task<Message> {
         let before = Arc::clone(&self.state.perform.clips);
         let recording = self
@@ -111,6 +131,9 @@ impl App {
             Message::UndoGesture { id, edit } => (*edit, Some(id)),
             message => (message, None),
         };
+        if undo_gesture.is_some_and(|gesture| self.state.project.history.is_reverted(gesture)) {
+            return Task::none();
+        }
         if let Message::Devices(edit) = &message {
             self.discard_param_entry(edit);
             if crate::domains::devices::is_unchanged_param_edit(&self.state.project_tracks, edit) {
@@ -143,7 +166,11 @@ impl App {
         if self.state.perform.clip_record.is_active()
             && matches!(
                 &message,
-                Message::Transport(TransportMsg::Stop | TransportMsg::TogglePlayback)
+                Message::Transport(
+                    TransportMsg::Stop
+                        | TransportMsg::TogglePlayback
+                        | TransportMsg::ContinuePlayback
+                )
             )
         {
             if self.state.perform.clip_record.pending_audio_arm.is_some() {
@@ -222,7 +249,6 @@ impl App {
                 | Message::Arrangement(ArrangementMsg::SetClipLoopRegion { .. })
                 | Message::Arrangement(ArrangementMsg::ResizeAudioClip { .. })
                 | Message::Arrangement(ArrangementMsg::DeleteSelectedClip)
-                | Message::Arrangement(ArrangementMsg::DuplicateSelectedClip)
                 | Message::Transport(TransportMsg::ToggleArrangementLoop)
                 | Message::Transport(TransportMsg::SetArrangementLoopRegion { .. })
                 | Message::Arrangement(ArrangementMsg::MoveSelectedTrackUp)
@@ -272,6 +298,7 @@ impl App {
             Message::UndoGesture { .. } => {
                 unreachable!("undo gesture wrappers are removed before routing")
             }
+            Message::CancelUndoGesture(gesture) => self.cancel_drag(gesture),
             Message::KeyboardInput { event, occurred_at } => {
                 return self.handle_keyboard_input(event, occurred_at);
             }
@@ -281,10 +308,11 @@ impl App {
             Message::Transport(msg) => {
                 if self.state.view.workspace == crate::state::Workspace::Perform
                     && self.state.perform.layout == vibez_project::PerformLayout::Clips
-                    && !self.state.transport.playing
+                    && !self.state.transport.will_play()
                     && matches!(
                         msg,
                         crate::domains::transport::TransportMsg::TogglePlayback
+                            | crate::domains::transport::TransportMsg::ContinuePlayback
                             | crate::domains::transport::TransportMsg::Play
                     )
                 {
@@ -308,29 +336,14 @@ impl App {
                     || matches!(
                         &msg,
                         crate::domains::transport::TransportMsg::TogglePlayback
-                            if self.state.transport.playing
+                            | crate::domains::transport::TransportMsg::ContinuePlayback
+                            if self.state.transport.will_play()
                     );
                 if stops_perform {
                     self.end_capture_automation_gesture();
                     self.section_residency_request.cancel();
                 }
-                let perform_playback_active = self.state.perform.clip_editor.running
-                    || self.state.perform.playing_section.is_some()
-                    || self.state.perform.queued_section.is_some()
-                    || self.state.perform.section_record.is_active();
-                let ctx = crate::domains::transport::TransportCtx {
-                    total_duration_samples: self.state.total_duration_samples(),
-                    time_selection: if self.state.arrangement.time_selection_active {
-                        Some((
-                            self.state.arrangement.selection_start_beats,
-                            self.state.arrangement.selection_end_beats,
-                        ))
-                    } else {
-                        None
-                    },
-                    perform_tempo_locked: perform_playback_active,
-                    perform_playback_active,
-                };
+                let ctx = self.transport_ctx();
                 let action = {
                     let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
                     self.state.transport.update(msg, &mut engine, ctx)
@@ -613,11 +626,7 @@ impl App {
             },
             Message::PianoRoll(msg) => {
                 let ctx = crate::domains::piano_roll::PianoRollCtx {
-                    snap_grid: self
-                        .state
-                        .view
-                        .grid_config()
-                        .effective_grid(self.active_editor_pixels_per_beat()),
+                    snap_grid: self.clip_editor_grid(),
                 };
                 let action = self.route_piano_roll_editor_message(msg, ctx);
                 self.apply_piano_roll_action(action);
@@ -631,6 +640,9 @@ impl App {
                 if let Some(status) = action.status {
                     self.state.status_text = status;
                 }
+            }
+            Message::TrackHeight(msg) => {
+                self.route_track_height_message(msg, self.state.view.cursor_y)
             }
             Message::Perform(msg) => {
                 if !msg.defers_project_edit() {
@@ -744,6 +756,9 @@ impl App {
             Message::ProjectSaved(result) => {
                 return self.route_project_saved(*result);
             }
+            Message::ProjectSampleRateConverted(converted) => {
+                self.finish_sample_rate_conversion(*converted);
+            }
 
             // -- About --
             message @ (Message::OpenAbout
@@ -803,7 +818,7 @@ impl App {
             | Message::DropSampleOnSampler { .. }
             | Message::LocalSamplePreviewReady(..)
             | Message::BrowserWaveformReady(..)
-            | Message::BrowserAuditionWarpReady { .. }
+            | Message::BrowserAuditionReady { .. }
             | Message::ImportSelectedBrowserSampleToArrangement
             | Message::SelectAdjacentBrowserResult(..)
             | Message::LoadSelectedBrowserSampleToDevice
@@ -841,9 +856,11 @@ impl App {
                 }
                 let start = self
                     .state
+                    .transport
                     .beats_to_samples(self.state.arrangement.selection_start_beats);
                 let end = self
                     .state
+                    .transport
                     .beats_to_samples(self.state.arrangement.selection_end_beats);
                 return self.dispatch_bounce(
                     vibez_engine::render::BounceMode::Master,
@@ -933,6 +950,7 @@ impl App {
             // -- Multi-track messages --
             Message::DeleteKeyPressed => return self.on_delete_key_pressed(),
             Message::SelectAllPressed => return self.on_select_all_pressed(),
+            Message::GridShortcutPressed(command) => return self.on_grid_shortcut_pressed(command),
             Message::AddClipToTrack(track_id) => {
                 return self.handle_add_clip_to_track(track_id);
             }
@@ -1016,6 +1034,10 @@ impl App {
             }
             Message::SetInterfaceScale(scale) => {
                 self.interface_scale = crate::ui_settings::clamp_interface_scale(scale);
+                self.persist_ui_settings();
+            }
+            Message::SetColourStrength(strength) => {
+                crate::theme::set_colour_strength(strength);
                 self.persist_ui_settings();
             }
             Message::ToggleProjectTrackDeleteConfirmation => {

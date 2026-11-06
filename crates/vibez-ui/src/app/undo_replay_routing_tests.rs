@@ -94,7 +94,8 @@ fn playing_project(app: &mut App, engine: &mut AudioEngine) -> (TrackId, EffectI
 fn undo_while_playing_keeps_a_project_with_built_in_devices_audible() {
     let mut app = super::test_support::app();
     let (mut engine, commands, _events) = AudioEngine::new();
-    app.cmd_tx = crate::domains::EngineCommandQueue::new(commands);
+    app.cmd_tx =
+        crate::domains::EngineCommandQueue::new(commands, engine.take_transport_sender().unwrap());
     playing_project(&mut app, &mut engine);
 
     app.push_undo_snapshot(None);
@@ -111,7 +112,8 @@ fn undo_while_playing_keeps_a_project_with_built_in_devices_audible() {
 fn a_plugin_reloading_into_its_retained_slot_keeps_the_project_audible() {
     let mut app = super::test_support::app();
     let (mut engine, commands, _events) = AudioEngine::new();
-    app.cmd_tx = crate::domains::EngineCommandQueue::new(commands);
+    app.cmd_tx =
+        crate::domains::EngineCommandQueue::new(commands, engine.take_transport_sender().unwrap());
     let (track_id, effect_id) = playing_project(&mut app, &mut engine);
 
     // Undo and project open retain the slot, so the routing model is already
@@ -134,7 +136,8 @@ fn a_plugin_reloading_into_its_retained_slot_keeps_the_project_audible() {
 fn unchanged_routing_undo_redo_266_keeps_exact_mixer_level_and_playback() {
     let mut app = super::test_support::app();
     let (mut engine, commands, _events) = AudioEngine::new();
-    app.cmd_tx = crate::domains::EngineCommandQueue::new(commands);
+    app.cmd_tx =
+        crate::domains::EngineCommandQueue::new(commands, engine.take_transport_sender().unwrap());
     playing_project(&mut app, &mut engine);
     let routing = app.state.devices.last_routing.clone();
     let original_gain = app.state.project_tracks.tracks[0].gain;
@@ -155,5 +158,52 @@ fn unchanged_routing_undo_redo_266_keeps_exact_mixer_level_and_playback() {
             "gain={gain}: {level} != {expected}"
         );
         assert!(engine.transport().is_playing());
+    }
+}
+
+#[test]
+fn undo_holds_the_song_end_while_it_re_adds_content() {
+    for channels_change in [false, true] {
+        let mut app = super::test_support::app();
+        let (producer, mut commands) = rtrb::RingBuffer::new(4096);
+        app.cmd_tx = crate::domains::EngineCommandQueue::new(
+            producer,
+            vibez_engine::transport_ring::transport_ring().0,
+        );
+        let track = ProjectTrack::new(TrackId::new(), "Pad".into(), 0);
+        Arc::make_mut(&mut app.state.project_tracks)
+            .tracks
+            .push(track.clone());
+        Arc::make_mut(&mut app.state.arrangement.timeline)
+            .ensure(track.id)
+            .clips
+            .push(steady_clip(1024));
+        app.push_undo_snapshot(None);
+        Arc::make_mut(&mut app.state.arrangement.timeline)
+            .ensure(track.id)
+            .clips
+            .clear();
+        if channels_change {
+            Arc::make_mut(&mut app.state.project_tracks).tracks[0].gain = 0.5;
+        }
+        while commands.pop().is_ok() {}
+
+        let _ = app.update_and_refresh_clips(Message::Project(ProjectMsg::Undo));
+
+        let edits: Vec<_> = std::iter::from_fn(|| commands.pop().ok())
+            .filter(|command| command.is_content_edit())
+            .collect();
+        assert!(
+            edits.len() > 2,
+            "channels_change={channels_change}: the undo re-adds the clip"
+        );
+        assert!(matches!(
+            edits.first(),
+            Some(EngineCommand::BeginContentRebuild)
+        ));
+        assert!(matches!(
+            edits.last(),
+            Some(EngineCommand::EndContentRebuild)
+        ));
     }
 }

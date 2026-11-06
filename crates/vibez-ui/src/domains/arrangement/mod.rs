@@ -17,8 +17,8 @@ use vibez_engine::commands::EngineCommand;
 use super::timeline_editor::TimelineEditorAdapter;
 use super::EngineHandle;
 use crate::state::{
-    ArrangementSelection, ArrangementState, ProjectTrack, ProjectTracksState, TimelineEditorState,
-    TrackTimelineContent, UiNoteClip,
+    ArrangementSelection, ArrangementState, EditDrag, ProjectTrack, ProjectTracksState,
+    TimelineEditorState, TrackTimelineContent, UiNoteClip,
 };
 
 mod messages;
@@ -26,12 +26,21 @@ pub use messages::{
     ArrangementAction, ArrangementCtx, ArrangementMsg, AudioSliceMarkers, ClipRenderedGeometry,
     ClipTransposeRenderRequest,
 };
+mod clip_copies;
+mod clip_drag;
 mod clip_moves;
+mod clip_spans;
 mod clipboard;
+mod content_swap;
+mod control_swap;
+pub use content_swap::swap_changed_content;
+pub use control_swap::swap_changed_controls;
 mod crossfades;
+mod duplicate;
 mod fade_edits;
 mod slice_to_drum_rack;
 mod slicing;
+pub(crate) use overwrite::lane_overwrite;
 pub(crate) use slicing::slice_region_count;
 
 pub const PROJECT_TRACKS_FULL: &str = "This project has no room for another track";
@@ -128,12 +137,27 @@ impl TimelineEditorState {
         self.marquee = None;
     }
 
+    /// The drag in flight is over.
+    pub fn end_drag_resize(&mut self) {
+        self.edit_drag = EditDrag::Idle;
+    }
+
     fn find_content(&self, track_id: TrackId) -> Option<&TrackTimelineContent> {
         self.timeline.get(track_id)
     }
 
     fn find_content_mut(&mut self, track_id: TrackId) -> Option<&mut TrackTimelineContent> {
         Arc::make_mut(&mut self.timeline).get_mut(track_id)
+    }
+
+    /// The Clips a gesture on `anchor` edits: the whole selection when it
+    /// holds `anchor`, otherwise `anchor` alone.
+    fn gesture_targets(&self, anchor: ArrangementSelection) -> Vec<ArrangementSelection> {
+        if self.selected_clips.contains(&anchor) {
+            self.selected_clips.iter().copied().collect()
+        } else {
+            vec![anchor]
+        }
     }
 }
 
@@ -181,11 +205,24 @@ impl TimelineEditorState {
             }
             ArrangementMsg::ToggleClipLoop(track_id, clip_id) => {
                 let mut cmd_data = None;
+                let mut from_start = None;
                 if let Some(track) = self.find_content_mut(track_id) {
                     if let Some(clip) = track.clips.iter_mut().find(|c| c.id == clip_id) {
-                        clip.loop_enabled = !clip.loop_enabled;
-                        if clip.loop_enabled {
-                            clip.reset_loop_region_to_clip();
+                        clip.set_loop_enabled(!clip.loop_enabled);
+                        if !clip.loop_enabled {
+                            // Unlooped, a Clip plays only inside its window,
+                            // which may end before its start marker.
+                            let duration = clip.playable_duration(clip.duration);
+                            let mut fragment = fragment_geometry::audio_fragment(
+                                clip,
+                                clip.name.clone(),
+                                0,
+                                duration,
+                            );
+                            fragment.id = clip.id;
+                            let moved = (fragment.source_offset, fragment.duration)
+                                != (clip.source_offset, clip.duration);
+                            from_start = moved.then_some(fragment);
                         }
                         cmd_data = Some((clip.loop_enabled, clip.loop_start, clip.loop_end));
                     }
@@ -198,6 +235,9 @@ impl TimelineEditorState {
                         loop_start,
                         loop_end,
                     });
+                }
+                if let Some(from_start) = from_start {
+                    self.replace_audio_clip(engine, track_id, clip_id, vec![from_start]);
                 }
             }
             ArrangementMsg::ToggleClipReverse(track_id, clip_id) => {
@@ -377,108 +417,7 @@ impl TimelineEditorState {
                 }
             }
             ArrangementMsg::DuplicateSelectedClip => {
-                let selections: Vec<_> = self.selected_clips.iter().copied().collect();
-                if !selections.is_empty() {
-                    let mut new_selections = HashSet::new();
-                    for selection in &selections {
-                        match selection {
-                            ArrangementSelection::AudioClip { track_id, clip_id } => {
-                                let duplicate = self.find_content(*track_id).and_then(|track| {
-                                    track.clips.iter().find(|c| c.id == *clip_id).map(|clip| {
-                                        let mut duplicate = clip.clone();
-                                        duplicate.id = ClipId::new();
-                                        duplicate.name = clip.name.clone();
-                                        duplicate.position =
-                                            clip.position.saturating_add(clip.duration);
-                                        duplicate.fades = duplicate.fades.unlinked();
-                                        duplicate
-                                    })
-                                });
-                                if let Some(duplicate) = duplicate {
-                                    engine.send(EngineCommand::AddClip {
-                                        insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
-                                        track_id: *track_id,
-                                        clip_id: duplicate.id,
-                                        audio: Arc::clone(&duplicate.audio),
-                                        position: duplicate.position,
-                                        source_offset: duplicate.source_offset,
-                                        start_marker: duplicate.start_marker,
-                                        duration: duplicate.duration,
-                                        loop_enabled: duplicate.loop_enabled,
-                                        loop_start: duplicate.loop_start,
-                                        loop_end: duplicate.loop_end,
-                                        linear_gain: duplicate.gain_db.linear(),
-                                        fades: duplicate.fades,
-                                        playback_direction: duplicate.playback_direction,
-                                        warp_markers: duplicate.warp_markers.clone(),
-                                    });
-                                    let new_id = duplicate.id;
-                                    if let Some(track) = self.find_content_mut(*track_id) {
-                                        track.clips.push(duplicate);
-                                    }
-                                    new_selections.insert(ArrangementSelection::AudioClip {
-                                        track_id: *track_id,
-                                        clip_id: new_id,
-                                    });
-                                }
-                            }
-                            ArrangementSelection::NoteClip { track_id, clip_id } => {
-                                let duplicate =
-                                    self.find_content(*track_id).and_then(|track| {
-                                        track.note_clips.iter().find(|c| c.id == *clip_id).map(
-                                            |clip| {
-                                                let mut duplicate = clip.clone();
-                                                duplicate.id = ClipId::new();
-                                                duplicate.name = clip.name.clone();
-                                                duplicate.position_beats =
-                                                    clip.position_beats + clip.duration_beats;
-                                                duplicate.selected_notes.clear();
-                                                duplicate
-                                            },
-                                        )
-                                    });
-                                if let Some(duplicate) = duplicate {
-                                    engine.send(EngineCommand::AddNoteClip {
-                                        track_id: *track_id,
-                                        insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
-                                            duplicate.id,
-                                            duplicate.position_beats,
-                                            duplicate.duration_beats,
-                                            duplicate.start_marker_beats,
-                                            duplicate.loop_enabled,
-                                            duplicate.loop_start_beats,
-                                            duplicate.loop_end_beats,
-                                            duplicate.groove_grid,
-                                        ),
-                                    });
-                                    for note in &duplicate.notes {
-                                        engine.send(EngineCommand::AddNote {
-                                            track_id: *track_id,
-                                            clip_id: duplicate.id,
-                                            insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(*note),
-                                        });
-                                    }
-                                    let new_id = duplicate.id;
-                                    if let Some(track) = self.find_content_mut(*track_id) {
-                                        track.note_clips.push(duplicate);
-                                    }
-                                    new_selections.insert(ArrangementSelection::NoteClip {
-                                        track_id: *track_id,
-                                        clip_id: new_id,
-                                    });
-                                }
-                            }
-                        }
-                    }
-                    // Select the new copies
-                    self.selected_clips = new_selections;
-                    let count = selections.len();
-                    action.status = Some(if count == 1 {
-                        "Duplicated clip".to_string()
-                    } else {
-                        format!("Duplicated {count} clips")
-                    });
-                }
+                return self.op_duplicate_selection(project_tracks, engine, ctx);
             }
             ArrangementMsg::CopySelectedClips => {
                 unreachable!("clipboard messages are resolved at the application boundary")
@@ -501,12 +440,25 @@ impl TimelineEditorState {
                     new_duration_beats,
                 );
             }
+            ArrangementMsg::TrimSelectedClipsStart {
+                anchor,
+                new_start_beats,
+            } => {
+                return self.op_trim_selected_clips_start(engine, ctx, anchor, new_start_beats);
+            }
+            ArrangementMsg::DragClips { step, edit } => {
+                return self.drag_clips(project_tracks, engine, ctx, step, *edit);
+            }
+            ArrangementMsg::DropClips { anchor } => {
+                self.clip_drag = None;
+                return self.op_drop_clips(engine, ctx, anchor);
+            }
             ArrangementMsg::MoveSelectedClips {
                 anchor,
                 new_position_beats,
                 target_track,
             } => {
-                self.move_selected_clips(
+                return self.move_selected_clips(
                     project_tracks,
                     engine,
                     ctx,
@@ -600,68 +552,26 @@ impl TimelineEditorState {
                 if let Some(track) = self.find_content(track_id) {
                     if let Some(clip) = track.note_clips.iter().find(|c| c.id == clip_id) {
                         let new_pos = clip.position_beats + clip.duration_beats;
-                        new_clip_data = Some((
-                            UiNoteClip {
-                                id: new_clip_id,
-                                name: clip.name.clone(),
-                                position_beats: new_pos,
-                                duration_beats: clip.duration_beats,
-                                notes: clip.notes.clone(),
-                                selected_notes: HashSet::new(),
-                                start_marker_beats: clip.start_marker_beats,
-                                loop_enabled: clip.loop_enabled,
-                                loop_start_beats: clip.loop_start_beats,
-                                loop_end_beats: clip.loop_end_beats,
-                                groove_grid: clip.groove_grid,
-                            },
-                            new_pos,
-                            clip.duration_beats,
-                            clip.notes.clone(),
-                            clip.start_marker_beats,
-                            clip.loop_enabled,
-                            clip.loop_start_beats,
-                            clip.loop_end_beats,
-                            clip.groove_grid,
-                        ));
+                        new_clip_data = Some(UiNoteClip {
+                            id: new_clip_id,
+                            name: clip.name.clone(),
+                            position_beats: new_pos,
+                            duration_beats: clip.duration_beats,
+                            notes: clip.notes.clone(),
+                            selected_notes: HashSet::new(),
+                            start_marker_beats: clip.start_marker_beats,
+                            loop_enabled: clip.loop_enabled,
+                            loop_start_beats: clip.loop_start_beats,
+                            loop_end_beats: clip.loop_end_beats,
+                            groove_grid: clip.groove_grid,
+                        });
                     }
                 }
 
-                if let Some((
-                    new_clip,
-                    pos,
-                    dur,
-                    notes,
-                    start_marker_beats,
-                    loop_enabled,
-                    loop_start,
-                    loop_end,
-                    groove_grid,
-                )) = new_clip_data
-                {
+                if let Some(new_clip) = new_clip_data {
+                    engine.send(new_clip.add_command(track_id));
                     if let Some(track) = self.find_content_mut(track_id) {
                         track.note_clips.push(new_clip);
-                    }
-                    engine.send(EngineCommand::AddNoteClip {
-                        track_id,
-                        insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
-                            new_clip_id,
-                            pos,
-                            dur,
-                            start_marker_beats,
-                            loop_enabled,
-                            loop_start,
-                            loop_end,
-                            groove_grid,
-                        ),
-                    });
-                    for note in &notes {
-                        engine.send(EngineCommand::AddNote {
-                            track_id,
-                            clip_id: new_clip_id,
-                            insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(
-                                *note,
-                            ),
-                        });
                     }
                     self.selected_note_clip = Some((track_id, new_clip_id));
                     action.status = Some("Duplicated clip".to_string());
@@ -730,28 +640,26 @@ impl TimelineEditorState {
                 for selection in clips {
                     match selection {
                         ArrangementSelection::AudioClip { track_id, clip_id } => {
-                            let _ = self.update(
-                                project_tracks,
-                                ArrangementMsg::SplitAudioClip {
+                            action.mark_dirty |= self
+                                .op_split_audio_clip(
+                                    engine,
+                                    ctx,
                                     track_id,
                                     clip_id,
-                                    split_position: ctx.playhead_samples,
-                                },
-                                engine,
-                                ctx,
-                            );
+                                    ctx.playhead_samples,
+                                )
+                                .mark_dirty;
                         }
                         ArrangementSelection::NoteClip { track_id, clip_id } => {
-                            let _ = self.update(
-                                project_tracks,
-                                ArrangementMsg::SplitNoteClip {
+                            action.mark_dirty |= self
+                                .op_split_note_clip(
+                                    engine,
+                                    ctx,
                                     track_id,
                                     clip_id,
-                                    split_beat: ctx.playhead_beats,
-                                },
-                                engine,
-                                ctx,
-                            );
+                                    ctx.playhead_beats,
+                                )
+                                .mark_dirty;
                         }
                     }
                 }
@@ -858,9 +766,12 @@ impl TimelineEditorState {
 }
 
 mod audio_clip_inspector;
+mod clip_edges;
+mod clip_trims;
 mod fragment_geometry;
 mod media_ops;
 mod ops;
+mod overwrite;
 mod transient_markers;
 mod warp_markers;
 mod warp_ops;

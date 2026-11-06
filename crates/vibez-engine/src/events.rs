@@ -172,6 +172,9 @@ pub enum EngineEvent {
         clip_id: Option<ClipId>,
         request_id: u64,
         effective_at_samples: u64,
+        /// Clip-local position at `effective_at_samples`; non-zero after a
+        /// Legato launch.
+        start_position: u64,
         retired: Option<Box<PreparedClipPlayback>>,
     },
     /// A snapshot cannot reconstruct every missed Capture boundary.

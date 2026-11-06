@@ -1,4 +1,4 @@
-use vibez_core::id::TrackId;
+use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::InstrumentKind;
 use vibez_core::perform::{NoteRepeatRate, SwingAmount, SwingOffset};
 use vibez_core::time::TempoMap;
@@ -8,6 +8,9 @@ use crate::note_repeat::{NoteRepeatTrigger, TrackNoteRepeats};
 use crate::playback_source::PreparedPlaybackSource;
 pub use crate::playback_source::{EngineClip, EngineNoteClip};
 mod channel_strip;
+mod clip_launch;
+#[cfg(test)]
+mod clip_loop_tests;
 mod effect_slot;
 mod groove;
 mod note_repeat;
@@ -37,13 +40,13 @@ pub(crate) struct QueuedTrackMute {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct MuteRamp {
+struct GainRamp {
     gain: f32,
     target: f32,
     remaining: u32,
 }
 
-impl Default for MuteRamp {
+impl Default for GainRamp {
     fn default() -> Self {
         Self {
             gain: 1.0,
@@ -53,16 +56,21 @@ impl Default for MuteRamp {
     }
 }
 
-impl MuteRamp {
+impl GainRamp {
     fn set_muted(&mut self, muted: bool, immediate: bool) {
         let target = if muted { 0.0 } else { 1.0 };
         if immediate {
-            self.gain = target;
-            self.target = target;
-            self.remaining = 0;
+            self.ramp_to(target, 0);
         } else if self.target != target {
-            self.target = target;
-            self.remaining = MUTE_RAMP_FRAMES;
+            self.ramp_to(target, MUTE_RAMP_FRAMES);
+        }
+    }
+
+    fn ramp_to(&mut self, target: f32, frames: u32) {
+        self.target = target;
+        self.remaining = frames;
+        if frames == 0 {
+            self.gain = target;
         }
     }
 
@@ -144,7 +152,11 @@ pub struct EngineTrack {
     pub(crate) queued_mute: Option<QueuedTrackMute>,
     automation_mute: Option<bool>,
     automation_overrides: AutomationOverrides,
-    mute_ramp: MuteRamp,
+    mute_ramp: GainRamp,
+    launch_declick: GainRamp,
+    /// Set when a Clip starts mid-pattern, so the next render sounds the
+    /// notes it would already be holding.
+    pickup_launch_notes: bool,
     pub solo: bool,
     pub swing_offset: Option<SwingOffset>,
     /// Block-evaluated automation override; manual FOLLOW/offset remains intact.
@@ -157,8 +169,8 @@ pub struct EngineTrack {
     /// the routing graph stays acyclic by construction.
     pub sends: Vec<(TrackId, f32)>,
     pub instrument: Option<Box<dyn Instrument>>,
-    /// Reused block-scheduler scratch: (frame_offset, pitch, velocity).
-    timed_note_ons: Vec<(u32, u8, u8)>,
+    /// Reused block-scheduler scratch.
+    timed_note_ons: Vec<groove::TimedNoteOn>,
     /// Reused block-scheduler scratch: (frame_offset, pitch).
     timed_note_offs: Vec<(u32, u8)>,
     note_repeats: TrackNoteRepeats,
@@ -168,6 +180,9 @@ pub struct EngineTrack {
     /// adjacent sample positions, so a jump would otherwise strand
     /// every sounding note in the "held down" state forever.
     active_notes: u128,
+    /// The Clip whose note started each pitch in `active_notes`, so an edit
+    /// of one Clip can release its own voices and leave the others.
+    note_owners: [Option<ClipId>; 128],
     /// Drum Rack pitches triggered by resident clips during this render block.
     /// Cosmetic feedback is deliberately lossy when the UI event ring is full.
     pending_note_activity: u128,
@@ -251,17 +266,7 @@ impl EngineTrack {
 
         self.timed_note_ons.clear();
         self.timed_note_offs.clear();
-        if !self.suppress_source_notes {
-            collect_timed_note_events(
-                &self.playback_source.note_clips,
-                pos,
-                frames,
-                spb,
-                swing,
-                &mut self.timed_note_ons,
-                &mut self.timed_note_offs,
-            );
-        }
+        self.collect_source_note_events(pos, frames, spb, swing);
 
         // Note Repeat is generated from live held notes rather than resident
         // clip events, so retain its frame walk while the clip scheduler is
@@ -285,7 +290,7 @@ impl EngineTrack {
         for &(frame, pitch) in &self.timed_note_offs {
             instrument.note_off_at(pitch, frame);
         }
-        for &(frame, pitch, vel) in &self.timed_note_ons {
+        for &(frame, pitch, vel, _) in &self.timed_note_ons {
             instrument.note_on_at(pitch, vel, frame);
             if reports_drum_pad_activity {
                 self.pending_note_activity |= 1u128 << pitch;
@@ -298,13 +303,14 @@ impl EngineTrack {
         for &(_, pitch) in &self.timed_note_offs {
             self.active_notes &= !(1u128 << pitch);
         }
-        for &(frame, pitch, _) in &self.timed_note_ons {
+        for &(frame, pitch, _, clip_id) in &self.timed_note_ons {
             let killed_later = self
                 .timed_note_offs
                 .iter()
                 .any(|&(off_frame, off_pitch)| off_pitch == pitch && off_frame > frame);
             if !killed_later {
                 self.active_notes |= 1u128 << pitch;
+                self.note_owners[pitch as usize] = Some(clip_id);
             }
         }
 
@@ -346,17 +352,7 @@ impl EngineTrack {
             .is_some_and(|instrument| instrument.instrument_kind() == InstrumentKind::DrumRack);
         self.timed_note_ons.clear();
         self.timed_note_offs.clear();
-        if !self.suppress_source_notes {
-            collect_timed_note_events(
-                &self.playback_source.note_clips,
-                pos,
-                frames,
-                spb,
-                swing,
-                &mut self.timed_note_ons,
-                &mut self.timed_note_offs,
-            );
-        }
+        self.collect_source_note_events(pos, frames, spb, swing);
         let mut note_on_index = 0;
         let mut note_off_index = 0;
 
@@ -377,9 +373,10 @@ impl EngineTrack {
             while note_on_index < self.timed_note_ons.len()
                 && self.timed_note_ons[note_on_index].0 == frame as u32
             {
-                let (_, pitch, velocity) = self.timed_note_ons[note_on_index];
+                let (_, pitch, velocity, clip_id) = self.timed_note_ons[note_on_index];
                 instrument.note_on(pitch, velocity);
                 self.active_notes |= 1u128 << pitch;
+                self.note_owners[pitch as usize] = Some(clip_id);
                 if reports_drum_pad_activity {
                     self.pending_note_activity |= 1u128 << pitch;
                 }
@@ -406,6 +403,36 @@ impl EngineTrack {
         }
 
         rendered
+    }
+
+    fn collect_source_note_events(
+        &mut self,
+        pos: u64,
+        frames: usize,
+        samples_per_beat: f64,
+        swing: SwingAmount,
+    ) {
+        if self.suppress_source_notes {
+            return;
+        }
+        if std::mem::take(&mut self.pickup_launch_notes) {
+            groove::collect_sounding_note_ons(
+                &self.playback_source.note_clips,
+                pos,
+                samples_per_beat,
+                swing,
+                &mut self.timed_note_ons,
+            );
+        }
+        collect_timed_note_events(
+            &self.playback_source.note_clips,
+            pos,
+            frames,
+            samples_per_beat,
+            swing,
+            &mut self.timed_note_ons,
+            &mut self.timed_note_offs,
+        );
     }
 
     pub(crate) fn take_note_activity(&mut self) -> u128 {

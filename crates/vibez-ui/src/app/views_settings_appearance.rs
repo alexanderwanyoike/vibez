@@ -1,245 +1,213 @@
-//! Appearance settings: theme selection and interface scale.
-//!
-//! Split out of `views_settings.rs`, which had reached the 1,000-line
-//! ceiling this repository enforces.
+//! Appearance settings: theme selection, colour strength and interface scale.
 
-use iced::widget::{button, column, container, horizontal_space, row, slider, text, text_input};
+use iced::widget::{button, column, container, row, stack, text, text_input, Space};
 use iced::{Element, Length, Theme};
 
-use crate::icons;
 use crate::message::Message;
 use crate::theme as th;
 use crate::ui_settings::{INTERFACE_SCALE_MAX, INTERFACE_SCALE_MIN};
 
+use super::views_settings_rows::{action, group, hint, label_block, setting_row, slider_control};
 use super::*;
 
-impl App {
-    pub(super) fn view_settings_appearance_tab(&self) -> Element<'_, Message> {
-        use iced::widget::scrollable;
+const TILE_COLUMNS: usize = 5;
+const TILE_H: f32 = 74.0;
+const TILE_RADIUS: f32 = 8.0;
+/// Each preview bar's lead-in and length, in parts of the tile's main panel.
+const TILE_BARS: [(u16, u16); 3] = [(0, 78), (20, 54), (8, 66)];
 
-        let title = text("Appearance").size(14).color(th::text());
-        let hint = text(
-            "Themes recolor the whole interface, track palette included. \
-             Drop .vzt files in the themes folder and rescan to add your own.",
-        )
-        .size(11)
-        .color(th::text_dim());
-
-        // One selectable row per theme: swatch strip + name.
-        let theme_row = |palette: &th::ThemePalette| -> Element<'_, Message> {
-            let name = palette.name.clone();
-            let selected = self.state.current_theme_name == name;
-            let mut swatches = row![].spacing(2);
-            for color in [
-                palette.bg_dark,
-                palette.bg_elevated,
-                palette.accent,
-                palette.track_colors[0],
-                palette.track_colors[3],
-                palette.track_colors[5],
-            ] {
-                swatches = swatches.push(
-                    container(
-                        column![]
-                            .width(Length::Fixed(14.0))
-                            .height(Length::Fixed(14.0)),
-                    )
-                    .style(move |_theme: &Theme| container::Style {
-                        background: Some(color.into()),
-                        border: iced::Border {
-                            color: th::border(),
-                            width: 1.0,
-                            radius: 2.0.into(),
-                        },
-                        ..Default::default()
-                    }),
-                );
-            }
-            let label =
-                text(name.clone())
-                    .size(12)
-                    .color(if selected { th::accent() } else { th::text() });
-            let marker: Element<'_, Message> = if selected {
-                icons::icon(icons::CIRCLE_DOT)
-                    .size(11)
-                    .color(th::accent())
-                    .into()
-            } else {
-                icons::icon(icons::CIRCLE)
-                    .size(11)
-                    .color(th::text_muted())
-                    .into()
-            };
-            button(
-                row![marker, swatches, label]
-                    .spacing(10)
-                    .align_y(iced::Alignment::Center),
-            )
-            .on_press(Message::SelectTheme(name))
-            .padding([5, 8])
+/// A preview of `palette`: its frame, side and main panels, three of its
+/// track colours and its accent, ringed in the accent while it is in use.
+fn theme_tile(palette: &th::ThemePalette, selected: bool) -> Element<'static, Message> {
+    let panel = palette.bg_surface;
+    let rounded = |colour: iced::Color, radius: f32| {
+        move |_theme: &Theme| container::Style {
+            background: Some(colour.into()),
+            border: iced::Border {
+                radius: radius.into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    };
+    let mut bars = column![].spacing(5);
+    for ((lead, length), index) in TILE_BARS.into_iter().zip([0, 2, 5]) {
+        let colour = th::colour_strength().track(palette.track_colors[index]);
+        bars = bars.push(row![
+            Space::with_width(Length::FillPortion(lead.max(1))).height(9),
+            container(Space::new(Length::Fill, 9.0))
+                .width(Length::FillPortion(length))
+                .style(rounded(colour, 2.0)),
+            Space::with_width(Length::FillPortion(100 - lead - length)),
+        ]);
+    }
+    let preview = row![
+        container(Space::new(Length::Fill, Length::Fill))
+            .width(Length::FillPortion(22))
+            .height(Length::Fill)
+            .style(rounded(panel, 4.0)),
+        container(bars)
+            .padding(6)
+            .width(Length::FillPortion(78))
+            .height(Length::Fill)
+            .style(rounded(panel, 4.0)),
+    ]
+    .spacing(4);
+    let dot = container(Space::new(7.0, 7.0)).style(rounded(palette.accent, 3.5));
+    let frame = palette.display_bg;
+    let tile = container(stack![
+        preview,
+        container(dot)
             .width(Length::Fill)
-            .style(move |_theme: &Theme, status| {
-                let bg = if selected {
-                    Some(th::bg_elevated().into())
-                } else {
-                    match status {
-                        button::Status::Hovered | button::Status::Pressed => {
-                            Some(th::bg_hover().into())
-                        }
-                        _ => None,
-                    }
-                };
-                button::Style {
-                    background: bg,
-                    text_color: th::text(),
-                    border: iced::Border {
-                        color: if selected {
-                            th::accent_dim()
-                        } else {
-                            iced::Color::TRANSPARENT
-                        },
-                        width: 1.0,
-                        radius: 4.0.into(),
-                    },
-                    ..Default::default()
-                }
-            })
-            .into()
-        };
-
-        let mut builtin_col = column![].spacing(2);
-        for palette in crate::themes::builtins() {
-            builtin_col = builtin_col.push(theme_row(&palette));
-        }
-
-        // User theme section: scanned .vzt files + rescan, like the
-        // plugin library.
-        let user_header = row![
-            text("Your Themes").size(13).color(th::text()),
-            horizontal_space(),
-            text(crate::themes::themes_dir().display().to_string())
-                .size(10)
-                .color(th::text_muted()),
-            button(text("Rescan").size(11).color(th::accent()))
-                .on_press(Message::RescanThemes)
-                .padding([3, 10])
-                .style(|_theme: &Theme, status| {
-                    let bg = match status {
-                        button::Status::Hovered | button::Status::Pressed => {
-                            Some(th::bg_hover().into())
-                        }
-                        _ => None,
-                    };
-                    button::Style {
-                        background: bg,
-                        text_color: th::accent(),
-                        border: iced::Border {
-                            color: th::accent_dim(),
-                            width: 1.0,
-                            radius: 4.0.into(),
-                        },
-                        ..Default::default()
-                    }
-                }),
-        ]
-        .spacing(8)
-        .align_y(iced::Alignment::Center);
-
-        let mut user_col = column![].spacing(2);
-        if self.state.user_themes.is_empty() {
-            user_col = user_col.push(
-                text("No .vzt themes found: save one below or drop files in the folder.")
-                    .size(11)
-                    .color(th::text_muted()),
-            );
-        } else {
-            for user in &self.state.user_themes {
-                user_col = user_col.push(theme_row(&user.palette));
-            }
-        }
-
-        // Save the active palette under a new name.
-        let save_row = row![
-            text_input("Theme name...", &self.state.theme_save_name)
-                .on_input(Message::ThemeSaveNameChanged)
-                .on_submit(Message::SaveCurrentTheme)
-                .size(12)
-                .padding([5, 8]),
-            button(text("Save Current").size(11).color(th::text()))
-                .on_press(Message::SaveCurrentTheme)
-                .padding([6, 12])
-                .style(|_theme: &Theme, status| {
-                    let bg = match status {
-                        button::Status::Hovered | button::Status::Pressed => {
-                            Some(th::bg_hover().into())
-                        }
-                        _ => None,
-                    };
-                    button::Style {
-                        background: bg,
-                        text_color: th::text(),
-                        border: iced::Border {
-                            color: th::accent_dim(),
-                            width: 1.0,
-                            radius: 4.0.into(),
-                        },
-                        ..Default::default()
-                    }
-                }),
-        ]
-        .spacing(8)
-        .align_y(iced::Alignment::Center);
-
-        let divider = || {
-            container(column![].height(Length::Fixed(1.0)).width(Length::Fill)).style(
-                |_theme: &Theme| container::Style {
-                    background: Some(th::border().into()),
-                    ..Default::default()
-                },
-            )
-        };
-
-        let list = scrollable(column![builtin_col, divider(), user_header, user_col,].spacing(8))
-            .height(Length::Fixed(300.0));
-
-        // Interface scale. The readout is a percentage because that is
-        // how the setting is named and reasoned about; the slider works
-        // in the multiplier iced actually consumes.
-        let scale = self.interface_scale;
-        let scale_header = row![
-            text("Interface scale").size(13).color(th::text()),
-            horizontal_space(),
-            text(format!("{}%", (scale * 100.0).round() as i32))
-                .size(12)
-                .color(th::accent()),
-        ]
-        .align_y(iced::Alignment::Center);
-        let scale_hint = text(
-            "Resizes every panel, control and font together, for high-density \
-             displays or for reading from across the room. Timeline zoom is \
-             separate and keeps its own setting.",
-        )
-        .size(11)
-        .color(th::text_dim());
-        let scale_slider = slider(
-            INTERFACE_SCALE_MIN..=INTERFACE_SCALE_MAX,
-            scale,
-            Message::SetInterfaceScale,
-        )
-        .step(0.05_f32);
-
+            .align_x(iced::alignment::Horizontal::Right)
+            .padding([3, 3]),
+    ])
+    .padding(6)
+    .width(Length::Fill)
+    .height(TILE_H)
+    .style(move |_theme: &Theme| container::Style {
+        background: Some(frame.into()),
+        border: iced::Border {
+            color: if selected {
+                th::accent()
+            } else {
+                th::hairline(th::bg_elevated())
+            },
+            width: if selected { 2.0 } else { 1.0 },
+            radius: TILE_RADIUS.into(),
+        },
+        ..Default::default()
+    });
+    let name = palette.name.clone();
+    button(
         column![
-            title,
-            hint,
-            list,
-            divider(),
-            save_row,
-            divider(),
-            scale_header,
-            scale_hint,
-            scale_slider,
+            tile,
+            text(name.clone())
+                .size(11.5)
+                .font(iced::Font {
+                    weight: if selected {
+                        iced::font::Weight::Semibold
+                    } else {
+                        iced::font::Weight::Medium
+                    },
+                    ..iced::Font::DEFAULT
+                })
+                .color(if selected { th::text() } else { th::text_dim() })
+                .wrapping(iced::widget::text::Wrapping::None),
         ]
-        .spacing(10)
-        .into()
+        .spacing(6),
+    )
+    .on_press(Message::SelectTheme(name))
+    .padding(0)
+    .width(Length::FillPortion(1))
+    .style(|_theme: &Theme, _status| button::Style::default())
+    .into()
+}
+
+impl App {
+    /// `palettes` as rows of tiles.
+    fn theme_grid<'p>(
+        &self,
+        palettes: impl IntoIterator<Item = &'p th::ThemePalette>,
+    ) -> Element<'static, Message> {
+        let palettes: Vec<&th::ThemePalette> = palettes.into_iter().collect();
+        let mut grid = column![].spacing(12);
+        for chunk in palettes.chunks(TILE_COLUMNS) {
+            let mut tiles = row![].spacing(10);
+            for palette in chunk {
+                tiles = tiles.push(theme_tile(
+                    palette,
+                    self.state.current_theme_name == palette.name,
+                ));
+            }
+            for _ in chunk.len()..TILE_COLUMNS {
+                tiles = tiles.push(Space::with_width(Length::FillPortion(1)));
+            }
+            grid = grid.push(tiles);
+        }
+        grid.into()
+    }
+
+    pub(super) fn view_settings_appearance_tab(&self) -> Element<'_, Message> {
+        let builtins = crate::themes::builtins();
+        let themes = group([column![
+            label_block(
+                "Theme",
+                Some(hint("Recolours the whole interface, track colours included.").into()),
+            ),
+            self.theme_grid(builtins.iter()),
+        ]
+        .spacing(14)
+        .into()]);
+
+        let user_palettes: Element<'_, Message> = if self.state.user_themes.is_empty() {
+            hint("No .vzt themes yet. Save the current look below, or drop theme files in the folder.")
+                .into()
+        } else {
+            self.theme_grid(self.state.user_themes.iter().map(|user| &user.palette))
+        };
+        let your_themes = group([
+            setting_row(
+                "Your themes",
+                Some(hint(crate::themes::themes_dir().display().to_string()).into()),
+                action("Rescan", Some(Message::RescanThemes), false),
+            ),
+            user_palettes,
+            row![
+                text_input("Theme name", &self.state.theme_save_name)
+                    .on_input(Message::ThemeSaveNameChanged)
+                    .on_submit(Message::SaveCurrentTheme)
+                    .size(11.5)
+                    .padding([6, 10])
+                    .style(super::views_browser_style::browser_search_style),
+                action(
+                    "Save current as theme",
+                    Some(Message::SaveCurrentTheme),
+                    true
+                ),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center)
+            .into(),
+        ]);
+
+        // The readout is a percentage because that is how the setting is
+        // named; the slider works in the multiplier iced consumes.
+        let scale = self.interface_scale;
+        let look = group([
+            setting_row(
+                "Colour strength",
+                Some(
+                    hint("How strongly track colours show on clips, headers, the mixer and Perform.")
+                        .into(),
+                ),
+                crate::widgets::device_controls::segmented(
+                    &[
+                        (th::ColourStrength::Vivid, "Vivid"),
+                        (th::ColourStrength::Medium, "Medium"),
+                        (th::ColourStrength::Soft, "Soft"),
+                    ],
+                    th::colour_strength(),
+                    Message::SetColourStrength,
+                    th::accent(),
+                ),
+            ),
+            setting_row(
+                "Interface scale",
+                Some(
+                    hint("Resizes every panel, control and font together. Timeline zoom keeps its own setting.")
+                        .into(),
+                ),
+                slider_control(
+                    INTERFACE_SCALE_MIN..=INTERFACE_SCALE_MAX,
+                    scale,
+                    0.05,
+                    Message::SetInterfaceScale,
+                    format!("{}%", (scale * 100.0).round() as i32),
+                ),
+            ),
+        ]);
+
+        column![themes, look, your_themes].spacing(16).into()
     }
 }

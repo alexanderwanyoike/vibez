@@ -13,7 +13,12 @@ use super::*;
 
 /// One of a kit's samples decoded and staged as project media, from its
 /// bytes and where they came from.
-fn stage_sample(file: &str, origin: &Path, bytes: &[u8]) -> Result<KitSample, String> {
+fn stage_sample(
+    file: &str,
+    origin: &Path,
+    bytes: &[u8],
+    sample_rate: u32,
+) -> Result<KitSample, String> {
     let extension = Path::new(file)
         .extension()
         .map(|value| value.to_string_lossy().into_owned());
@@ -21,6 +26,7 @@ fn stage_sample(file: &str, origin: &Path, bytes: &[u8]) -> Result<KitSample, St
         std::io::Cursor::new(bytes.to_vec()),
         extension.as_deref(),
     )
+    .and_then(|audio| vibez_audio_io::file_io::into_sample_rate(audio, sample_rate))
     .map_err(|error| format!("{file}: {error}"))?;
     let source = vibez_project::project_format_v1::stage_local_content(origin, file, bytes)
         .map_err(|error| format!("{file}: {error}"))?;
@@ -42,7 +48,7 @@ fn unique_samples(kit: &DrumKit) -> Vec<String> {
     files
 }
 
-fn read_kit_folder(folder: &Path) -> Result<(DrumKit, Vec<KitSample>), String> {
+fn read_kit_folder(folder: &Path, sample_rate: u32) -> Result<(DrumKit, Vec<KitSample>), String> {
     let text = std::fs::read_to_string(folder.join(KIT_FILE))
         .map_err(|error| format!("{KIT_FILE}: {error}"))?;
     let kit: DrumKit = serde_json::from_str(&text).map_err(|error| error.to_string())?;
@@ -52,7 +58,7 @@ fn read_kit_folder(folder: &Path) -> Result<(DrumKit, Vec<KitSample>), String> {
         let path = folder.join(&file);
         // A missing sample leaves its pad silent rather than the kit unloaded.
         if let Ok(bytes) = std::fs::read(&path) {
-            samples.push(stage_sample(&file, &path, &bytes)?);
+            samples.push(stage_sample(&file, &path, &bytes, sample_rate)?);
         }
     }
     Ok((kit, samples))
@@ -81,6 +87,7 @@ impl App {
             return Task::none();
         };
         self.state.status_text = format!("Loading kit {}...", factory.name);
+        let sample_rate = self.state.transport.sample_rate;
         Task::perform(
             async move {
                 tokio::task::spawn_blocking(move || {
@@ -91,7 +98,7 @@ impl App {
                         let origin = PathBuf::from("factory-kits")
                             .join(factory.folder)
                             .join(&file);
-                        samples.push(stage_sample(&file, &origin, bytes)?);
+                        samples.push(stage_sample(&file, &origin, bytes, sample_rate)?);
                     }
                     Ok((kit, samples))
                 })
@@ -124,9 +131,10 @@ impl App {
             return Task::none();
         };
         self.state.status_text = "Loading kit...".into();
+        let sample_rate = self.state.transport.sample_rate;
         Task::perform(
             async move {
-                tokio::task::spawn_blocking(move || read_kit_folder(&folder))
+                tokio::task::spawn_blocking(move || read_kit_folder(&folder, sample_rate))
                     .await
                     .map_err(|error| error.to_string())?
             },
@@ -244,7 +252,8 @@ mod tests {
         let (kit, samples) = kit_from_rack("Mine", &pads).unwrap();
         write_kit_folder(folder.path(), &kit, &samples).unwrap();
 
-        let (read, staged): (DrumKit, Vec<KitSample>) = read_kit_folder(folder.path()).unwrap();
+        let (read, staged): (DrumKit, Vec<KitSample>) =
+            read_kit_folder(folder.path(), 44_100).unwrap();
 
         assert_eq!(read, kit);
         assert_eq!(staged.len(), 1);
@@ -252,6 +261,23 @@ mod tests {
         let loaded = rack_pads(&read, &staged);
         assert_eq!(loaded[3].param(param::TUNE), -3.0);
         assert!(loaded[3].audio.is_some());
+    }
+
+    #[test]
+    fn a_kit_s_samples_load_at_the_device_s_sample_rate() {
+        let folder = tempfile::tempdir().unwrap();
+        let mut pads = crate::state::default_drum_rack_pads();
+        pads[0].audio = Some(Arc::new(vibez_core::audio_buffer::DecodedAudio {
+            channels: vec![vec![0.25; 44_100]],
+            sample_rate: 44_100,
+        }));
+        let (kit, samples) = kit_from_rack("Mine", &pads).unwrap();
+        write_kit_folder(folder.path(), &kit, &samples).unwrap();
+
+        let (_, staged) = read_kit_folder(folder.path(), 48_000).unwrap();
+
+        assert_eq!(staged[0].audio.sample_rate, 48_000);
+        assert_eq!(staged[0].audio.num_frames(), 48_000);
     }
 
     #[test]
@@ -269,7 +295,7 @@ mod tests {
         )
         .unwrap();
 
-        let (_, staged) = read_kit_folder(folder.path()).unwrap();
+        let (_, staged) = read_kit_folder(folder.path(), 44_100).unwrap();
 
         assert_eq!(staged.len(), 1);
         assert_eq!(staged[0].file, "kick.wav");

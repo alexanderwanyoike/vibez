@@ -486,6 +486,14 @@ viewport at a bounded musical rate. A generic conformance harness currently
 runs against the Arrange adapter and is reusable unchanged by the Section
 adapter.
 
+`SnapTargets` (`timeline_snap.rs`) is the one snap layer above that geometry.
+Each timeline builds its targets once per view (`for_arrangement`,
+`for_section`): the grid, every Clip edge, the time selection, and that
+timeline's markers. Clicks, Clip moves and edge drags, fades and loop brace
+drags all ask it where they land, so a magnet within its radius beats the
+grid everywhere, Alt bypasses every target, and an edge drag never leaves a
+span shorter than `SHORTEST_LENGTH_BEATS`.
+
 ```mermaid
 flowchart LR
     PT["ProjectTracksState<br/>TrackId + channel/devices/mixer"]
@@ -533,6 +541,37 @@ The engine lives on the cpal audio callback. Its rules:
 - **No allocation, no locks, no I/O** in the callback, ever.
 - All mutations arrive as `EngineCommand` values through the ring buffer and
   are drained at the start of each callback.
+- Transport commands (Play, Stop, Seek, loop changes) travel on their own
+  transport ring. A content edit waiting for storage pauses the main ring, but
+  a transport command overtakes it and the content and channel edits queued
+  behind it (`EngineCommand::transport_may_overtake`). Each one is stamped
+  with the number of other commands sent before it, such as tempo, Section or
+  Capture commands, and waits for those.
+- A note clip is sent as one prepared insertion that carries all its notes;
+  `AddNote` is for single edits.
+- A clip drag is heard as it moves, so each drag step is an in-place edit of
+  the resident clip (`MoveClip`, `SetClipBounds`, `MoveNoteClip`,
+  `SetNoteClipBounds`) and never re-adds it. A cross-lane drop re-inserts the
+  clip with storage for the target lane's clips, so it lands in the next
+  callback. While the main ring is full, a waiting edit of the same kind and
+  clip is overwritten instead of queued, so only the latest position waits.
+  `MoveNoteClip` and `SetNoteClipBounds` release only the notes that clip
+  started and no longer holds under the playhead; the track remembers which
+  clip started each sounding pitch.
+- Arrange playback stops on its own only when the playhead reaches the song
+  end; a playhead already past it keeps going. Undo and Capture wrap the
+  content they re-add in `BeginContentRebuild`/`EndContentRebuild`, and the
+  song end does not stop playback in between, so a song that is briefly
+  shorter while it is rebuilt never stops or moves the playhead.
+- The UI's `PlaybackPhase` follows the engine's `PlaybackStarted` and
+  `PlaybackStopped` events; an unconfirmed Play or Stop is `Starting` or
+  `Stopping`. Every stop reports `PlaybackStopped`, including the one at the
+  song end.
+- Arrange keeps a play-start marker, placed by clicking the timeline or ruler
+  and drawn on the ruler. Stop returns the playhead to it, Stop while stopped
+  (or Home) moves it to the song start, and a stop at the song end returns
+  there too. Shift+Space plays from where playback last stopped. Perform's
+  Stop leaves the Arrange cursor alone.
 - Everything the engine needs (decoded audio, plugin instances, note data) is
   handed to it fully constructed; `Arc<DecodedAudio>` shares immutable sample
   data with the UI without copying.
@@ -746,9 +785,16 @@ initialization, while loading the declared executable.
   in the `.vzp` container. Only Arrange content is replayed to the engine until
   Section launch/playback is implemented.
 - Undo/redo keeps independently shared snapshots of Project Tracks, Arrange
-  Timeline Content, and Sections (audio is also shared via `Arc`). Restoring a
-  snapshot tears down the engine side and replays the currently playable
-  Arrange store.
+  Timeline Content, and Sections (audio is also shared via `Arc`). When the
+  snapshot's Project Tracks hold the same channels and devices as the current
+  ones (`same_channel_layout`), restoring it sends the mixer values, send
+  levels and built-in device and drum pad values that differ as control
+  commands and swaps only the clips and automation lanes that differ, so
+  tracks, devices and plugins keep running. Adding, removing or reordering a
+  track, bus or device, changing an instrument, sample, a drum pad's sample
+  or choke group, a plugin, plugin parameter, sidechain or input route still
+  tears down the engine side and replays the
+  currently playable Arrange store.
   Live plugin state is captured before teardown so undo does not reset
   plugin parameters.
 - Long-lived recording edits use one explicit Project Transaction from start

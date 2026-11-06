@@ -18,21 +18,17 @@ impl PianoRollWidget {
     ) -> Vec<canvas::Geometry> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
 
-        // Key-lane feedback: the auditioned (pressed) pitch, and the
-        // pitch under the cursor while hovering the keys.
-        let pressed_pitch = state.audition_pitch;
-        let hovered_pitch = cursor.position_in(bounds).and_then(|pos| {
-            if pos.x < KEY_WIDTH && pos.y > RULER_HEIGHT && state.audition_pitch.is_none() {
-                let pitch = self.y_to_pitch(pos.y);
-                (LOW_NOTE..HIGH_NOTE).contains(&pitch).then_some(pitch)
-            } else {
-                None
-            }
-        });
         let w = bounds.width;
         let h = bounds.height;
         let grid_width = w - KEY_WIDTH;
         let total = self.total_beats.max(1.0);
+        // Loop repeats are drawn laid out after the loop, so the clip ends
+        // its length after the start marker, wrapped or not.
+        let clip_end = self
+            .clip
+            .as_ref()
+            .map_or(0.0, |clip| clip.start_marker_beats)
+            + total;
         let geometry = self.geometry(&bounds);
         let grid_ppb = geometry.pixels_per_beat();
 
@@ -86,132 +82,10 @@ impl PianoRollWidget {
             );
         }
 
-        // ── Draw piano keys ──
-        // First pass: draw all white keys
-        for i in first_visible..last_visible {
-            let pitch = HIGH_NOTE - 1 - i as u8;
-            let y = i as f32 * KEY_HEIGHT + RULER_HEIGHT - self.scroll_y;
-
-            if y + KEY_HEIGHT < RULER_HEIGHT || y > h {
-                continue;
-            }
-
-            if !is_black_key(pitch) {
-                let fill = if pressed_pitch == Some(pitch) {
-                    self.track_color
-                } else if hovered_pitch == Some(pitch) {
-                    Color {
-                        a: 0.75,
-                        ..theme::piano_white_key()
-                    }
-                } else {
-                    theme::piano_white_key()
-                };
-                frame.fill_rectangle(
-                    iced::Point::new(0.0, y),
-                    iced::Size::new(KEY_WIDTH, KEY_HEIGHT),
-                    fill,
-                );
-
-                // Key border
-                let border = canvas::Path::line(
-                    iced::Point::new(0.0, y + KEY_HEIGHT),
-                    iced::Point::new(KEY_WIDTH, y + KEY_HEIGHT),
-                );
-                frame.stroke(
-                    &border,
-                    canvas::Stroke::default()
-                        .with_color(theme::divider())
-                        .with_width(0.5),
-                );
-            }
-        }
-
-        // Second pass: draw black keys on top (narrower, covering left portion)
-        let black_key_width = KEY_WIDTH * BLACK_KEY_RATIO;
-        for i in first_visible..last_visible {
-            let pitch = HIGH_NOTE - 1 - i as u8;
-            let y = i as f32 * KEY_HEIGHT + RULER_HEIGHT - self.scroll_y;
-
-            if y + KEY_HEIGHT < RULER_HEIGHT || y > h {
-                continue;
-            }
-
-            if is_black_key(pitch) {
-                // Dark fill for the background area behind black key
-                frame.fill_rectangle(
-                    iced::Point::new(0.0, y),
-                    iced::Size::new(KEY_WIDTH, KEY_HEIGHT),
-                    theme::piano_white_row(),
-                );
-
-                // Black key itself
-                let fill = if pressed_pitch == Some(pitch) {
-                    self.track_color
-                } else if hovered_pitch == Some(pitch) {
-                    theme::border_light()
-                } else {
-                    theme::piano_black_key()
-                };
-                frame.fill_rectangle(
-                    iced::Point::new(0.0, y),
-                    iced::Size::new(black_key_width, KEY_HEIGHT),
-                    fill,
-                );
-
-                // Key border
-                let border = canvas::Path::line(
-                    iced::Point::new(0.0, y + KEY_HEIGHT),
-                    iced::Point::new(KEY_WIDTH, y + KEY_HEIGHT),
-                );
-                frame.stroke(
-                    &border,
-                    canvas::Stroke::default()
-                        .with_color(theme::divider())
-                        .with_width(0.5),
-                );
-            }
-        }
-
-        // C note labels — drawn after keys so they're visible
-        for i in first_visible..last_visible {
-            let pitch = HIGH_NOTE - 1 - i as u8;
-            let y = i as f32 * KEY_HEIGHT + RULER_HEIGHT - self.scroll_y;
-
-            if y + KEY_HEIGHT < RULER_HEIGHT || y > h {
-                continue;
-            }
-
-            if pitch.is_multiple_of(12) {
-                let label = pitch_name(pitch);
-                frame.fill_text(canvas::Text {
-                    content: label,
-                    position: iced::Point::new(black_key_width + 3.0, y + 2.0),
-                    color: theme::piano_key_label(),
-                    size: iced::Pixels(10.0),
-                    ..Default::default()
-                });
-            }
-        }
-
-        // Key area separator (vertical line at right edge of piano)
-        let sep = canvas::Path::line(
-            iced::Point::new(KEY_WIDTH, RULER_HEIGHT),
-            iced::Point::new(KEY_WIDTH, h),
-        );
-        frame.stroke(
-            &sep,
-            canvas::Stroke::default()
-                .with_color(theme::border())
-                .with_width(1.0),
-        );
-
         // ── Vertical musical grid lines ──
         let grid_step = self.grid.effective_grid(grid_ppb).beat_size();
-        let num_steps = (total / grid_step).ceil() as usize;
 
-        for step in 0..=num_steps {
-            let beat = step as f64 * grid_step;
+        for beat in geometry.grid_beats(grid_step, KEY_WIDTH, w) {
             // Snap to half-pixel for crisp 1px rendering (avoids blurry subpixel splits)
             let x = geometry.beat_to_x(beat).floor() + 0.5;
             if x > w {
@@ -290,7 +164,7 @@ impl PianoRollWidget {
 
                 // Draw repeat boundary lines in the looped region
                 let mut boundary_beat = clip_data.loop_end_beats + loop_len;
-                while boundary_beat < total {
+                while boundary_beat < clip_end {
                     let bx = self.beat_to_x(boundary_beat, &bounds);
                     let bline = canvas::Path::line(
                         iced::Point::new(bx, RULER_HEIGHT),
@@ -397,7 +271,7 @@ impl PianoRollWidget {
                     theme::with_alpha(theme::darken(self.track_color, 0.6), ghost_alpha);
 
                 let mut offset_beat = loop_len;
-                while clip_data.loop_end_beats + offset_beat - loop_len < total {
+                while clip_data.loop_end_beats + offset_beat - loop_len < clip_end {
                     for note in &clip_data.notes {
                         if !(LOW_NOTE..HIGH_NOTE).contains(&note.pitch) {
                             continue;
@@ -410,7 +284,7 @@ impl PianoRollWidget {
                         }
 
                         let ghost_beat = note.start_beat + offset_beat;
-                        if ghost_beat >= total {
+                        if ghost_beat >= clip_end {
                             continue;
                         }
 
@@ -442,6 +316,15 @@ impl PianoRollWidget {
                     offset_beat += loop_len;
                 }
             }
+        }
+
+        let clip_end_x = geometry.beat_to_x(clip_end).max(KEY_WIDTH);
+        if clip_end_x < w {
+            frame.fill_rectangle(
+                iced::Point::new(clip_end_x, RULER_HEIGHT),
+                iced::Size::new(w - clip_end_x, h - RULER_HEIGHT),
+                theme::past_clip_end_shade(),
+            );
         }
 
         // ── Rubber-band selection rectangle ──
@@ -489,6 +372,14 @@ impl PianoRollWidget {
             theme::bg_surface(),
         );
 
+        if clip_end_x < w {
+            frame.fill_rectangle(
+                iced::Point::new(clip_end_x, 0.0),
+                iced::Size::new(w - clip_end_x, RULER_HEIGHT),
+                theme::past_clip_end_shade(),
+            );
+        }
+
         // Paint the brace below ruler text so bar numbers remain legible.
         if let Some(clip) = &self.clip {
             if clip.loop_enabled && clip.loop_end_beats > clip.loop_start_beats {
@@ -524,8 +415,7 @@ impl PianoRollWidget {
         );
 
         // Ruler tick marks and labels
-        for step in 0..=num_steps {
-            let beat = step as f64 * grid_step;
+        for beat in geometry.grid_beats(grid_step, KEY_WIDTH, w) {
             let x = geometry.beat_to_x(beat).floor() + 0.5;
             if x > w {
                 break;
@@ -571,7 +461,7 @@ impl PianoRollWidget {
                 frame.fill_text(canvas::Text {
                     content: format!("{}.{}", bar_index + 1, beat_in_bar),
                     position: iced::Point::new(x + 2.0, 29.0),
-                    color: theme::text_muted(),
+                    color: theme::text_dim(),
                     size: iced::Pixels(8.0),
                     ..Default::default()
                 });
@@ -592,6 +482,172 @@ impl PianoRollWidget {
             );
         }
 
-        vec![frame.into_geometry()]
+        let mut keys = canvas::Frame::new(renderer, bounds.size());
+        self.draw_keys(&mut keys, state, bounds, cursor);
+        vec![frame.into_geometry(), keys.into_geometry()]
+    }
+
+    /// The keyboard and the ruler corner above it sit on their own layer so
+    /// that notes and grid lines scrolled left of the note grid pass under
+    /// them.
+    fn draw_keys(
+        &self,
+        frame: &mut canvas::Frame,
+        state: &PianoRollState,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+    ) {
+        // Key-lane feedback: the auditioned (pressed) pitch, and the
+        // pitch under the cursor while hovering the keys.
+        let pressed_pitch = state.audition_pitch;
+        let hovered_pitch = cursor.position_in(bounds).and_then(|pos| {
+            if pos.x < KEY_WIDTH && pos.y > RULER_HEIGHT && state.audition_pitch.is_none() {
+                let pitch = self.y_to_pitch(pos.y);
+                (LOW_NOTE..HIGH_NOTE).contains(&pitch).then_some(pitch)
+            } else {
+                None
+            }
+        });
+        let h = bounds.height;
+        let first_visible = (self.scroll_y / KEY_HEIGHT).floor() as usize;
+        let visible_height = h - RULER_HEIGHT;
+        let last_visible = ((self.scroll_y + visible_height) / KEY_HEIGHT).ceil() as usize;
+        let last_visible = last_visible.min(NUM_ROWS as usize);
+
+        // ── Draw piano keys ──
+        // First pass: draw all white keys
+        for i in first_visible..last_visible {
+            let pitch = HIGH_NOTE - 1 - i as u8;
+            let y = i as f32 * KEY_HEIGHT + RULER_HEIGHT - self.scroll_y;
+
+            if y + KEY_HEIGHT < RULER_HEIGHT || y > h {
+                continue;
+            }
+
+            if !is_black_key(pitch) {
+                let fill = if pressed_pitch == Some(pitch) {
+                    self.track_color
+                } else if hovered_pitch == Some(pitch) {
+                    Color {
+                        a: 0.75,
+                        ..theme::piano_white_key()
+                    }
+                } else {
+                    theme::piano_white_key()
+                };
+                frame.fill_rectangle(
+                    iced::Point::new(0.0, y),
+                    iced::Size::new(KEY_WIDTH, KEY_HEIGHT),
+                    fill,
+                );
+
+                // Key border
+                let border = canvas::Path::line(
+                    iced::Point::new(0.0, y + KEY_HEIGHT),
+                    iced::Point::new(KEY_WIDTH, y + KEY_HEIGHT),
+                );
+                frame.stroke(
+                    &border,
+                    canvas::Stroke::default()
+                        .with_color(theme::divider())
+                        .with_width(0.5),
+                );
+            }
+        }
+
+        // Second pass: draw black keys on top (narrower, covering left portion)
+        let black_key_width = KEY_WIDTH * BLACK_KEY_RATIO;
+        for i in first_visible..last_visible {
+            let pitch = HIGH_NOTE - 1 - i as u8;
+            let y = i as f32 * KEY_HEIGHT + RULER_HEIGHT - self.scroll_y;
+
+            if y + KEY_HEIGHT < RULER_HEIGHT || y > h {
+                continue;
+            }
+
+            if is_black_key(pitch) {
+                // Dark fill for the background area behind black key
+                frame.fill_rectangle(
+                    iced::Point::new(0.0, y),
+                    iced::Size::new(KEY_WIDTH, KEY_HEIGHT),
+                    theme::piano_white_row(),
+                );
+
+                // Black key itself
+                let fill = if pressed_pitch == Some(pitch) {
+                    self.track_color
+                } else if hovered_pitch == Some(pitch) {
+                    theme::border_light()
+                } else {
+                    theme::piano_black_key()
+                };
+                frame.fill_rectangle(
+                    iced::Point::new(0.0, y),
+                    iced::Size::new(black_key_width, KEY_HEIGHT),
+                    fill,
+                );
+
+                // Key border
+                let border = canvas::Path::line(
+                    iced::Point::new(0.0, y + KEY_HEIGHT),
+                    iced::Point::new(KEY_WIDTH, y + KEY_HEIGHT),
+                );
+                frame.stroke(
+                    &border,
+                    canvas::Stroke::default()
+                        .with_color(theme::divider())
+                        .with_width(0.5),
+                );
+            }
+        }
+
+        // C note labels, drawn after the keys so the keys never cover them
+        for i in first_visible..last_visible {
+            let pitch = HIGH_NOTE - 1 - i as u8;
+            let y = i as f32 * KEY_HEIGHT + RULER_HEIGHT - self.scroll_y;
+
+            if y + KEY_HEIGHT < RULER_HEIGHT || y > h {
+                continue;
+            }
+
+            if pitch.is_multiple_of(12) {
+                let label = pitch_name(pitch);
+                frame.fill_text(canvas::Text {
+                    content: label,
+                    position: iced::Point::new(black_key_width + 3.0, y + 2.0),
+                    color: theme::piano_key_label(),
+                    size: iced::Pixels(10.0),
+                    ..Default::default()
+                });
+            }
+        }
+
+        // Key area separator (vertical line at right edge of piano)
+        let sep = canvas::Path::line(
+            iced::Point::new(KEY_WIDTH, RULER_HEIGHT),
+            iced::Point::new(KEY_WIDTH, h),
+        );
+        frame.stroke(
+            &sep,
+            canvas::Stroke::default()
+                .with_color(theme::border())
+                .with_width(1.0),
+        );
+
+        frame.fill_rectangle(
+            iced::Point::ORIGIN,
+            iced::Size::new(KEY_WIDTH, RULER_HEIGHT),
+            theme::bg_surface(),
+        );
+        let corner_border = canvas::Path::line(
+            iced::Point::new(0.0, RULER_HEIGHT),
+            iced::Point::new(KEY_WIDTH, RULER_HEIGHT),
+        );
+        frame.stroke(
+            &corner_border,
+            canvas::Stroke::default()
+                .with_color(theme::border())
+                .with_width(1.0),
+        );
     }
 }

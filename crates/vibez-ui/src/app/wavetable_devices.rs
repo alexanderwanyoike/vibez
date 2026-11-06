@@ -10,8 +10,7 @@ use crate::widgets::wavetable_device::WavetableView;
 use super::*;
 
 impl App {
-    /// The Wavetable Synth card at `width`, with its title and the latency
-    /// line beneath it.
+    /// The Wavetable Synth card at `width`.
     pub(super) fn wavetable_card<'a>(
         &'a self,
         track_id: TrackId,
@@ -25,7 +24,7 @@ impl App {
             track,
             accent,
             width,
-            move |device, panel, entry, preset_bar, size| {
+            move |device, panel, entry, size| {
                 WavetableView {
                     track_id,
                     device,
@@ -33,7 +32,7 @@ impl App {
                     panel,
                     entry,
                 }
-                .view(preset_bar, size)
+                .view(size)
             },
         )
     }

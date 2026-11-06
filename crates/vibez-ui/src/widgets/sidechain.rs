@@ -1,4 +1,4 @@
-use iced::widget::{button, column, container, row, scrollable, text, Space};
+use iced::widget::{button, column, container, row, text, Space};
 use iced::{Element, Length};
 use vibez_core::{
     id::{EffectId, TrackId},
@@ -234,14 +234,10 @@ pub fn view<'a>(
         );
     }
     Some(
-        container(
-            scrollable(content).direction(scrollable::Direction::Vertical(
-                scrollable::Scrollbar::new().width(3).scroller_width(3),
-            )),
-        )
-        .padding([8, 8])
-        .width(Length::Fixed(WIDTH))
-        .height(Length::Fill)
-        .into(),
+        container(crate::widgets::quiet_scroll::vertical(content))
+            .padding([8, 8])
+            .width(Length::Fixed(WIDTH))
+            .height(Length::Fill)
+            .into(),
     )
 }

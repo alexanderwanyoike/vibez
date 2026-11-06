@@ -152,7 +152,7 @@ impl canvas::Program<Message> for WavetablePlot {
                 frame.fill_text(canvas::Text {
                     content: text.into(),
                     position: Point::new(x, y),
-                    color: th::text_muted(),
+                    color: th::text_dim(),
                     size: LABEL_SIZE.into(),
                     horizontal_alignment: align,
                     vertical_alignment: iced::alignment::Vertical::Center,

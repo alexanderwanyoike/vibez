@@ -2,6 +2,37 @@
 
 use crate::state::AppState;
 
+/// Escape as the window delivers it.
+pub(super) fn escape_key() -> iced::keyboard::Event {
+    use iced::keyboard::key::{Code, Named, Physical};
+    iced::keyboard::Event::KeyPressed {
+        key: iced::keyboard::Key::Named(Named::Escape),
+        modified_key: iced::keyboard::Key::Named(Named::Escape),
+        physical_key: Physical::Code(Code::Escape),
+        location: iced::keyboard::Location::Standard,
+        modifiers: iced::keyboard::Modifiers::empty(),
+        text: None,
+    }
+}
+
+/// Hands a key press the widgets left with `status` to the app's global
+/// shortcuts, as the window does; the keyboard router returns their
+/// message as a task, which tests do not run.
+pub(super) fn deliver_key(
+    app: &mut super::App,
+    event: iced::keyboard::Event,
+    status: iced::event::Status,
+) {
+    if super::keyboard::keyboard_input_message(event.clone(), status).is_none() {
+        return;
+    }
+    if let iced::keyboard::Event::KeyPressed { key, modifiers, .. } = event {
+        if let Some(message) = super::keyboard::global_key_handler(key, modifiers) {
+            let _ = app.update(message);
+        }
+    }
+}
+
 pub(super) fn app() -> super::App {
     let (plugin_effect_tx, plugin_effect_rx) = std::sync::mpsc::channel();
     let (plugin_instrument_tx, plugin_instrument_rx) = std::sync::mpsc::channel();

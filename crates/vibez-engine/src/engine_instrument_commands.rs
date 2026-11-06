@@ -21,6 +21,36 @@ impl AudioEngine {
         clip_id: vibez_core::id::ClipId,
         duration_beats: f64,
     ) {
+        self.reshape_note_clip(track_id, clip_id, |clip| {
+            clip.duration_beats = duration_beats;
+        });
+    }
+
+    pub(super) fn command_set_note_clip_bounds(
+        &mut self,
+        track_id: vibez_core::id::TrackId,
+        clip_id: vibez_core::id::ClipId,
+        duration_beats: f64,
+        start_marker_beats: f64,
+        loop_start_beats: f64,
+        loop_end_beats: f64,
+    ) {
+        self.reshape_note_clip(track_id, clip_id, |clip| {
+            clip.duration_beats = duration_beats;
+            clip.start_marker_beats = start_marker_beats;
+            clip.loop_start_beats = loop_start_beats;
+            clip.loop_end_beats = loop_end_beats;
+        });
+    }
+
+    /// Notes the new shape no longer covers would never get their note-offs.
+    fn reshape_note_clip(
+        &mut self,
+        track_id: vibez_core::id::TrackId,
+        clip_id: vibez_core::id::ClipId,
+        reshape: impl FnOnce(&mut crate::playback_source::EngineNoteClip),
+    ) {
+        let playhead_beat = self.arrange_playhead_beat();
         if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
             if let Some(clip) = track
                 .playback_source
@@ -28,9 +58,9 @@ impl AudioEngine {
                 .iter_mut()
                 .find(|c| c.id == clip_id)
             {
-                clip.duration_beats = duration_beats;
+                reshape(clip);
             }
-            track.flush_notes();
+            track.release_notes_left_by(clip_id, playhead_beat);
         }
         self.recalculate_audio_length();
     }
@@ -75,6 +105,7 @@ impl AudioEngine {
         clip_id: vibez_core::id::ClipId,
         new_position_beats: f64,
     ) {
+        let playhead_beat = self.arrange_playhead_beat();
         if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
             if let Some(clip) = track
                 .playback_source
@@ -84,8 +115,16 @@ impl AudioEngine {
             {
                 clip.position_beats = new_position_beats;
             }
+            track.release_notes_left_by(clip_id, playhead_beat);
         }
         self.recalculate_audio_length();
+    }
+
+    fn arrange_playhead_beat(&self) -> f64 {
+        let samples_per_beat =
+            vibez_core::time::TempoMap::new(self.transport.bpm(), self.sample_rate)
+                .samples_per_beat();
+        self.transport.position() as f64 / samples_per_beat
     }
 
     pub(super) fn command_remove_note(

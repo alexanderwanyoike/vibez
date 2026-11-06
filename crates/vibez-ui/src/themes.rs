@@ -1,15 +1,15 @@
 //! The built-in theme collection and the `.vzt` user-theme service.
 //!
-//! Built-ins are authored from a handful of seeds through the
-//! dark/light builders below, so every theme fills the complete
-//! [`ThemePalette`]. User themes are plain `.vzt` JSON files scanned
-//! from the config themes directory, plugin-cache style.
+//! Built-ins are authored in OKLCH through the dark/light builders below,
+//! so every theme fills the complete [`ThemePalette`] from one tinted
+//! surface ramp. User themes are plain `.vzt` JSON files scanned from the
+//! config themes directory, plugin-cache style.
 
 use std::path::PathBuf;
 
 use iced::Color;
 
-use crate::theme::ThemePalette;
+use crate::theme::{contrast_ratio, ClipStyle, LaneStyle, Oklch, ThemePalette};
 
 const fn rgb8(r: u8, g: u8, b: u8) -> Color {
     Color {
@@ -18,6 +18,10 @@ const fn rgb8(r: u8, g: u8, b: u8) -> Color {
         b: b as f32 / 255.0,
         a: 1.0,
     }
+}
+
+const fn lch(lightness: f32, chroma: f32, hue: f32) -> Oklch {
+    Oklch::new(lightness, chroma, hue)
 }
 
 /// Move `c` toward white by `f` (0..1).
@@ -44,459 +48,529 @@ fn alpha(c: Color, a: f32) -> Color {
     Color { a, ..c }
 }
 
-/// Console-convention EQ band colors (LF brown, LMF blue, HMF green,
-/// HF red), shared by most themes.
-const EQ_CONSOLE: [Color; 4] = [
-    Color {
-        r: 0.65,
-        g: 0.46,
-        b: 0.28,
-        a: 1.0,
-    },
-    Color {
-        r: 0.36,
-        g: 0.48,
-        b: 0.72,
-        a: 1.0,
-    },
-    Color {
-        r: 0.33,
-        g: 0.62,
-        b: 0.38,
-        a: 1.0,
-    },
-    Color {
-        r: 0.76,
-        g: 0.33,
-        b: 0.30,
-        a: 1.0,
-    },
+/// Track hues in rainbow order (red, orange, yellow, green, cyan, blue,
+/// purple, magenta), taken from the palettes the themes shipped with.
+const HUES_CLASSIC: [f32; 8] = [23.0, 62.0, 102.0, 147.0, 210.0, 266.0, 305.0, 342.0];
+const HUES_MUTED: [f32; 8] = [21.0, 62.0, 96.0, 147.0, 211.0, 268.0, 314.0, 352.0];
+const HUES_NEON: [f32; 8] = [17.0, 60.0, 117.0, 142.0, 175.0, 246.0, 311.0, 340.0];
+const HUES_PASTEL: [f32; 8] = [3.0, 53.0, 87.0, 143.0, 183.0, 260.0, 305.0, 336.0];
+const HUES_WARM: [f32; 8] = [31.0, 59.0, 96.0, 120.0, 171.0, 267.0, 325.0, 6.0];
+const HUES_SOLARIZED: [f32; 8] = [27.0, 40.0, 86.0, 128.0, 187.0, 245.0, 279.0, 356.0];
+
+/// Yellow looks olive at the lightness the other hues share, so it sits
+/// this much higher.
+const YELLOW_LIFT: f32 = 0.1;
+
+/// Eight track colours at one perceived lightness and chroma, keeping
+/// `hues`, with as much chroma as sRGB allows each one.
+fn matched(hues: [f32; 8], lightness: f32, chroma: f32) -> [Oklch; 8] {
+    hues.map(|hue| {
+        let lift = if (70.0..=120.0).contains(&hue) {
+            YELLOW_LIFT
+        } else {
+            0.0
+        };
+        lch(lightness + lift, chroma, hue).fitted()
+    })
+}
+
+/// EQ bands take the theme's own orange, blue, green and red tracks (LF,
+/// LMF, HMF, HF), so they belong to its palette.
+fn eq_bands(tracks: [Oklch; 8]) -> [Oklch; 4] {
+    [tracks[1], tracks[5], tracks[3], tracks[0]]
+}
+
+/// Meter green, yellow and red, shared by every theme so levels read the
+/// same everywhere.
+const DARK_METER: [Oklch; 3] = [
+    lch(0.80, 0.17, 150.0),
+    lch(0.86, 0.16, 95.0),
+    lch(0.68, 0.19, 25.0),
+];
+const LIGHT_METER: [Oklch; 3] = [
+    lch(0.66, 0.16, 150.0),
+    lch(0.76, 0.15, 85.0),
+    lch(0.58, 0.19, 25.0),
 ];
 
-/// The default track rainbow (charcoal's).
-const TRACKS_CLASSIC: [Color; 8] = [
-    rgb8(224, 96, 96),
-    rgb8(224, 144, 64),
-    rgb8(208, 192, 64),
-    rgb8(80, 176, 96),
-    rgb8(64, 160, 176),
-    rgb8(96, 128, 208),
-    rgb8(144, 96, 192),
-    rgb8(192, 96, 160),
-];
+/// Contrast floors for the dimmer text tiers on every surface they are
+/// drawn on. Dim text carries 8 to 10 px captions and values, so it keeps
+/// WCAG AA's 4.5:1. Muted text only carries hints, placeholders and
+/// disabled states, so it keeps the 3:1 AA allows for large text.
+const TEXT_DIM_CONTRAST: f32 = 4.5;
+const TEXT_MUTED_CONTRAST: f32 = 3.0;
 
-const TRACKS_NEON: [Color; 8] = [
-    rgb8(255, 64, 96),
-    rgb8(255, 144, 0),
-    rgb8(230, 255, 0),
-    rgb8(57, 255, 20),
-    rgb8(0, 255, 213),
-    rgb8(0, 160, 255),
-    rgb8(191, 64, 255),
-    rgb8(255, 64, 208),
-];
+/// WCAG's 3:1 for graphics cannot hold for a knob ring, which sits between
+/// the body inside it, the strip round it and the band colour drawn over
+/// it: a ring 3:1 off a dark body is brighter than the dimmer band colours.
+/// 1.4:1 is the smallest step that reads at the ring's 2.5 px on every
+/// built-in theme.
+const KNOB_RING_STEP: f32 = 1.4;
 
-const TRACKS_PASTEL: [Color; 8] = [
-    rgb8(243, 139, 168),
-    rgb8(250, 179, 135),
-    rgb8(249, 226, 175),
-    rgb8(166, 227, 161),
-    rgb8(148, 226, 213),
-    rgb8(137, 180, 250),
-    rgb8(203, 166, 247),
-    rgb8(245, 194, 231),
-];
+/// The dark text tiers' lightness: body, dim and muted.
+const DARK_TEXT: [f32; 3] = [0.94, 0.76, 0.62];
+const LIGHT_TEXT: [f32; 3] = [0.25, 0.45, 0.56];
 
-const TRACKS_WARM: [Color; 8] = [
-    rgb8(204, 102, 84),
-    rgb8(214, 143, 84),
-    rgb8(199, 178, 90),
-    rgb8(143, 158, 96),
-    rgb8(114, 150, 137),
-    rgb8(122, 138, 176),
-    rgb8(158, 118, 160),
-    rgb8(186, 118, 132),
-];
-
-/// Desaturated club palette: distinct hues, no neon. Tracks stay
-/// tellable apart without breaking a monochrome-leaning theme.
-const TRACKS_MUTED: [Color; 8] = [
-    rgb8(178, 96, 96),
-    rgb8(178, 130, 88),
-    rgb8(168, 154, 96),
-    rgb8(106, 146, 110),
-    rgb8(96, 138, 146),
-    rgb8(106, 122, 162),
-    rgb8(138, 108, 154),
-    rgb8(162, 106, 130),
-];
-
+/// A theme authored in OKLCH, as the approved theme mockup builds it.
 struct Seed {
     name: &'static str,
-    bg: Color,
+    /// The lane shade of a dark theme, the panel shade of a light one.
+    /// Every surface keeps its hue and chroma and steps only in lightness.
+    base: Oklch,
+    /// Lightness of the body, dim and muted text, tinted with `base`.
+    text: [f32; 3],
     accent: Color,
-    text: Color,
-    tracks: [Color; 8],
-    eq: [Color; 4],
+    tracks: [Oklch; 8],
+    /// LF, LMF, HMF and HF, or [`eq_bands`] of `tracks` when `None`.
+    eq: Option<[Oklch; 4]>,
 }
 
-/// Fill a complete palette from a dark seed: surfaces step up from
-/// the background, text tiers step down, grids sit between.
+impl Seed {
+    fn eq(&self) -> [Color; 4] {
+        self.eq
+            .unwrap_or_else(|| eq_bands(self.tracks))
+            .map(Oklch::color)
+    }
+}
+
+/// The first colour `nearer` returns, stepping 0.01 at a time from its
+/// nominal shade, that keeps `floor` against every one of `behind`.
+fn holding(floor: f32, behind: &[Color], nearer: impl Fn(f32) -> Color) -> Color {
+    (0..=60)
+        .map(|step| nearer(step as f32 * 0.01))
+        .find(|&colour| {
+            behind
+                .iter()
+                .all(|&background| contrast_ratio(colour, background) >= floor)
+        })
+        .unwrap_or_else(|| nearer(0.6))
+}
+
+/// Fill the dim and muted text tiers at their nominal lightness, or as far
+/// nearer the body text as each needs to hold its floor on every surface
+/// it is drawn on.
+fn with_text_tiers(
+    mut palette: ThemePalette,
+    dim: impl Fn(f32) -> Color,
+    muted: impl Fn(f32) -> Color,
+) -> ThemePalette {
+    let surfaces = palette.text_surfaces().map(|(_, surface)| surface);
+    palette.text_dim = holding(TEXT_DIM_CONTRAST, &surfaces, dim);
+    palette.text_muted = holding(TEXT_MUTED_CONTRAST, &surfaces, muted);
+    palette
+}
+
+/// Fill a complete palette from a dark seed: surfaces step up in lightness
+/// from the lane, text is light, editor grids sit between.
 fn dark(seed: Seed) -> ThemePalette {
-    let bg = seed.bg;
-    ThemePalette {
+    let Oklch {
+        lightness: b,
+        chroma: c,
+        hue: h,
+    } = seed.base;
+    let shade = |lightness: f32| lch(lightness, c, h).color();
+    let tint = |lightness: f32, chroma: f32| lch(lightness, chroma, h).color();
+    let [text, dim, muted] = seed.text;
+    let [meter_green, meter_yellow, meter_red] = DARK_METER.map(Oklch::color);
+    let [eq_lf, eq_lmf, eq_hmf, eq_hf] = seed.eq();
+    let accent = seed.accent;
+    let raised = shade(b + 0.07);
+    let palette = ThemePalette {
         name: seed.name.to_string(),
-        bg_dark: bg,
-        bg_surface: lighten(bg, 0.045),
-        bg_elevated: lighten(bg, 0.085),
-        bg_hover: lighten(bg, 0.125),
-        text: seed.text,
-        text_dim: darken(seed.text, 0.43),
-        text_muted: darken(seed.text, 0.64),
-        accent: seed.accent,
-        accent_dim: darken(seed.accent, 0.4),
-        border: lighten(bg, 0.14),
-        border_light: lighten(bg, 0.21),
-        divider: lighten(bg, 0.07),
-        success: rgb8(74, 222, 128),
-        danger: rgb8(248, 113, 113),
+        bg_dark: shade(b),
+        bg_surface: shade(b + 0.035),
+        bg_elevated: raised,
+        bg_hover: shade(b + 0.145),
+        control: Some(shade(b + 0.11)),
+        text: tint(text, c * 0.6),
+        text_dim: tint(dim, c * 0.8),
+        text_muted: tint(muted, c),
+        accent,
+        accent_dim: darken(accent, 0.4),
+        border: shade(b + 0.09),
+        border_light: shade(b + 0.16),
+        divider: shade(b + 0.09),
+        success: meter_green,
+        danger: meter_red,
         playhead: alpha(Color::WHITE, 0.8),
-        meter_green: rgb8(74, 222, 128),
-        meter_yellow: rgb8(255, 215, 0),
-        meter_red: rgb8(248, 113, 113),
-        display_bg: darken(bg, 0.32),
-        knob_arc: lighten(bg, 0.48),
-        knob_body: lighten(bg, 0.02),
-        knob_body_engaged: lighten(bg, 0.065),
-        knob_track: lighten(bg, 0.13),
-        fader_handle: lighten(bg, 0.48),
-        track_colors: seed.tracks,
-        eq_lf: seed.eq[0],
-        eq_lmf: seed.eq[1],
-        eq_hmf: seed.eq[2],
-        eq_hf: seed.eq[3],
-        clip_body: alpha(seed.accent, 0.35),
-        clip_border: alpha(lighten(seed.accent, 0.2), 0.9),
-        waveform: alpha(lighten(seed.accent, 0.2), 0.6),
-        ruler_line: alpha(lighten(bg, 0.14), 0.5),
-        grid_bar: lighten(bg, 0.30),
-        grid_beat: lighten(bg, 0.17),
-        grid_sub: lighten(bg, 0.13),
-        piano_white_row: lighten(bg, 0.05),
-        piano_black_row: lighten(bg, 0.01),
-        piano_octave_line: lighten(bg, 0.14),
-        piano_grid: lighten(bg, 0.07),
-        piano_white_key: rgb8(200, 200, 200),
-        piano_black_key: darken(bg, 0.15),
-        piano_key_label: lighten(bg, 0.32),
-    }
+        meter_green,
+        meter_yellow,
+        meter_red,
+        display_bg: shade(b - 0.035),
+        knob_arc: tint(muted, c),
+        knob_body: shade(b),
+        knob_body_engaged: shade(b + 0.035),
+        knob_track: holding(
+            KNOB_RING_STEP,
+            &[shade(b), shade(b + 0.035), raised],
+            |step| shade(b + 0.17 + step),
+        ),
+        fader_handle: tint(0.86, c * 0.6),
+        track_colors: seed.tracks.map(Oklch::color),
+        eq_lf,
+        eq_lmf,
+        eq_hmf,
+        eq_hf,
+        clip_body: alpha(accent, 0.35),
+        clip_border: alpha(lighten(accent, 0.2), 0.9),
+        waveform: alpha(lighten(accent, 0.2), 0.6),
+        ruler_line: alpha(shade(b + 0.09), 0.5),
+        grid_bar: shade(b + 0.24),
+        grid_beat: shade(b + 0.13),
+        grid_sub: shade(b + 0.09),
+        piano_white_row: shade(b + 0.035),
+        piano_black_row: shade(b),
+        piano_octave_line: shade(b + 0.11),
+        piano_grid: shade(b + 0.05),
+        piano_white_key: tint(0.84, c * 0.6),
+        piano_black_key: shade(b - 0.05),
+        piano_key_label: tint(0.45, c),
+        clip_style: ClipStyle {
+            ink: alpha(tint(0.17, c * 0.5), ClipStyle::DARK.ink.a),
+            ..ClipStyle::DARK
+        },
+        lane_style: LaneStyle::DARK,
+    };
+    with_text_tiers(
+        palette,
+        |step| tint(dim + step, c * 0.8),
+        |step| tint(muted + step, c),
+    )
 }
 
-/// Fill a complete palette from a light seed: surfaces step down
-/// from the background, text is ink, grids darker than paper.
+/// Fill a complete palette from a light seed: the panel is paper, lanes
+/// and wells sink below it, raised cards lift above it, text is ink.
 fn light(seed: Seed) -> ThemePalette {
-    let bg = seed.bg;
-    ThemePalette {
+    let Oklch {
+        lightness: b,
+        chroma: c,
+        hue: h,
+    } = seed.base;
+    let shade = |lightness: f32| lch(lightness, c, h).color();
+    let tint = |lightness: f32, chroma: f32| lch(lightness, chroma, h).color();
+    let [text, dim, muted] = seed.text;
+    let [meter_green, meter_yellow, meter_red] = LIGHT_METER.map(Oklch::color);
+    let [eq_lf, eq_lmf, eq_hmf, eq_hf] = seed.eq();
+    let accent = seed.accent;
+    let raised = shade((b + 0.025).min(0.995));
+    let palette = ThemePalette {
         name: seed.name.to_string(),
-        bg_dark: bg,
-        bg_surface: darken(bg, 0.035),
-        bg_elevated: darken(bg, 0.065),
-        bg_hover: darken(bg, 0.10),
-        text: seed.text,
-        text_dim: lighten(seed.text, 0.38),
-        text_muted: lighten(seed.text, 0.58),
-        accent: seed.accent,
-        accent_dim: lighten(seed.accent, 0.3),
-        border: darken(bg, 0.14),
-        border_light: darken(bg, 0.22),
-        divider: darken(bg, 0.07),
-        success: rgb8(34, 154, 82),
-        danger: rgb8(205, 60, 60),
+        bg_dark: shade(b - 0.035),
+        bg_surface: shade(b),
+        bg_elevated: raised,
+        bg_hover: shade(b - 0.075),
+        control: Some(shade(b - 0.05)),
+        text: tint(text, c * 2.0),
+        text_dim: tint(dim, c * 2.0),
+        text_muted: tint(muted, c * 2.0),
+        accent,
+        accent_dim: lighten(accent, 0.3),
+        border: shade(b - 0.08),
+        border_light: shade(b - 0.15),
+        divider: shade(b - 0.08),
+        success: meter_green,
+        danger: meter_red,
         playhead: alpha(Color::BLACK, 0.7),
-        meter_green: rgb8(46, 178, 99),
-        meter_yellow: rgb8(212, 165, 8),
-        meter_red: rgb8(205, 60, 60),
-        display_bg: darken(bg, 0.05),
-        knob_arc: darken(bg, 0.45),
-        knob_body: darken(bg, 0.05),
-        knob_body_engaged: darken(bg, 0.10),
-        knob_track: darken(bg, 0.18),
-        fader_handle: darken(bg, 0.45),
-        track_colors: seed.tracks,
-        eq_lf: darken(seed.eq[0], 0.12),
-        eq_lmf: darken(seed.eq[1], 0.12),
-        eq_hmf: darken(seed.eq[2], 0.12),
-        eq_hf: darken(seed.eq[3], 0.12),
-        clip_body: alpha(seed.accent, 0.35),
-        clip_border: alpha(darken(seed.accent, 0.2), 0.9),
-        waveform: alpha(darken(seed.accent, 0.25), 0.65),
-        ruler_line: alpha(darken(bg, 0.14), 0.5),
-        grid_bar: darken(bg, 0.32),
-        grid_beat: darken(bg, 0.18),
-        grid_sub: darken(bg, 0.12),
-        piano_white_row: darken(bg, 0.02),
-        piano_black_row: darken(bg, 0.075),
-        piano_octave_line: darken(bg, 0.20),
-        piano_grid: darken(bg, 0.10),
-        piano_white_key: rgb8(250, 250, 250),
-        piano_black_key: rgb8(40, 40, 40),
-        piano_key_label: darken(bg, 0.45),
-    }
+        meter_green,
+        meter_yellow,
+        meter_red,
+        display_bg: shade(b - 0.055),
+        knob_arc: tint(muted, c * 2.0),
+        knob_body: shade(b - 0.05),
+        knob_body_engaged: shade(b - 0.075),
+        knob_track: holding(
+            KNOB_RING_STEP,
+            &[shade(b - 0.05), shade(b), raised],
+            |step| shade(b - 0.16 - step),
+        ),
+        fader_handle: tint(0.42, c * 2.0),
+        track_colors: seed.tracks.map(Oklch::color),
+        eq_lf,
+        eq_lmf,
+        eq_hmf,
+        eq_hf,
+        clip_body: alpha(accent, 0.35),
+        clip_border: alpha(darken(accent, 0.2), 0.9),
+        waveform: alpha(darken(accent, 0.25), 0.65),
+        ruler_line: alpha(shade(b - 0.08), 0.5),
+        grid_bar: shade(b - 0.2),
+        grid_beat: shade(b - 0.12),
+        grid_sub: shade(b - 0.08),
+        piano_white_row: shade(b),
+        piano_black_row: shade(b - 0.05),
+        piano_octave_line: shade(b - 0.15),
+        piano_grid: shade(b - 0.08),
+        piano_white_key: raised,
+        piano_black_key: tint(0.3, c),
+        piano_key_label: tint(muted, c * 2.0),
+        clip_style: ClipStyle {
+            ink: alpha(tint(0.2, c), ClipStyle::LIGHT.ink.a),
+            ..ClipStyle::LIGHT
+        },
+        lane_style: LaneStyle::LIGHT,
+    };
+    with_text_tiers(
+        palette,
+        |step| tint(dim - step, c * 2.0),
+        |step| tint(muted - step, c * 2.0),
+    )
+}
+
+/// The founding vibez look: near-neutral charcoal, orange accent. The
+/// approved theme mockup's values, as are Gruvbox's, Nord's and Porcelain's.
+pub(crate) fn charcoal() -> ThemePalette {
+    dark(Seed {
+        name: "Charcoal",
+        base: lch(0.215, 0.006, 260.0),
+        text: DARK_TEXT,
+        accent: lch(0.74, 0.175, 55.0).color(),
+        tracks: [
+            lch(0.70, 0.15, 25.0),
+            lch(0.74, 0.14, 58.0),
+            lch(0.82, 0.135, 95.0),
+            lch(0.73, 0.14, 150.0),
+            lch(0.73, 0.11, 200.0),
+            lch(0.69, 0.13, 255.0),
+            lch(0.67, 0.14, 300.0),
+            lch(0.70, 0.15, 350.0),
+        ],
+        eq: Some([
+            lch(0.72, 0.12, 60.0),
+            lch(0.70, 0.11, 250.0),
+            lch(0.74, 0.12, 155.0),
+            lch(0.69, 0.14, 25.0),
+        ]),
+    })
 }
 
 /// All built-in themes, default first.
 pub fn builtins() -> Vec<ThemePalette> {
-    let mut themes = vec![ThemePalette::charcoal()];
-    themes.extend([
+    vec![
+        charcoal(),
         dark(Seed {
             name: "Obsidian",
-            bg: rgb8(10, 10, 12),
+            base: lch(0.175, 0.006, 270.0),
+            text: DARK_TEXT,
             accent: rgb8(125, 200, 255),
-            text: rgb8(222, 226, 230),
-            tracks: TRACKS_CLASSIC,
-            eq: EQ_CONSOLE,
+            tracks: matched(HUES_CLASSIC, 0.70, 0.15),
+            eq: None,
         }),
         dark(Seed {
             name: "Berlin",
-            bg: rgb8(6, 6, 6),
+            base: lch(0.16, 0.003, 30.0),
+            text: [0.88, 0.72, 0.6],
             accent: rgb8(192, 57, 43),
-            text: rgb8(200, 200, 200),
-            tracks: TRACKS_MUTED,
-            eq: EQ_CONSOLE,
+            tracks: matched(HUES_MUTED, 0.64, 0.105),
+            eq: None,
         }),
         dark(Seed {
             name: "Acid",
-            bg: rgb8(8, 10, 6),
+            base: lch(0.17, 0.014, 128.0),
+            text: DARK_TEXT,
             accent: rgb8(170, 255, 0),
-            text: rgb8(214, 230, 202),
-            tracks: TRACKS_NEON,
-            eq: EQ_CONSOLE,
+            tracks: matched(HUES_NEON, 0.78, 0.2),
+            eq: None,
         }),
         dark(Seed {
             name: "Vaporwave",
-            bg: rgb8(24, 14, 42),
+            base: lch(0.215, 0.05, 298.0),
+            text: DARK_TEXT,
             accent: rgb8(255, 113, 206),
-            text: rgb8(230, 220, 245),
-            tracks: TRACKS_NEON,
-            eq: [
-                rgb8(255, 113, 206),
-                rgb8(1, 205, 254),
-                rgb8(5, 255, 161),
-                rgb8(185, 103, 255),
-            ],
+            tracks: matched(HUES_NEON, 0.74, 0.19),
+            eq: Some([
+                lch(0.74, 0.18, 343.0),
+                lch(0.76, 0.13, 240.0),
+                lch(0.84, 0.17, 165.0),
+                lch(0.66, 0.2, 300.0),
+            ]),
         }),
         dark(Seed {
             name: "Nord",
-            bg: rgb8(46, 52, 64),
-            accent: rgb8(136, 192, 208),
-            text: rgb8(216, 222, 233),
+            base: lch(0.30, 0.032, 262.0),
+            text: [0.95, 0.80, 0.68],
+            accent: lch(0.78, 0.10, 215.0).color(),
             tracks: [
-                rgb8(191, 97, 106),
-                rgb8(208, 135, 112),
-                rgb8(235, 203, 139),
-                rgb8(163, 190, 140),
-                rgb8(143, 188, 187),
-                rgb8(129, 161, 193),
-                rgb8(180, 142, 173),
-                rgb8(94, 129, 172),
+                lch(0.65, 0.16, 18.0),
+                lch(0.72, 0.15, 50.0),
+                lch(0.83, 0.145, 90.0),
+                lch(0.74, 0.15, 140.0),
+                lch(0.75, 0.115, 190.0),
+                lch(0.69, 0.135, 245.0),
+                lch(0.66, 0.14, 320.0),
+                lch(0.62, 0.15, 270.0),
             ],
-            eq: EQ_CONSOLE,
+            eq: Some([
+                lch(0.73, 0.13, 55.0),
+                lch(0.69, 0.13, 245.0),
+                lch(0.75, 0.14, 140.0),
+                lch(0.66, 0.15, 20.0),
+            ]),
         }),
         dark(Seed {
             name: "Dracula",
-            bg: rgb8(40, 42, 54),
+            base: lch(0.285, 0.025, 278.0),
+            text: DARK_TEXT,
             accent: rgb8(189, 147, 249),
-            text: rgb8(248, 248, 242),
-            tracks: [
-                rgb8(255, 85, 85),
-                rgb8(255, 184, 108),
-                rgb8(241, 250, 140),
-                rgb8(80, 250, 123),
-                rgb8(139, 233, 253),
-                rgb8(98, 114, 164),
-                rgb8(189, 147, 249),
-                rgb8(255, 121, 198),
-            ],
-            eq: EQ_CONSOLE,
+            tracks: matched(
+                [24.0, 67.0, 113.0, 148.0, 213.0, 270.0, 302.0, 347.0],
+                0.74,
+                0.16,
+            ),
+            eq: None,
         }),
         dark(Seed {
             name: "Gruvbox",
-            bg: rgb8(40, 40, 40),
-            accent: rgb8(254, 128, 25),
-            text: rgb8(235, 219, 178),
+            base: lch(0.255, 0.012, 70.0),
+            text: DARK_TEXT,
+            accent: lch(0.73, 0.165, 55.0).color(),
             tracks: [
-                rgb8(204, 36, 29),
-                rgb8(214, 93, 14),
-                rgb8(215, 153, 33),
-                rgb8(152, 151, 26),
-                rgb8(104, 157, 106),
-                rgb8(69, 133, 136),
-                rgb8(177, 98, 134),
-                rgb8(254, 128, 25),
+                lch(0.60, 0.19, 29.0),
+                lch(0.69, 0.17, 52.0),
+                lch(0.79, 0.155, 85.0),
+                lch(0.72, 0.15, 120.0),
+                lch(0.72, 0.11, 165.0),
+                lch(0.66, 0.10, 215.0),
+                lch(0.63, 0.13, 335.0),
+                lch(0.65, 0.15, 5.0),
             ],
-            eq: EQ_CONSOLE,
+            eq: Some([
+                lch(0.70, 0.15, 60.0),
+                lch(0.67, 0.10, 215.0),
+                lch(0.72, 0.14, 120.0),
+                lch(0.62, 0.18, 29.0),
+            ]),
         }),
         dark(Seed {
             name: "Solarized Dark",
-            bg: rgb8(0, 43, 54),
+            base: lch(0.255, 0.045, 220.0),
+            text: DARK_TEXT,
             accent: rgb8(38, 139, 210),
-            text: rgb8(147, 161, 161),
-            tracks: [
-                rgb8(220, 50, 47),
-                rgb8(203, 75, 22),
-                rgb8(181, 137, 0),
-                rgb8(133, 153, 0),
-                rgb8(42, 161, 152),
-                rgb8(38, 139, 210),
-                rgb8(108, 113, 196),
-                rgb8(211, 54, 130),
-            ],
-            eq: EQ_CONSOLE,
+            tracks: matched(HUES_SOLARIZED, 0.66, 0.15),
+            eq: None,
         }),
         dark(Seed {
             name: "Monokai",
-            bg: rgb8(39, 40, 34),
+            base: lch(0.27, 0.012, 115.0),
+            text: DARK_TEXT,
             accent: rgb8(166, 226, 46),
-            text: rgb8(248, 248, 242),
-            tracks: [
-                rgb8(249, 38, 114),
-                rgb8(253, 151, 31),
-                rgb8(230, 219, 116),
-                rgb8(166, 226, 46),
-                rgb8(102, 217, 239),
-                rgb8(118, 149, 216),
-                rgb8(174, 129, 255),
-                rgb8(249, 38, 114),
-            ],
-            eq: EQ_CONSOLE,
+            tracks: matched(
+                [7.0, 62.0, 103.0, 127.0, 212.0, 265.0, 298.0, 340.0],
+                0.74,
+                0.17,
+            ),
+            eq: None,
         }),
         dark(Seed {
             name: "Tokyo Night",
-            bg: rgb8(26, 27, 38),
+            base: lch(0.225, 0.025, 278.0),
+            text: DARK_TEXT,
             accent: rgb8(122, 162, 247),
-            text: rgb8(192, 202, 245),
-            tracks: [
-                rgb8(247, 118, 142),
-                rgb8(255, 158, 100),
-                rgb8(224, 175, 104),
-                rgb8(158, 206, 106),
-                rgb8(115, 218, 202),
-                rgb8(122, 162, 247),
-                rgb8(187, 154, 247),
-                rgb8(255, 117, 127),
-            ],
-            eq: EQ_CONSOLE,
+            tracks: matched(
+                [10.0, 51.0, 75.0, 130.0, 182.0, 264.0, 299.0, 350.0],
+                0.74,
+                0.15,
+            ),
+            eq: None,
         }),
         dark(Seed {
             name: "Catppuccin",
-            bg: rgb8(30, 30, 46),
+            base: lch(0.245, 0.03, 284.0),
+            text: DARK_TEXT,
             accent: rgb8(203, 166, 247),
-            text: rgb8(205, 214, 244),
-            tracks: TRACKS_PASTEL,
-            eq: EQ_CONSOLE,
+            tracks: matched(HUES_PASTEL, 0.80, 0.11),
+            eq: None,
         }),
         dark(Seed {
             name: "One Dark",
-            bg: rgb8(40, 44, 52),
+            base: lch(0.28, 0.018, 264.0),
+            text: DARK_TEXT,
             accent: rgb8(97, 175, 239),
-            text: rgb8(171, 178, 191),
-            tracks: [
-                rgb8(224, 108, 117),
-                rgb8(209, 154, 102),
-                rgb8(229, 192, 123),
-                rgb8(152, 195, 121),
-                rgb8(86, 182, 194),
-                rgb8(97, 175, 239),
-                rgb8(198, 120, 221),
-                rgb8(190, 80, 70),
-            ],
-            eq: EQ_CONSOLE,
+            tracks: matched(
+                [17.0, 64.0, 82.0, 133.0, 206.0, 245.0, 318.0, 350.0],
+                0.72,
+                0.14,
+            ),
+            eq: None,
         }),
         dark(Seed {
             name: "Deep Sea",
-            bg: rgb8(11, 26, 36),
+            base: lch(0.215, 0.03, 236.0),
+            text: DARK_TEXT,
             accent: rgb8(46, 196, 182),
-            text: rgb8(202, 220, 228),
-            tracks: [
-                rgb8(231, 111, 81),
-                rgb8(244, 162, 97),
-                rgb8(233, 196, 106),
-                rgb8(138, 177, 125),
-                rgb8(42, 157, 143),
-                rgb8(69, 123, 157),
-                rgb8(131, 111, 168),
-                rgb8(190, 111, 130),
-            ],
-            eq: EQ_CONSOLE,
+            tracks: matched(
+                [35.0, 58.0, 87.0, 138.0, 183.0, 238.0, 300.0, 5.0],
+                0.70,
+                0.13,
+            ),
+            eq: None,
         }),
         dark(Seed {
             name: "Espresso",
-            bg: rgb8(36, 26, 20),
+            base: lch(0.235, 0.022, 55.0),
+            text: DARK_TEXT,
             accent: rgb8(212, 163, 115),
-            text: rgb8(230, 218, 205),
-            tracks: TRACKS_WARM,
-            eq: EQ_CONSOLE,
+            tracks: matched(HUES_WARM, 0.68, 0.11),
+            eq: None,
         }),
         dark(Seed {
             name: "Slate",
-            bg: rgb8(28, 33, 40),
+            base: lch(0.245, 0.018, 255.0),
+            text: DARK_TEXT,
             accent: rgb8(83, 155, 245),
-            text: rgb8(205, 217, 229),
-            tracks: TRACKS_CLASSIC,
-            eq: EQ_CONSOLE,
+            tracks: matched(HUES_CLASSIC, 0.70, 0.14),
+            eq: None,
         }),
         dark(Seed {
             name: "Rose Pine",
-            bg: rgb8(25, 23, 36),
+            base: lch(0.22, 0.028, 291.0),
+            text: DARK_TEXT,
             accent: rgb8(235, 188, 186),
-            text: rgb8(224, 222, 244),
-            tracks: [
-                rgb8(235, 111, 146),
-                rgb8(246, 193, 119),
-                rgb8(234, 154, 151),
-                rgb8(49, 116, 143),
-                rgb8(156, 207, 216),
-                rgb8(196, 167, 231),
-                rgb8(144, 122, 169),
-                rgb8(235, 188, 186),
-            ],
-            eq: EQ_CONSOLE,
+            tracks: matched(
+                [4.0, 30.0, 75.0, 228.0, 195.0, 305.0, 270.0, 345.0],
+                0.74,
+                0.12,
+            ),
+            eq: None,
         }),
         dark(Seed {
             name: "High Contrast",
-            bg: rgb8(0, 0, 0),
+            base: lch(0.10, 0.0, 0.0),
+            text: [1.0, 0.86, 0.74],
             accent: rgb8(255, 215, 0),
-            text: rgb8(255, 255, 255),
-            tracks: TRACKS_NEON,
-            eq: EQ_CONSOLE,
+            tracks: matched(HUES_NEON, 0.80, 0.2),
+            eq: None,
         }),
         light(Seed {
             name: "Solarized Light",
-            bg: rgb8(253, 246, 227),
+            base: lch(0.965, 0.022, 88.0),
+            text: LIGHT_TEXT,
             accent: rgb8(38, 139, 210),
-            text: rgb8(88, 110, 117),
-            tracks: [
-                rgb8(220, 50, 47),
-                rgb8(203, 75, 22),
-                rgb8(181, 137, 0),
-                rgb8(133, 153, 0),
-                rgb8(42, 161, 152),
-                rgb8(38, 139, 210),
-                rgb8(108, 113, 196),
-                rgb8(211, 54, 130),
-            ],
-            eq: EQ_CONSOLE,
+            tracks: matched(HUES_SOLARIZED, 0.62, 0.15),
+            eq: None,
         }),
         light(Seed {
             name: "Porcelain",
-            bg: rgb8(242, 242, 240),
-            accent: rgb8(235, 120, 15),
-            text: rgb8(40, 42, 46),
-            tracks: TRACKS_CLASSIC,
-            eq: EQ_CONSOLE,
+            base: lch(0.965, 0.004, 85.0),
+            text: LIGHT_TEXT,
+            accent: lch(0.66, 0.17, 50.0).color(),
+            tracks: [
+                lch(0.63, 0.17, 27.0),
+                lch(0.68, 0.15, 55.0),
+                lch(0.75, 0.14, 88.0),
+                lch(0.64, 0.14, 150.0),
+                lch(0.64, 0.10, 205.0),
+                lch(0.61, 0.15, 260.0),
+                lch(0.61, 0.15, 300.0),
+                lch(0.62, 0.17, 350.0),
+            ],
+            eq: Some([
+                lch(0.62, 0.12, 60.0),
+                lch(0.56, 0.12, 255.0),
+                lch(0.60, 0.12, 150.0),
+                lch(0.57, 0.15, 25.0),
+            ]),
         }),
-    ]);
-    themes
+    ]
 }
 
 /// Look a built-in up by name.
@@ -602,17 +676,216 @@ mod tests {
         assert_eq!(themes[0].name, "Charcoal", "default first");
     }
 
+    /// Body text meets WCAG AAA.
+    const TEXT_CONTRAST: f32 = 7.0;
+    /// A fader handle is the control itself, so it keeps WCAG's 3:1 for
+    /// graphics.
+    const FADER_HANDLE_CONTRAST: f32 = 3.0;
+
+    fn shortfalls(
+        theme: &ThemePalette,
+        role: &str,
+        colour: Color,
+        backgrounds: &[(&str, Color)],
+        floor: f32,
+    ) -> Vec<String> {
+        backgrounds
+            .iter()
+            .map(|&(name, background)| (name, contrast_ratio(colour, background)))
+            .filter(|&(_, ratio)| ratio < floor)
+            .map(|(name, ratio)| format!("{}: {role} on {name} {ratio:.2} < {floor}", theme.name))
+            .collect()
+    }
+
     #[test]
-    fn builtin_text_contrasts_with_background() {
-        // Cheap luminance gate: every theme's primary text must sit
-        // far from its background, dark or light.
-        fn luma(c: Color) -> f32 {
-            0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
+    fn every_builtin_theme_keeps_its_text_tiers_readable_on_every_surface() {
+        let failures: Vec<String> = builtins()
+            .iter()
+            .flat_map(|theme| {
+                let surfaces = theme.text_surfaces();
+                [
+                    ("text", theme.text, TEXT_CONTRAST),
+                    ("text_dim", theme.text_dim, TEXT_DIM_CONTRAST),
+                    ("text_muted", theme.text_muted, TEXT_MUTED_CONTRAST),
+                ]
+                .into_iter()
+                .flat_map(move |(role, colour, floor)| {
+                    shortfalls(theme, role, colour, &surfaces, floor)
+                })
+            })
+            .collect();
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    #[test]
+    fn every_builtin_theme_steps_its_knob_rings_clear_of_body_strip_and_arc() {
+        let failures: Vec<String> = builtins()
+            .iter()
+            .flat_map(|theme| {
+                let around = [
+                    ("knob_body", theme.knob_body),
+                    ("bg_surface", theme.bg_surface),
+                    ("bg_elevated", theme.bg_elevated),
+                ];
+                let ring = [("knob_track", theme.knob_track)];
+                let mut failures = shortfalls(
+                    theme,
+                    "knob_track",
+                    theme.knob_track,
+                    &around,
+                    KNOB_RING_STEP,
+                );
+                for (role, arc) in [
+                    ("accent", theme.accent),
+                    ("eq_lf", theme.eq_lf),
+                    ("eq_lmf", theme.eq_lmf),
+                    ("eq_hmf", theme.eq_hmf),
+                    ("eq_hf", theme.eq_hf),
+                ] {
+                    failures.extend(shortfalls(theme, role, arc, &ring, KNOB_RING_STEP));
+                }
+                failures
+            })
+            .collect();
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    #[test]
+    fn every_builtin_theme_sets_its_fader_handles_clear_of_their_track_and_strip() {
+        let failures: Vec<String> = builtins()
+            .iter()
+            .flat_map(|theme| {
+                let behind = [
+                    ("fader_track", theme.display_bg),
+                    ("bg_elevated", theme.bg_elevated),
+                    ("bg_surface", theme.bg_surface),
+                ];
+                shortfalls(
+                    theme,
+                    "fader_handle",
+                    theme.fader_handle,
+                    &behind,
+                    FADER_HANDLE_CONTRAST,
+                )
+            })
+            .collect();
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    #[test]
+    fn the_default_dark_and_light_themes_have_vivid_track_palettes() {
+        // Dev's classic rainbow averages 0.53. The muted 0.42 palette took
+        // the pop out of the app; calmer looks are the Colour strength
+        // preference's job, not the theme's.
+        for name in ["Charcoal", "Porcelain"] {
+            let theme = builtin_by_name(name).unwrap();
+            let mean = theme
+                .track_colors
+                .iter()
+                .map(|&color| crate::theme::Hsl::of(color).saturation)
+                .sum::<f32>()
+                / theme.track_colors.len() as f32;
+            assert!(mean >= 0.5, "{name} mean track saturation is {mean}");
         }
-        for t in builtins() {
-            let d = (luma(t.text) - luma(t.bg_dark)).abs();
-            assert!(d > 0.45, "theme {} text/bg contrast too low: {d}", t.name);
+    }
+
+    /// The approved mockup steps dark surfaces about 0.035 OKLCH lightness
+    /// apart. Light themes step 0.02 to 0.035, keeping their raised shade
+    /// under white.
+    const SURFACE_STEP: f32 = 0.018;
+    /// How far a control fill stands off the raised cards it sits on.
+    const CONTROL_STEP: f32 = 0.03;
+    /// Below this chroma a surface is grey and its hue is noise.
+    const TINTED: f32 = 0.01;
+
+    fn hue_gap(a: f32, b: f32) -> f32 {
+        ((a - b).rem_euclid(360.0)).min((b - a).rem_euclid(360.0))
+    }
+
+    #[test]
+    fn every_builtin_theme_steps_its_surfaces_in_lightness_keeping_one_hue() {
+        let mut failures = Vec::new();
+        for theme in builtins() {
+            let ramp = [
+                ("display_bg", theme.display_bg),
+                ("lane", theme.lane()),
+                ("bg_surface", theme.bg_surface),
+                ("bg_elevated", theme.bg_elevated),
+            ]
+            .map(|(role, colour)| (role, Oklch::of(colour)));
+            for pair in ramp.windows(2) {
+                let [(low, below), (high, above)] = [pair[0], pair[1]];
+                if above.lightness - below.lightness < SURFACE_STEP {
+                    failures.push(format!("{}: {high} not a step above {low}", theme.name));
+                }
+            }
+            let raised = ramp[3].1;
+            let control = Oklch::of(theme.control());
+            if (control.lightness - raised.lightness).abs() < CONTROL_STEP {
+                failures.push(format!("{}: control too close to bg_elevated", theme.name));
+            }
+            let lane = ramp[1].1;
+            if lane.chroma < TINTED {
+                continue;
+            }
+            for (role, surface) in ramp.into_iter().chain([("control", control)]) {
+                if surface.chroma < lane.chroma * 0.6 || hue_gap(surface.hue, lane.hue) > 15.0 {
+                    failures.push(format!("{}: {role} loses the lane's tint", theme.name));
+                }
+            }
         }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    /// Tracks this close to their palette's median lightness read as one
+    /// family. Yellow sits highest, as it must to look yellow at all.
+    const TRACK_LIGHTNESS_SPREAD: f32 = 0.13;
+    const TRACK_CHROMA: f32 = 0.095;
+
+    #[test]
+    fn every_builtin_theme_has_track_colours_of_one_lightness_and_strong_colour() {
+        let mut failures = Vec::new();
+        for theme in builtins() {
+            let tracks = theme.track_colors.map(Oklch::of);
+            let mut lightness = tracks.map(|track| track.lightness);
+            lightness.sort_by(f32::total_cmp);
+            let median = (lightness[3] + lightness[4]) / 2.0;
+            for (index, track) in tracks.iter().enumerate() {
+                if (track.lightness - median).abs() > TRACK_LIGHTNESS_SPREAD {
+                    failures.push(format!(
+                        "{}: track {index} {track:?} off {median}",
+                        theme.name
+                    ));
+                }
+                if track.chroma < TRACK_CHROMA {
+                    failures.push(format!("{}: track {index} {track:?} too grey", theme.name));
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    #[test]
+    fn every_builtin_theme_draws_its_eq_bands_from_its_own_track_colours() {
+        let mut failures = Vec::new();
+        for theme in builtins() {
+            let tracks = theme.track_colors.map(Oklch::of);
+            for (band, colour) in [
+                ("eq_lf", theme.eq_lf),
+                ("eq_lmf", theme.eq_lmf),
+                ("eq_hmf", theme.eq_hmf),
+                ("eq_hf", theme.eq_hf),
+            ] {
+                let eq = Oklch::of(colour);
+                let near_a_track = tracks
+                    .iter()
+                    .any(|track| hue_gap(track.hue, eq.hue) <= 15.0);
+                if !near_a_track || eq.chroma < TRACK_CHROMA {
+                    failures.push(format!("{}: {band} {eq:?}", theme.name));
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
 
     #[test]
@@ -621,7 +894,7 @@ mod tests {
         // Redirect the service to a temp dir via direct file ops:
         // save_user_theme always writes to the real config dir, so
         // exercise the same serialize/parse path manually here.
-        let mut palette = ThemePalette::charcoal();
+        let mut palette = charcoal();
         palette.name = "Test Custom".to_string();
         let json = serde_json::to_string_pretty(&palette).unwrap();
         let path = dir.path().join("test-custom.vzt");
