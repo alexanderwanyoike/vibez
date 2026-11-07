@@ -288,7 +288,7 @@ impl TimelineEditorState {
                 id: success.new_clip_id,
                 name: success.new_name,
                 audio: Arc::clone(&success.new_audio),
-                source: None,
+                source: Some(success.new_source),
                 position: success.new_position,
                 source_offset: 0,
                 start_marker: 0,
