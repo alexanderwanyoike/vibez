@@ -675,11 +675,15 @@ impl App {
         );
     }
 
+    /// Whether Perform is showing a Section's own timeline.
+    fn section_timeline_on_screen(&self) -> bool {
+        self.state.view.workspace == crate::state::Workspace::Perform
+            && self.state.perform.selected_section.is_some()
+    }
+
     /// Zoom of the Arrange or Section timeline on screen.
     pub(super) fn timeline_pixels_per_beat(&self) -> f32 {
-        if self.state.view.workspace == crate::state::Workspace::Perform
-            && self.state.perform.selected_section.is_some()
-        {
+        if self.section_timeline_on_screen() {
             return self
                 .state
                 .perform
