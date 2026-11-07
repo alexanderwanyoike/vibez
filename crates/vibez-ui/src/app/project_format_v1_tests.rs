@@ -1025,7 +1025,7 @@ async fn joined_audio_clips_survive_save_and_reopen() {
     let project_path = directory.path().join("jungle.vzp");
     let (mut app, track_id) = app_with_two_selected_break_clips(directory.path());
 
-    super::test_support::join_selected_audio_clips(&mut app, track_id).await;
+    super::test_support::join_selected_audio_clips(&mut app).await;
     let _ = app.update(Message::Arrangement(
         crate::domains::arrangement::ArrangementMsg::DuplicateSelectedClip,
     ));
@@ -1054,9 +1054,9 @@ async fn joined_audio_clips_survive_save_and_reopen() {
 #[tokio::test]
 async fn joined_audio_clip_survives_sample_rate_conversion() {
     let directory = tempfile::tempdir().unwrap();
-    let (mut app, track_id) = app_with_two_selected_break_clips(directory.path());
+    let (mut app, _) = app_with_two_selected_break_clips(directory.path());
 
-    super::test_support::join_selected_audio_clips(&mut app, track_id).await;
+    super::test_support::join_selected_audio_clips(&mut app).await;
     let converted = super::tasks::convert_project_sample_rate_async(
         super::tasks::SampleRateConversion {
             project: app.project_for_save(),
