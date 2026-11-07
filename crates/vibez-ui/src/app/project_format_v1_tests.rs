@@ -639,6 +639,87 @@ async fn unavailable_media_clip_is_kept_for_relink_on_reopen() {
 }
 
 #[tokio::test]
+async fn sourceless_audio_clip_survives_reopen_and_re_save() {
+    let directory = tempfile::tempdir().unwrap();
+    let project_path = directory.path().join("joined.vzp");
+    let track = TrackInfo::new("Breaks");
+    let clip_id = ClipId::new();
+    let fades = ClipFades::new(256, 512, 2_048).with_fade_in_curve(FadeCurve::new(40));
+    let project = Project {
+        reduced_latency_monitoring: false,
+        tracks: vec![track.clone()],
+        arrange: vibez_project::TimelineInfo {
+            clips: vec![ClipInfo {
+                id: clip_id,
+                track_id: track.id,
+                name: "Joined".into(),
+                position: 4_096,
+                source_offset: 0,
+                start_marker: None,
+                duration: 2_048,
+                source: None,
+                file_path: None,
+                loop_enabled: false,
+                loop_start: 0,
+                loop_end: 2_048,
+                gain_db: Default::default(),
+                fades,
+                playback_direction: Default::default(),
+                transient_markers: Default::default(),
+                warp_markers: Default::default(),
+                transpose: Default::default(),
+                original_bpm: None,
+                warped: false,
+                warped_to_bpm: None,
+            }],
+            ..vibez_project::TimelineInfo::default()
+        },
+        ..Project::default()
+    };
+    vibez_project::project_format_v1::save_project_v1(&project_path, None, project).unwrap();
+
+    let loaded = load_project_async(
+        project_path.clone(),
+        None,
+        vibez_core::constants::DEFAULT_SAMPLE_RATE,
+    )
+    .await
+    .unwrap();
+    assert!(loaded.clips.is_empty());
+    assert_eq!(loaded.unresolved_clips.len(), 1);
+    assert_eq!(loaded.unresolved_clips[0].id, clip_id);
+    assert!(loaded
+        .warnings
+        .iter()
+        .any(|warning| warning.contains("Clip 'Joined' has no saved audio")));
+
+    let mut app = super::test_support::app();
+    app.rebuild_from_loaded_project(loaded);
+    save_project_async(
+        project_path.clone(),
+        Some(project_path.clone()),
+        app.project_for_save(),
+    )
+    .await
+    .unwrap();
+
+    let reopened = load_project_async(
+        project_path,
+        None,
+        vibez_core::constants::DEFAULT_SAMPLE_RATE,
+    )
+    .await
+    .unwrap();
+    let kept = &reopened.project.arrange.clips;
+    assert_eq!(kept.len(), 1);
+    assert_eq!(kept[0].id, clip_id);
+    assert_eq!(kept[0].name, "Joined");
+    assert_eq!(kept[0].position, 4_096);
+    assert_eq!(kept[0].duration, 2_048);
+    assert_eq!(kept[0].fades, fades);
+}
+
+#[tokio::test]
 async fn cached_remote_media_materializes_without_a_client_and_persists_metadata() {
     let directory = tempfile::tempdir().unwrap();
     let source_path = directory.path().join("source.wav");
