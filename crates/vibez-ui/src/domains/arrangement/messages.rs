@@ -6,6 +6,7 @@ use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::track::{ClipTranspose, MediaSourceRef};
 
+use super::audio_join::{AudioJoinRequest, PreparedAudioJoin};
 use crate::state::{
     ArrangementSelection, AudioClipInspectorField, AudioClipRotaryField, ClipDragStep,
 };
@@ -268,6 +269,11 @@ pub enum ArrangementMsg {
         source: MediaSourceRef,
         audio: Arc<DecodedAudio>,
     },
+    /// Replaces the requested Clips with their prepared, staged join.
+    ApplyAudioJoin {
+        request: AudioJoinRequest,
+        prepared: PreparedAudioJoin,
+    },
     SplitNoteClip {
         track_id: TrackId,
         clip_id: ClipId,
@@ -338,6 +344,7 @@ impl ArrangementMsg {
                 | Self::SliceAudioClipAtMarkers { .. }
                 | Self::RequestSliceAudioClipToDrumRack { .. }
                 | Self::SliceAudioClipToDrumRack { .. }
+                | Self::ApplyAudioJoin { .. }
                 | Self::SplitNoteClip { .. }
                 | Self::SplitSelectedAtPlayhead
                 | Self::JoinSelectedClips
@@ -395,6 +402,7 @@ impl ArrangementMsg {
                 | Self::SliceAudioClipAtMarkers { .. }
                 | Self::RequestSliceAudioClipToDrumRack { .. }
                 | Self::SliceAudioClipToDrumRack { .. }
+                | Self::ApplyAudioJoin { .. }
                 | Self::SplitNoteClip { .. }
                 | Self::SplitSelectedAtPlayhead
                 | Self::JoinSelectedClips
@@ -477,6 +485,7 @@ impl ArrangementMsg {
                     | Self::RemoveWarpMarker { .. }
                     | Self::SliceAudioClipAtMarkers { .. }
                     | Self::SliceAudioClipToDrumRack { .. }
+                    | Self::ApplyAudioJoin { .. }
             )
     }
 }
@@ -509,6 +518,8 @@ pub struct ArrangementAction {
     /// A changed source tempo must immediately rebuild an already-warped Clip
     /// against the current Project tempo.
     pub warp_refresh: Option<(TrackId, ClipId)>,
+    /// Audio Clips whose join must be rendered and staged in the background.
+    pub join_audio: Option<AudioJoinRequest>,
 }
 
 /// Read-only cross-domain facts for arrangement updates.

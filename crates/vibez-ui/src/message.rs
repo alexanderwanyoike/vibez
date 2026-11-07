@@ -113,6 +113,11 @@ pub enum Message {
     SubmitTransientAnalysisSensitivity,
     ConfirmTransientAnalysis,
     CancelTransientAnalysis,
+    AudioJoinPrepared {
+        location: TimelineLocation,
+        request: crate::domains::arrangement::AudioJoinRequest,
+        result: Result<crate::domains::arrangement::PreparedAudioJoin, String>,
+    },
     AudioClipDrumRackPrepared {
         location: TimelineLocation,
         track_id: TrackId,

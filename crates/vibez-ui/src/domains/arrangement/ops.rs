@@ -338,8 +338,10 @@ impl TimelineEditorState {
             });
 
         if all_audio {
-            action.status = self.join_audio_clips(first_track, &clips, engine);
-            action.mark_dirty = action.status.is_some();
+            action.join_audio = self.audio_join_request(first_track, &clips);
+            if action.join_audio.is_some() {
+                action.status = Some("Joining audio clips...".to_string());
+            }
         } else if all_note {
             action.status = self.join_note_clips(first_track, &clips, engine);
             action.mark_dirty = action.status.is_some();

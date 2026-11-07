@@ -590,6 +590,24 @@ impl App {
                 return self
                     .apply_arrangement_action_in_transaction(action, owns_project_transaction);
             }
+            Message::AudioJoinPrepared {
+                location,
+                request,
+                result,
+            } => match result {
+                Ok(prepared) if self.active_timeline_location() == location => {
+                    return self.update(Message::Arrangement(ArrangementMsg::ApplyAudioJoin {
+                        request,
+                        prepared,
+                    }));
+                }
+                Ok(_) => {
+                    self.state.status_text = "Join cancelled because the timeline changed".into();
+                }
+                Err(error) => {
+                    self.state.status_text = format!("Join failed: {error}");
+                }
+            },
             Message::AudioClipDrumRackPrepared {
                 location,
                 track_id,

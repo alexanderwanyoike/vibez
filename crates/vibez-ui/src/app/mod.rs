@@ -161,6 +161,7 @@ pub fn run() -> iced::Result {
 }
 
 mod actions;
+mod audio_join_preparation;
 mod audio_recording;
 mod audio_settings;
 mod audio_take_finalization;
@@ -186,6 +187,7 @@ mod filter_devices;
 mod fm_devices;
 mod gain_devices;
 mod gate_devices;
+mod generated_media;
 mod instrument_devices;
 mod keyboard;
 mod local_watcher;
