@@ -908,11 +908,10 @@ async fn uncached_degraded_materialization_requires_explicit_reconnect() {
     assert!(error.contains("Reconnect Required"));
 }
 
-#[tokio::test]
-async fn joined_audio_clips_survive_save_and_reopen() {
-    let directory = tempfile::tempdir().unwrap();
-    let source_path = directory.path().join("break.wav");
-    let project_path = directory.path().join("jungle.vzp");
+/// An App holding one Arrange Audio track with a break chopped into two
+/// selected Clips backed by staged Project Media.
+fn app_with_two_selected_break_clips(directory: &Path) -> (App, vibez_core::id::TrackId) {
+    let source_path = directory.join("break.wav");
     vibez_audio_io::file_io::write_wav_file(&source_path, &one_second_audio()).unwrap();
     let source = vibez_project::project_format_v1::stage_local_file(&source_path).unwrap();
     let mut app = super::test_support::app();
@@ -936,17 +935,62 @@ async fn joined_audio_clips_survive_save_and_reopen() {
         );
         app.state.arrange_content_mut(track_id).clips.push(clip);
     }
+    (app, track_id)
+}
+
+#[tokio::test]
+async fn joined_audio_clips_survive_save_and_reopen() {
+    let directory = tempfile::tempdir().unwrap();
+    let project_path = directory.path().join("jungle.vzp");
+    let (mut app, track_id) = app_with_two_selected_break_clips(directory.path());
 
     super::test_support::join_selected_audio_clips(&mut app, track_id).await;
-    assert_eq!(app.state.arrange_content(track_id).unwrap().clips.len(), 1);
+    let _ = app.update(Message::Arrangement(
+        crate::domains::arrangement::ArrangementMsg::DuplicateSelectedClip,
+    ));
+    let clips = &app.state.arrange_content(track_id).unwrap().clips;
+    assert_eq!(clips.len(), 2);
+    let Some(MediaSourceRef::StagedProjectMedia { staging_path, .. }) = clips[0].source.clone()
+    else {
+        panic!("joined clip has no staged media: {:?}", clips[0].source);
+    };
     save_project_async(project_path.clone(), None, app.project_for_save())
         .await
         .unwrap();
+    std::fs::remove_file(staging_path).unwrap();
     let reopened = load_project_async(project_path, None, 44_100)
         .await
         .unwrap();
 
     assert!(reopened.warnings.is_empty(), "{:?}", reopened.warnings);
-    assert_eq!(reopened.clips.len(), 1, "joined clip audio lost on reopen");
-    assert_eq!(reopened.clips[0].clip.audio.num_frames(), 44_100);
+    assert_eq!(reopened.clips.len(), 2, "joined clip audio lost on reopen");
+    assert!(reopened
+        .clips
+        .iter()
+        .all(|clip| clip.clip.audio.num_frames() == 44_100));
+}
+
+#[tokio::test]
+async fn joined_audio_clip_survives_sample_rate_conversion() {
+    let directory = tempfile::tempdir().unwrap();
+    let (mut app, track_id) = app_with_two_selected_break_clips(directory.path());
+
+    super::test_support::join_selected_audio_clips(&mut app, track_id).await;
+    let converted = super::tasks::convert_project_sample_rate_async(
+        super::tasks::SampleRateConversion {
+            project: app.project_for_save(),
+            path: None,
+            dirty: true,
+            sample_rate: 48_000,
+        },
+        None,
+    )
+    .await;
+
+    assert!(
+        converted.loaded.warnings.is_empty(),
+        "{:?}",
+        converted.loaded.warnings
+    );
+    assert_eq!(converted.loaded.clips.len(), 1);
 }
