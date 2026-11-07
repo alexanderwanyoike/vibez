@@ -12,6 +12,7 @@ use vibez_core::midi::{InstrumentKind, MidiNote};
 use vibez_core::track::{AudioInputRoute, ClipPlaybackDirection, MediaSourceRef};
 use vibez_core::transient::{TransientMarker, TransientMarkerKind};
 use vibez_core::warp_marker::WarpMarker;
+
 /// Joins the selected Audio Clips through the background round trip, with
 /// Project Media staging replaced by a fixed source.
 fn join_selected_audio(

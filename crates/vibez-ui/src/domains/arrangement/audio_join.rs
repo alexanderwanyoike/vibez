@@ -10,9 +10,7 @@ use vibez_engine::commands::EngineCommand;
 use super::{ArrangementAction, EngineHandle};
 use crate::state::{ArrangementSelection, TimelineEditorState, UiClip};
 
-/// Audio Clips to join, sorted by position. The joined audio is rendered and
-/// staged as Project Media off the UI thread before any Clip changes, so a
-/// joined Clip never exists without saved media.
+/// Audio Clips to join, sorted by position, as they were when Join was asked.
 #[derive(Debug, Clone)]
 pub struct AudioJoinRequest {
     pub track_id: TrackId,
@@ -23,10 +21,19 @@ impl PartialEq for AudioJoinRequest {
     fn eq(&self, other: &Self) -> bool {
         self.track_id == other.track_id
             && self.clips.len() == other.clips.len()
-            && self.clips.iter().zip(&other.clips).all(|(a, b)| {
-                a.id == b.id && a.position == b.position && a.has_same_audible_geometry(b)
-            })
+            && self
+                .clips
+                .iter()
+                .zip(&other.clips)
+                .all(|(a, b)| unchanged_since(a, b))
     }
+}
+
+/// Whether `clip` is still `original` as far as joining it is concerned.
+fn unchanged_since(clip: &UiClip, original: &UiClip) -> bool {
+    clip.id == original.id
+        && clip.position == original.position
+        && clip.has_same_audible_geometry(original)
 }
 
 /// Joined audio and the Project Media it was staged as.
@@ -120,11 +127,10 @@ impl TimelineEditorState {
     ) -> ArrangementAction {
         let unchanged = self.find_content(request.track_id).is_some_and(|track| {
             request.clips.iter().all(|original| {
-                track.clips.iter().any(|clip| {
-                    clip.id == original.id
-                        && clip.position == original.position
-                        && clip.has_same_audible_geometry(original)
-                })
+                track
+                    .clips
+                    .iter()
+                    .any(|clip| unchanged_since(clip, original))
             })
         });
         if !unchanged {
