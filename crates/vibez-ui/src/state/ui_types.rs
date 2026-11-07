@@ -1106,8 +1106,9 @@ impl SnapGrid {
         }
     }
 
-    /// The steps a zoom-adaptive grid picks from, coarsest first.
-    const ADAPTIVE_STEPS: [Self; 8] = [
+    /// Every straight division, coarsest first. The zoom-adaptive grid picks
+    /// from these and the grid menu lists them.
+    const DIVISIONS: [Self; 8] = [
         Self::EIGHT_BARS,
         Self::FOUR_BARS,
         Self::TWO_BARS,
@@ -1120,10 +1121,10 @@ impl SnapGrid {
 
     /// The furthest a bias can push the adaptive grid. Any further and every
     /// zoom lands on the same end step.
-    pub const ADAPTIVE_BIAS_LIMIT: i8 = Self::ADAPTIVE_STEPS.len() as i8 - 1;
+    pub const ADAPTIVE_BIAS_LIMIT: i8 = Self::DIVISIONS.len() as i8 - 1;
 
     pub fn adaptive(pixels_per_beat: f32, bias: i8, triplet: bool) -> Self {
-        let steps = Self::ADAPTIVE_STEPS;
+        let steps = Self::DIVISIONS;
         let base = steps
             .iter()
             .rposition(|grid| grid.beat_size() * pixels_per_beat as f64 >= 12.0)
@@ -1292,7 +1293,7 @@ impl GridConfig {
     /// triplet feel, as Ableton's Fixed Grid menu keeps Triplet Grid on.
     pub fn fixed_choices(self) -> impl Iterator<Item = GridChoice> {
         let triplet = self.selected.is_triplet();
-        SnapGrid::ADAPTIVE_STEPS
+        SnapGrid::DIVISIONS
             .into_iter()
             .map(move |grid| GridChoice::Fixed(if triplet { grid.triplet() } else { grid }))
     }
