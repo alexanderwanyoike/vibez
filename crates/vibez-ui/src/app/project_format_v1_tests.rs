@@ -908,13 +908,6 @@ async fn uncached_degraded_materialization_requires_explicit_reconnect() {
     assert!(error.contains("Reconnect Required"));
 }
 
-/// Joins the selected Audio Clips the way Ctrl+J does.
-async fn join_selected_audio_clips(app: &mut App) {
-    let _ = app.update(Message::Arrangement(
-        crate::domains::arrangement::ArrangementMsg::JoinSelectedClips,
-    ));
-}
-
 #[tokio::test]
 async fn joined_audio_clips_survive_save_and_reopen() {
     let directory = tempfile::tempdir().unwrap();
@@ -944,7 +937,7 @@ async fn joined_audio_clips_survive_save_and_reopen() {
         app.state.arrange_content_mut(track_id).clips.push(clip);
     }
 
-    join_selected_audio_clips(&mut app).await;
+    super::test_support::join_selected_audio_clips(&mut app, track_id).await;
     assert_eq!(app.state.arrange_content(track_id).unwrap().clips.len(), 1);
     save_project_async(project_path.clone(), None, app.project_for_save())
         .await

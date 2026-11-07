@@ -4,10 +4,37 @@ use std::sync::Arc;
 
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::id::{ClipId, TrackId};
+use vibez_core::track::MediaSourceRef;
 use vibez_engine::commands::EngineCommand;
 
-use super::EngineHandle;
+use super::{ArrangementAction, EngineHandle};
 use crate::state::{ArrangementSelection, TimelineEditorState, UiClip};
+
+/// Audio Clips to join, sorted by position. The joined audio is rendered and
+/// staged as Project Media off the UI thread before any Clip changes, so a
+/// joined Clip never exists without saved media.
+#[derive(Debug, Clone)]
+pub struct AudioJoinRequest {
+    pub track_id: TrackId,
+    pub clips: Vec<UiClip>,
+}
+
+impl PartialEq for AudioJoinRequest {
+    fn eq(&self, other: &Self) -> bool {
+        self.track_id == other.track_id
+            && self.clips.len() == other.clips.len()
+            && self.clips.iter().zip(&other.clips).all(|(a, b)| {
+                a.id == b.id && a.position == b.position && a.has_same_audible_geometry(b)
+            })
+    }
+}
+
+/// Joined audio and the Project Media it was staged as.
+#[derive(Debug, Clone)]
+pub struct PreparedAudioJoin {
+    pub joined: JoinedAudio,
+    pub source: MediaSourceRef,
+}
 
 /// The audible result of joining Audio Clips, laid out from the first Clip.
 #[derive(Debug, Clone)]
@@ -61,30 +88,58 @@ pub fn render_joined_audio(clips: &[UiClip]) -> JoinedAudio {
 }
 
 impl TimelineEditorState {
-    pub(super) fn join_audio_clips(
-        &mut self,
+    pub(super) fn audio_join_request(
+        &self,
         track_id: TrackId,
         selections: &[ArrangementSelection],
-        engine: &mut impl EngineHandle,
-    ) -> Option<String> {
-        let mut clips: Vec<UiClip> = Vec::new();
-        if let Some(track) = self.find_content(track_id) {
-            for selection in selections {
-                if let ArrangementSelection::AudioClip { clip_id, .. } = selection {
-                    if let Some(clip) = track.clips.iter().find(|c| c.id == *clip_id) {
-                        clips.push(clip.clone());
-                    }
+    ) -> Option<AudioJoinRequest> {
+        let track = self.find_content(track_id)?;
+        let mut clips: Vec<UiClip> = selections
+            .iter()
+            .filter_map(|selection| match selection {
+                ArrangementSelection::AudioClip { clip_id, .. } => {
+                    track.clips.iter().find(|clip| clip.id == *clip_id).cloned()
                 }
-            }
-        }
+                ArrangementSelection::NoteClip { .. } => None,
+            })
+            .collect();
         if clips.len() < 2 {
             return None;
         }
         clips.sort_by_key(|clip| clip.position);
-        let joined = render_joined_audio(&clips);
-        let clip_ids: Vec<ClipId> = clips.iter().map(|clip| clip.id).collect();
-        self.replace_with_joined_clip(engine, track_id, &clip_ids, joined);
-        Some("Joined audio clips".to_string())
+        Some(AudioJoinRequest { track_id, clips })
+    }
+
+    /// Applies a prepared join unless any original Clip moved, changed or
+    /// went away while its audio was being staged.
+    pub(super) fn apply_audio_join(
+        &mut self,
+        engine: &mut impl EngineHandle,
+        request: &AudioJoinRequest,
+        prepared: PreparedAudioJoin,
+    ) -> ArrangementAction {
+        let unchanged = self.find_content(request.track_id).is_some_and(|track| {
+            request.clips.iter().all(|original| {
+                track.clips.iter().any(|clip| {
+                    clip.id == original.id
+                        && clip.position == original.position
+                        && clip.has_same_audible_geometry(original)
+                })
+            })
+        });
+        if !unchanged {
+            return ArrangementAction {
+                status: Some("Join cancelled because the Audio Clips changed".to_string()),
+                ..ArrangementAction::default()
+            };
+        }
+        let originals: Vec<ClipId> = request.clips.iter().map(|clip| clip.id).collect();
+        self.replace_with_joined_clip(engine, request.track_id, &originals, prepared);
+        ArrangementAction {
+            status: Some("Joined audio clips".to_string()),
+            mark_dirty: true,
+            ..ArrangementAction::default()
+        }
     }
 
     fn replace_with_joined_clip(
@@ -92,8 +147,9 @@ impl TimelineEditorState {
         engine: &mut impl EngineHandle,
         track_id: TrackId,
         originals: &[ClipId],
-        joined: JoinedAudio,
+        prepared: PreparedAudioJoin,
     ) {
+        let PreparedAudioJoin { joined, source } = prepared;
         for clip_id in originals {
             self.unlink_crossfades_for_clip(engine, track_id, *clip_id);
             engine.send(EngineCommand::RemoveClip(track_id, *clip_id));
@@ -125,7 +181,7 @@ impl TimelineEditorState {
                 id: new_id,
                 name: "Joined".to_string(),
                 audio: joined.audio,
-                source: None,
+                source: Some(source),
                 position: joined.position,
                 source_offset: 0,
                 start_marker: 0,

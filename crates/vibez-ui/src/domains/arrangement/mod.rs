@@ -27,6 +27,7 @@ pub use messages::{
     ClipTransposeRenderRequest,
 };
 mod audio_join;
+pub use audio_join::{render_joined_audio, AudioJoinRequest, PreparedAudioJoin};
 mod clip_copies;
 mod clip_drag;
 mod clip_moves;
@@ -667,6 +668,9 @@ impl TimelineEditorState {
             }
             ArrangementMsg::JoinSelectedClips => {
                 return self.op_join_selected_clips(engine, ctx);
+            }
+            ArrangementMsg::ApplyAudioJoin { request, prepared } => {
+                return self.apply_audio_join(engine, &request, prepared);
             }
             ArrangementMsg::CrossfadeSelectedAudioClips => {
                 return self.crossfade_selected_audio_clips(engine);

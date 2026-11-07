@@ -124,3 +124,33 @@ fn join_makes_one_clip_in_one_undo_step() {
     let _ = app.update(Message::Project(ProjectMsg::Undo));
     assert_eq!(clip_counts(&app, &tracks), vec![2]);
 }
+
+#[tokio::test]
+async fn audio_join_makes_one_clip_in_one_undo_step() {
+    let mut app = super::test_support::app();
+    let track = ProjectTrack::new(TrackId::new(), "Audio".into(), 0);
+    let track_id = track.id;
+    Arc::make_mut(&mut app.state.project_tracks)
+        .tracks
+        .push(track);
+    for position in [0, 100] {
+        let clip = crate::state::UiClip::test_clip(position, 100);
+        app.state
+            .arrangement
+            .selected_clips
+            .insert(ArrangementSelection::AudioClip {
+                track_id,
+                clip_id: clip.id,
+            });
+        app.state.arrange_content_mut(track_id).clips.push(clip);
+    }
+
+    super::test_support::join_selected_audio_clips(&mut app, track_id).await;
+
+    let clips = &app.state.arrange_content(track_id).unwrap().clips;
+    assert_eq!(clips.len(), 1);
+    assert!(clips[0].source.is_some());
+    assert_eq!(app.state.project.history.undo.len(), 1);
+    let _ = app.update(Message::Project(ProjectMsg::Undo));
+    assert_eq!(app.state.arrange_content(track_id).unwrap().clips.len(), 2);
+}

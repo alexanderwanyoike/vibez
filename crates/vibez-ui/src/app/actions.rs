@@ -252,6 +252,16 @@ impl App {
                 )
             },
         );
+        let join_task = action.join_audio.take().map(|request| {
+            Task::perform(
+                super::audio_join_preparation::prepare_audio_join_async(request.clips.clone()),
+                move |result| Message::AudioJoinPrepared {
+                    location,
+                    request: request.clone(),
+                    result,
+                },
+            )
+        });
         let warp_task = action.warp_refresh.take().map(|(track_id, clip_id)| {
             self.dispatch_warp_clip_to_project(location, track_id, clip_id, false)
         });
@@ -332,7 +342,8 @@ impl App {
             transpose_task
                 .into_iter()
                 .chain(transpose_debounce_task)
-                .chain(warp_task),
+                .chain(warp_task)
+                .chain(join_task),
         )
     }
 

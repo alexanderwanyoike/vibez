@@ -12,6 +12,36 @@ use vibez_core::midi::{InstrumentKind, MidiNote};
 use vibez_core::track::{AudioInputRoute, ClipPlaybackDirection, MediaSourceRef};
 use vibez_core::transient::{TransientMarker, TransientMarkerKind};
 use vibez_core::warp_marker::WarpMarker;
+/// Joins the selected Audio Clips through the background round trip, with
+/// Project Media staging replaced by a fixed source.
+fn join_selected_audio(
+    a: &mut ArrangementFixture,
+    engine: &mut RecordingEngine,
+) -> (ArrangementAction, ArrangementAction) {
+    let mut requested = a.update(
+        ArrangementMsg::JoinSelectedClips,
+        engine,
+        ArrangementCtx::default(),
+    );
+    let request = requested.join_audio.take().expect("an audio join request");
+    let prepared = PreparedAudioJoin {
+        joined: render_joined_audio(&request.clips),
+        source: joined_source(),
+    };
+    let applied = a.update(
+        ArrangementMsg::ApplyAudioJoin { request, prepared },
+        engine,
+        ArrangementCtx::default(),
+    );
+    (requested, applied)
+}
+
+fn joined_source() -> MediaSourceRef {
+    MediaSourceRef::LocalFile {
+        path: "Joined.wav".into(),
+    }
+}
+
 fn add_audio_clip(
     a: &mut ArrangementFixture,
     track_idx: usize,

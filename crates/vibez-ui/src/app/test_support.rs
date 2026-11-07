@@ -86,3 +86,37 @@ pub(super) fn app() -> super::App {
         save_runtime: Default::default(),
     }
 }
+
+/// Joins the selected Arrange Audio Clips the way Ctrl+J does, running the
+/// background render and staging step the returned Task would run.
+pub(super) async fn join_selected_audio_clips(
+    app: &mut super::App,
+    track_id: vibez_core::id::TrackId,
+) {
+    let mut clips: Vec<_> = app
+        .state
+        .arrange_content(track_id)
+        .unwrap()
+        .clips
+        .iter()
+        .filter(|clip| {
+            app.state.arrangement.selected_clips.contains(
+                &crate::state::ArrangementSelection::AudioClip {
+                    track_id,
+                    clip_id: clip.id,
+                },
+            )
+        })
+        .cloned()
+        .collect();
+    clips.sort_by_key(|clip| clip.position);
+    let _ = app.update(crate::message::Message::Arrangement(
+        crate::domains::arrangement::ArrangementMsg::JoinSelectedClips,
+    ));
+    let result = super::audio_join_preparation::prepare_audio_join_async(clips.clone()).await;
+    let _ = app.update(crate::message::Message::AudioJoinPrepared {
+        location: vibez_project::TimelineLocation::Arrange,
+        request: crate::domains::arrangement::AudioJoinRequest { track_id, clips },
+        result,
+    });
+}
