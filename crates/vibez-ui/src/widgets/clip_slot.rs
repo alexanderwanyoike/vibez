@@ -79,6 +79,15 @@ const TILE_INSET: f32 = TILE_GAP / 2.0;
 const TILE_RADIUS: f32 = 6.0;
 /// Where the cell's buttons sit, inside the tile.
 pub(crate) const BUTTON_INSET: f32 = TILE_INSET + 4.0;
+/// The side of each of the cell's square buttons.
+pub(crate) const BUTTON_SIZE: f32 = 20.0;
+/// Where a clip's delete button sits in its cell.
+pub(crate) const DELETE_PADDING: iced::Padding = iced::Padding {
+    top: BUTTON_INSET,
+    right: BUTTON_INSET,
+    bottom: BUTTON_INSET,
+    left: BUTTON_INSET,
+};
 const HEADER_H: f32 = 18.0;
 /// Room along the film's bottom for the cell's buttons.
 const BUTTON_ROOM: f32 = 21.0;

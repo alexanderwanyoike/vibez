@@ -730,7 +730,11 @@ impl App {
                             false,
                         )
                     } else {
-                        iced::widget::Space::new(20, 20).into()
+                        iced::widget::Space::new(
+                            crate::widgets::clip_slot::BUTTON_SIZE,
+                            crate::widgets::clip_slot::BUTTON_SIZE,
+                        )
+                        .into()
                     };
                     let cell: Element<'_, Message> = stack![
                         cell,
@@ -777,7 +781,7 @@ impl App {
                                 false,
                             ))
                             .align_right(Length::Fill)
-                            .padding(crate::widgets::clip_slot::BUTTON_INSET)
+                            .padding(crate::widgets::clip_slot::DELETE_PADDING)
                         ]
                         .into()
                     } else {
@@ -839,8 +843,8 @@ impl App {
         let glyph = icons::icon(icon).size(11);
         tooltip(
             button(center(glyph))
-                .width(20)
-                .height(20)
+                .width(crate::widgets::clip_slot::BUTTON_SIZE)
+                .height(crate::widgets::clip_slot::BUTTON_SIZE)
                 .padding(0)
                 .on_press(Message::Perform(action))
                 .style(move |_, status| button::Style {
