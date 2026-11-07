@@ -244,6 +244,7 @@ mod views_control_status;
 mod views_detail;
 mod views_devices;
 mod views_file_menu;
+mod views_grid_menu;
 mod views_mixer;
 mod views_overlays;
 mod views_perform;
@@ -674,11 +675,21 @@ impl App {
         );
     }
 
+    /// Whether Perform is showing a Section's own timeline.
+    fn section_timeline_on_screen(&self) -> bool {
+        self.state.view.workspace == crate::state::Workspace::Perform
+            && self.state.perform.selected_section.is_some()
+    }
+
+    /// Whether an Arrange or Section timeline is on screen.
+    pub(super) fn timeline_on_screen(&self) -> bool {
+        self.state.view.workspace == crate::state::Workspace::Arrange
+            || self.section_timeline_on_screen()
+    }
+
     /// Zoom of the Arrange or Section timeline on screen.
     pub(super) fn timeline_pixels_per_beat(&self) -> f32 {
-        if self.state.view.workspace == crate::state::Workspace::Perform
-            && self.state.perform.selected_section.is_some()
-        {
+        if self.section_timeline_on_screen() {
             return self
                 .state
                 .perform

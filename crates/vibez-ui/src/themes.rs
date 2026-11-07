@@ -681,6 +681,11 @@ mod tests {
     /// A fader handle is the control itself, so it keeps WCAG's 3:1 for
     /// graphics.
     const FADER_HANDLE_CONTRAST: f32 = 3.0;
+    /// Floors for each rank of lane grid line; why they sit so low is on
+    /// [`crate::theme::LaneStyle`].
+    const GRID_LABEL_LINE_CONTRAST: f32 = 1.5;
+    const GRID_BAR_LINE_CONTRAST: f32 = 1.2;
+    const GRID_FINE_LINE_CONTRAST: f32 = 1.12;
 
     fn shortfalls(
         theme: &ThemePalette,
@@ -712,6 +717,33 @@ mod tests {
                 .flat_map(move |(role, colour, floor)| {
                     shortfalls(theme, role, colour, &surfaces, floor)
                 })
+            })
+            .collect();
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    #[test]
+    fn every_builtin_theme_draws_lane_grid_lines_that_read_against_the_lane() {
+        let failures: Vec<String> = builtins()
+            .iter()
+            .flat_map(|theme| {
+                let lane = theme.lane();
+                let band = crate::theme::blend(lane, theme.text, theme.lane_style.band);
+                let lines = theme.lane_style.lines;
+                [("lane", lane), ("bar band", band)].into_iter().flat_map(
+                    move |(surface, under)| {
+                        [
+                            ("label line", lines.label, GRID_LABEL_LINE_CONTRAST),
+                            ("bar line", lines.bar, GRID_BAR_LINE_CONTRAST),
+                            ("fine line", lines.fine, GRID_FINE_LINE_CONTRAST),
+                        ]
+                        .into_iter()
+                        .flat_map(move |(role, strength, floor)| {
+                            let colour = crate::theme::blend(under, theme.text, strength);
+                            shortfalls(theme, role, colour, &[(surface, under)], floor)
+                        })
+                    },
+                )
             })
             .collect();
         assert!(failures.is_empty(), "{}", failures.join("\n"));
