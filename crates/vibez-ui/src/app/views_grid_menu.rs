@@ -90,3 +90,26 @@ impl App {
         section.into()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::state::Workspace;
+    use vibez_core::id::SectionId;
+
+    #[test]
+    fn the_grid_is_offered_only_over_a_timeline_on_screen() {
+        let mut app = super::super::test_support::app();
+        app.state.view.workspace = Workspace::Arrange;
+        assert!(app.timeline_on_screen());
+
+        app.state.view.workspace = Workspace::Mix;
+        assert!(!app.timeline_on_screen(), "the Mix desk has no timeline");
+
+        app.state.view.workspace = Workspace::Perform;
+        app.state.perform.selected_section = None;
+        assert!(!app.timeline_on_screen(), "no Section is open");
+
+        app.state.perform.selected_section = Some(SectionId::new());
+        assert!(app.timeline_on_screen());
+    }
+}
