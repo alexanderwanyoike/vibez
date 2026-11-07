@@ -200,9 +200,9 @@ pub struct LaneStyle {
     pub recess: f32,
     /// How far every other bar band is mixed toward the text colour.
     pub band: f32,
-    /// How far grid lines are mixed toward the text colour. Kept faint
-    /// because clip bodies are see-through and the grid must read as
-    /// texture behind them.
+    /// How far grid lines are mixed toward the text colour. Faint enough to
+    /// read as texture behind see-through clip bodies, strong enough that
+    /// every division shows on an empty lane.
     pub lines: GridLineStrengths,
     /// How far the lanes, Section ruler and overview under a loop are mixed
     /// toward the accent.
@@ -224,9 +224,9 @@ impl LaneStyle {
         recess: 0.0,
         band: 0.015,
         lines: GridLineStrengths {
-            label: 0.085,
-            bar: 0.04,
-            fine: 0.025,
+            label: 0.18,
+            bar: 0.11,
+            fine: 0.07,
         },
         loop_tint: 0.05,
     };
@@ -235,9 +235,9 @@ impl LaneStyle {
         recess: 0.0,
         band: 0.015,
         lines: GridLineStrengths {
-            label: 0.14,
-            bar: 0.065,
-            fine: 0.04,
+            label: 0.26,
+            bar: 0.16,
+            fine: 0.10,
         },
         loop_tint: 0.07,
     };
