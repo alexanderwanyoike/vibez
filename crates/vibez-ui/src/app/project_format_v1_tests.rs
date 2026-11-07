@@ -994,3 +994,73 @@ async fn joined_audio_clip_survives_sample_rate_conversion() {
     );
     assert_eq!(converted.loaded.clips.len(), 1);
 }
+
+/// One second of decaying noise bursts, so Quantize finds transients.
+fn drum_hits() -> Arc<DecodedAudio> {
+    let mut samples = vec![0.0f32; 44_100];
+    for hit in [3_000usize, 14_000, 25_000, 36_000] {
+        for (offset, sample) in samples[hit..hit + 4_000].iter_mut().enumerate() {
+            let noise = if (offset * 7919) % 13 < 6 { 1.0 } else { -1.0 };
+            *sample = noise * 0.9 * (-(offset as f32) / 600.0).exp();
+        }
+    }
+    Arc::new(DecodedAudio {
+        channels: vec![samples],
+        sample_rate: 44_100,
+    })
+}
+
+#[tokio::test]
+async fn quantized_audio_clip_survives_save_and_reopen() {
+    let directory = tempfile::tempdir().unwrap();
+    let project_path = directory.path().join("quantized.vzp");
+    let mut app = super::test_support::app();
+    let track = crate::state::ProjectTrack::new(vibez_core::id::TrackId::new(), "Drums".into(), 0);
+    let track_id = track.id;
+    Arc::make_mut(&mut app.state.project_tracks)
+        .tracks
+        .push(track);
+    let clip = crate::state::UiClip {
+        name: "hits.wav".into(),
+        audio: drum_hits(),
+        ..crate::state::UiClip::test_clip(0, 44_100)
+    };
+    let clip_id = clip.id;
+    app.state
+        .arrange_content_mut(track_id)
+        .clips
+        .push(clip.clone());
+
+    let result = super::tasks::quantize_audio_clip_async(super::audio_tasks::QuantizeInput {
+        audio: Arc::clone(&clip.audio),
+        bpm: 120.0,
+        sample_rate: 44_100,
+        grid: crate::state::SnapGrid::SIXTEENTH,
+        clip_position: 0,
+        clip_source_offset: 0,
+        clip_duration: 44_100,
+        original_name: clip.name,
+        new_clip_id: ClipId::new(),
+    })
+    .await;
+    assert!(result.is_ok(), "{result:?}");
+    let _ = app.update(Message::AudioQuantizeReady {
+        location: vibez_project::TimelineLocation::Arrange,
+        track_id,
+        old_clip_id: clip_id,
+        result,
+    });
+    save_project_async(project_path.clone(), None, app.project_for_save())
+        .await
+        .unwrap();
+    let reopened = load_project_async(project_path, None, 44_100)
+        .await
+        .unwrap();
+
+    assert!(reopened.warnings.is_empty(), "{:?}", reopened.warnings);
+    assert_eq!(
+        reopened.clips.len(),
+        1,
+        "quantized clip audio lost on reopen"
+    );
+}
