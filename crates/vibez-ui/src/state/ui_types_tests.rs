@@ -86,6 +86,20 @@ fn the_grid_menu_offers_every_fixed_division_from_eight_bars_to_a_thirty_second(
 }
 
 #[test]
+fn a_triplet_grid_menu_offers_every_division_as_a_triplet() {
+    let mut grid = GridConfig::default();
+    grid.toggle_triplet();
+    let labels: Vec<String> = grid
+        .fixed_choices()
+        .map(|choice| choice.to_string())
+        .collect();
+    assert_eq!(
+        labels,
+        ["8 Bars T", "4 Bars T", "2 Bars T", "1 Bar T", "1/4T", "1/8T", "1/16T", "1/32T"]
+    );
+}
+
+#[test]
 fn picking_a_division_from_the_grid_menu_keeps_the_triplet_grid() {
     let mut grid = GridConfig::default();
     grid.choose(GridChoice::Fixed(SnapGrid::EIGHTH.triplet()));
