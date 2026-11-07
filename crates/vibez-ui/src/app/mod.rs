@@ -681,6 +681,12 @@ impl App {
             && self.state.perform.selected_section.is_some()
     }
 
+    /// Whether an Arrange or Section timeline is on screen.
+    pub(super) fn timeline_on_screen(&self) -> bool {
+        self.state.view.workspace == crate::state::Workspace::Arrange
+            || self.section_timeline_on_screen()
+    }
+
     /// Zoom of the Arrange or Section timeline on screen.
     pub(super) fn timeline_pixels_per_beat(&self) -> f32 {
         if self.section_timeline_on_screen() {

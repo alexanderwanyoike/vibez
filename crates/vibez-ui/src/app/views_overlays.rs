@@ -960,7 +960,7 @@ impl App {
                     "Bounce Selection".into(),
                     Message::BounceSelectionToAudio,
                 ));
-                col = col.push(self.view_grid_menu());
+                col = col.push_maybe(self.timeline_on_screen().then(|| self.view_grid_menu()));
 
                 col.into()
             }
@@ -1085,8 +1085,8 @@ impl App {
                     "Add MIDI Track".into(),
                     Message::Arrangement(ArrangementMsg::AddInstrumentTrack),
                 ),
-                self.view_grid_menu(),
             ]
+            .push_maybe(self.timeline_on_screen().then(|| self.view_grid_menu()))
             .spacing(0)
             .width(Length::Fixed(super::views_grid_menu::TIMELINE_MENU_WIDTH))
             .into(),
