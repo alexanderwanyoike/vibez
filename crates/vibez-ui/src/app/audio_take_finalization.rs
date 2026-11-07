@@ -1,6 +1,5 @@
 //! Recorded take staging and validation outside the live recording lifecycle.
 
-use std::path::Path;
 use std::sync::Arc;
 
 use vibez_core::audio_buffer::DecodedAudio;
@@ -57,13 +56,11 @@ pub(super) async fn finalize_audio_take(
             ],
             sample_rate,
         });
-        let bytes = vibez_audio_io::file_io::encode_wav(&audio);
-        let source = vibez_project::project_format_v1::stage_local_content(
-            Path::new("Recorded Audio"),
+        let source = super::generated_media::stage_generated_audio(
+            "Recorded Audio",
             &format!("{clip_name}.wav"),
-            &bytes,
-        )
-        .map_err(|error| format!("Project Media staging failed: {error}"))?;
+            &audio,
+        )?;
         let mut warnings = Vec::new();
         if truncated {
             warnings
