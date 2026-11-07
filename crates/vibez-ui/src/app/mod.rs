@@ -289,6 +289,8 @@ mod sample_rate_import_tests;
 #[cfg(test)]
 mod sample_rate_reopen_tests;
 #[cfg(test)]
+mod save_round_trip_tests;
+#[cfg(test)]
 mod track_height_tests;
 
 impl Drop for App {
