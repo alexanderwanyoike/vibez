@@ -26,6 +26,7 @@ pub use messages::{
     ArrangementAction, ArrangementCtx, ArrangementMsg, AudioSliceMarkers, ClipRenderedGeometry,
     ClipTransposeRenderRequest,
 };
+mod audio_join;
 mod clip_copies;
 mod clip_drag;
 mod clip_moves;
