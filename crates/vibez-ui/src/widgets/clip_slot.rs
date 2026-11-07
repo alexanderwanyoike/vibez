@@ -81,9 +81,11 @@ const TILE_RADIUS: f32 = 6.0;
 pub(crate) const BUTTON_INSET: f32 = TILE_INSET + 4.0;
 /// The side of each of the cell's square buttons.
 pub(crate) const BUTTON_SIZE: f32 = 20.0;
-/// Where a clip's delete button sits in its cell.
+/// Where a clip's delete button sits in its cell. The button is taller than
+/// the header band, so it overhangs it evenly rather than sharing the
+/// bottom buttons' inset.
 pub(crate) const DELETE_PADDING: iced::Padding = iced::Padding {
-    top: BUTTON_INSET,
+    top: TILE_INSET + (HEADER_H - BUTTON_SIZE) / 2.0,
     right: BUTTON_INSET,
     bottom: BUTTON_INSET,
     left: BUTTON_INSET,
