@@ -6,6 +6,7 @@ use std::sync::Arc;
 use proptest::prelude::*;
 use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::id::{ClipId, TrackId};
+use vibez_core::track::MediaSourceRef;
 use vibez_project::TimelineLocation;
 
 use super::test_support::{app, run_until_idle};
@@ -128,7 +129,8 @@ fn select(app: &mut App, track_id: TrackId, clips: &[&UiClip]) {
 async fn apply(app: &mut App, track_id: TrackId, edit: &Edit) {
     let clips = sorted_clips(app, track_id);
     let pick = |index: usize| clips.get(index % clips.len().max(1));
-    let samples_per_beat = 60.0 * f64::from(app.state.transport.sample_rate) / 120.0;
+    let samples_per_beat =
+        60.0 * f64::from(app.state.transport.sample_rate) / app.state.transport.bpm;
     let messages = match *edit {
         Edit::Undo => vec![Message::Project(ProjectMsg::Undo)],
         Edit::Redo => vec![Message::Project(ProjectMsg::Redo)],
@@ -213,12 +215,35 @@ async fn apply(app: &mut App, track_id: TrackId, edit: &Edit) {
     }
 }
 
-/// What a producer would notice about a lane: where each Clip sits, how long
-/// it is, and that its audio is backed by saved media.
-fn lane_summary(app: &App, track_id: TrackId) -> Vec<(ClipId, u64, u64, bool)> {
+/// Where a Clip sits, how long it is, and which saved media it plays.
+#[derive(Debug, PartialEq)]
+struct ClipShape {
+    id: ClipId,
+    position: u64,
+    duration: u64,
+    media: Option<String>,
+}
+
+/// Saving turns staged media into Project Media with the same content id, so
+/// the id is what must survive.
+fn media_identity(source: &MediaSourceRef) -> String {
+    match source {
+        MediaSourceRef::StagedProjectMedia { id, .. }
+        | MediaSourceRef::StagedRemoteProjectMedia { id, .. }
+        | MediaSourceRef::ProjectMedia { id, .. } => id.clone(),
+        other => format!("{other:?}"),
+    }
+}
+
+fn lane_shape(app: &App, track_id: TrackId) -> Vec<ClipShape> {
     sorted_clips(app, track_id)
         .iter()
-        .map(|clip| (clip.id, clip.position, clip.duration, clip.source.is_some()))
+        .map(|clip| ClipShape {
+            id: clip.id,
+            position: clip.position,
+            duration: clip.duration,
+            media: clip.source.as_ref().map(media_identity),
+        })
         .collect()
 }
 
@@ -263,10 +288,10 @@ async fn assert_survives_save_and_reopen(edits: &[Edit]) -> Result<(), TestCaseE
     for edit in edits {
         apply(&mut app, track_id, edit).await;
     }
-    let before = lane_summary(&app, track_id);
+    let before = lane_shape(&app, track_id);
     let heard_before = render_master(&app);
     prop_assert!(
-        before.iter().all(|(.., has_media)| *has_media),
+        before.iter().all(|clip| clip.media.is_some()),
         "a Clip has no saved media: {before:?}"
     );
 
@@ -278,10 +303,9 @@ async fn assert_survives_save_and_reopen(edits: &[Edit]) -> Result<(), TestCaseE
         .unwrap();
     prop_assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
     let mut reopened = super::test_support::app();
-    reopened.state.transport.bpm = app.state.transport.bpm;
     reopened.rebuild_from_loaded_project(loaded);
 
-    prop_assert_eq!(lane_summary(&reopened, track_id), before);
+    prop_assert_eq!(lane_shape(&reopened, track_id), before);
     let heard_after = render_master(&reopened);
     prop_assert_eq!(heard_after.len(), heard_before.len());
     let worst = heard_before
@@ -289,14 +313,14 @@ async fn assert_survives_save_and_reopen(edits: &[Edit]) -> Result<(), TestCaseE
         .zip(&heard_after)
         .map(|(a, b)| (a - b).abs())
         .fold(0.0f32, f32::max);
-    // Generated audio is saved as 16-bit WAV, so allow its rounding error.
-    prop_assert!(worst < 1e-3, "reopened render differs by {worst}");
+    // Float rounding noise only; about -120 dB, far below anything audible.
+    prop_assert!(worst < 1e-6, "reopened render differs by {worst}");
     Ok(())
 }
 
 proptest! {
     #![proptest_config(ProptestConfig {
-        cases: 64,
+        cases: 200,
         ..ProptestConfig::default()
     })]
 
