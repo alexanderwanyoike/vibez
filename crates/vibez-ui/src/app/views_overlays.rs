@@ -38,10 +38,12 @@ const CONTEXT_MENU_CLIP_WIDTH: f32 = 220.0 + CONTEXT_MENU_CARD_PADDING;
 fn context_menu_width(target: &ContextMenuTarget) -> f32 {
     match target {
         ContextMenuTarget::Clip { .. } => CONTEXT_MENU_CLIP_WIDTH,
-        ContextMenuTarget::TimeSelection { .. }
-        | ContextMenuTarget::AudioClipDetail { .. }
-        | ContextMenuTarget::TrackHeader { .. }
-        | ContextMenuTarget::ArrangementEmpty => 200.0 + CONTEXT_MENU_CARD_PADDING,
+        ContextMenuTarget::TimeSelection { .. } | ContextMenuTarget::ArrangementEmpty => {
+            super::views_grid_menu::TIMELINE_MENU_WIDTH + CONTEXT_MENU_CARD_PADDING
+        }
+        ContextMenuTarget::AudioClipDetail { .. } | ContextMenuTarget::TrackHeader { .. } => {
+            200.0 + CONTEXT_MENU_CARD_PADDING
+        }
     }
 }
 
@@ -51,6 +53,12 @@ fn track_header_menu(track_id: vibez_core::id::TrackId) -> [(char, &'static str,
         "Delete Track",
         Message::remove_track(track_id),
     )]
+}
+
+/// A menu opened in the window's lower half grows up from the pointer, since
+/// the timeline menus can be taller than the room left below it.
+fn context_menu_opens_upward(y: f32, window_height: f32) -> bool {
+    y > window_height / 2.0
 }
 
 fn context_menu_x(requested_x: f32, menu_width: f32, window_width: f32) -> f32 {
@@ -920,7 +928,9 @@ impl App {
             } => {
                 let start = *start_beats;
                 let end = *end_beats;
-                let mut col = column![].spacing(0).width(Length::Fixed(200.0));
+                let mut col = column![]
+                    .spacing(0)
+                    .width(Length::Fixed(super::views_grid_menu::TIMELINE_MENU_WIDTH));
 
                 // "Create Note Clip" if track is an instrument track
                 let effective_track = track_id.or(self.state.arrangement.selected_track);
@@ -956,6 +966,7 @@ impl App {
                     "Bounce Selection".into(),
                     Message::BounceSelectionToAudio,
                 ));
+                col = col.push_maybe(self.timeline_on_screen().then(|| self.view_grid_menu()));
 
                 col.into()
             }
@@ -1081,8 +1092,9 @@ impl App {
                     Message::Arrangement(ArrangementMsg::AddInstrumentTrack),
                 ),
             ]
+            .push_maybe(self.timeline_on_screen().then(|| self.view_grid_menu()))
             .spacing(0)
-            .width(Length::Fixed(200.0))
+            .width(Length::Fixed(super::views_grid_menu::TIMELINE_MENU_WIDTH))
             .into(),
         };
 
@@ -1099,10 +1111,17 @@ impl App {
             .padding(4);
 
         // Position menu at (x, y) using spacers in a column+row layout
-        let positioned = column![
-            vertical_space().height(Length::Fixed(y)),
-            row![horizontal_space().width(Length::Fixed(x)), menu_container,]
-        ];
+        let menu_row = row![horizontal_space().width(Length::Fixed(x)), menu_container,];
+        let positioned = if context_menu_opens_upward(y, self.state.view.window_height) {
+            column![
+                vertical_space(),
+                menu_row,
+                vertical_space()
+                    .height(Length::Fixed((self.state.view.window_height - y).max(0.0))),
+            ]
+        } else {
+            column![vertical_space().height(Length::Fixed(y)), menu_row]
+        };
 
         // Full-screen click-eating backdrop
         mouse_area(
@@ -1120,8 +1139,8 @@ mod tests {
     use std::sync::Arc;
 
     use super::{
-        context_menu_x, drum_rack_slice_can_create, project_track_deletion_list_height,
-        track_header_menu, CONTEXT_MENU_CLIP_WIDTH,
+        context_menu_opens_upward, context_menu_x, drum_rack_slice_can_create,
+        project_track_deletion_list_height, track_header_menu, CONTEXT_MENU_CLIP_WIDTH,
     };
     use crate::domains::view::ViewMsg;
     use crate::message::{MenuOverlay, Message};
@@ -1163,6 +1182,12 @@ mod tests {
         let x = context_menu_x(1_862.0, CONTEXT_MENU_CLIP_WIDTH, 1_920.0);
 
         assert_eq!(x, 1_676.0);
+    }
+
+    #[test]
+    fn a_context_menu_opened_low_in_the_window_opens_upward() {
+        assert!(!context_menu_opens_upward(200.0, 720.0));
+        assert!(context_menu_opens_upward(600.0, 720.0));
     }
 
     #[test]

@@ -130,7 +130,8 @@ pub(super) fn display_label<'a>(label: &'a str, color: Color) -> iced::widget::T
         .wrapping(text::Wrapping::None)
 }
 
-fn rule<'a>(width: Length, height: Length, colour: Color) -> Element<'a, Message> {
+/// A solid bar of `colour`, for dividers.
+pub(super) fn rule<'a>(width: Length, height: Length, colour: Color) -> Element<'a, Message> {
     container(Space::new(width, height))
         .style(move |_theme: &Theme| container::Style {
             background: Some(colour.into()),
