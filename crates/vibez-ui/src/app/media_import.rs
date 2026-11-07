@@ -602,7 +602,7 @@ impl App {
                 id: clip_id,
                 name: name.clone(),
                 audio: Arc::clone(&audio),
-                source: Some(source),
+                source,
                 position: existing_end,
                 source_offset: 0,
                 start_marker: 0,

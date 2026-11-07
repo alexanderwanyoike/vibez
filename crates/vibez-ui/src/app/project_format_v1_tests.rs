@@ -1010,8 +1010,7 @@ async fn joined_audio_clips_survive_save_and_reopen() {
     ));
     let clips = &app.state.arrange_content(track_id).unwrap().clips;
     assert_eq!(clips.len(), 2);
-    let Some(MediaSourceRef::StagedProjectMedia { staging_path, .. }) = clips[0].source.clone()
-    else {
+    let MediaSourceRef::StagedProjectMedia { staging_path, .. } = clips[0].source.clone() else {
         panic!("joined clip has no staged media: {:?}", clips[0].source);
     };
     save_project_async(project_path.clone(), None, app.project_for_save())

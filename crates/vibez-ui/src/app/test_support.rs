@@ -142,7 +142,7 @@ pub(super) fn app_with_two_break_clips(
         let clip = crate::state::UiClip {
             name: "break.wav".into(),
             audio: std::sync::Arc::clone(&decoded),
-            source: Some(source.clone()),
+            source: source.clone(),
             ..crate::state::UiClip::test_clip(position, frames)
         };
         app.state.arrange_content_mut(track_id).clips.push(clip);

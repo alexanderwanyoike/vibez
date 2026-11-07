@@ -5,9 +5,9 @@ fn slice_to_drum_rack_builds_one_native_track_and_reconstruction_clip() {
     let mut arrangement = arrangement_with_tracks(1);
     let (source_track_id, source_clip_id) = add_audio_clip(&mut arrangement, 0, 100, 1_000);
     let original = &mut arrangement.tracks[0].clips[0];
-    original.source = Some(MediaSourceRef::LocalFile {
+    original.source = MediaSourceRef::LocalFile {
         path: "shared-loop.wav".into(),
-    });
+    };
     original.gain_db = vibez_core::track::ClipGainDb::new(12.0).unwrap();
     original.transient_markers.replace_suggestions([250, 600]);
     let shared_audio = Arc::new(vibez_core::audio_buffer::DecodedAudio {
@@ -22,7 +22,7 @@ fn slice_to_drum_rack_builds_one_native_track_and_reconstruction_clip() {
             track_id: source_track_id,
             clip_id: source_clip_id,
             markers: AudioSliceMarkers::Transients,
-            source: shared_source.clone().unwrap(),
+            source: shared_source.clone(),
             audio: Arc::clone(&shared_audio),
         },
         &mut engine,
@@ -48,7 +48,7 @@ fn slice_to_drum_rack_builds_one_native_track_and_reconstruction_clip() {
         pad.audio
             .as_ref()
             .is_some_and(|audio| Arc::ptr_eq(audio, &shared_audio))
-            && pad.source == shared_source
+            && pad.source.as_ref() == Some(&shared_source)
     }));
     use vibez_instruments::sampler::param;
     // The clip's boost is more than a Sampler's 0 dB top.
@@ -154,13 +154,13 @@ fn slice_to_drum_rack_spans_beyond_the_first_visible_pad_bank() {
     let mut arrangement = arrangement_with_tracks(1);
     let (source_track_id, source_clip_id) = add_audio_clip(&mut arrangement, 0, 0, 1_000);
     let original = &mut arrangement.tracks[0].clips[0];
-    original.source = Some(MediaSourceRef::LocalFile {
+    original.source = MediaSourceRef::LocalFile {
         path: "shared-loop.wav".into(),
-    });
+    };
     for frame in (50..1_000).step_by(50) {
         assert!(original.warp_markers.add(frame, frame, 0, 1_000, 1_000));
     }
-    let source = original.source.clone().unwrap();
+    let source = original.source.clone();
     let audio = Arc::clone(&original.audio);
     let mut engine = RecordingEngine::default();
 
@@ -201,13 +201,13 @@ fn slice_to_drum_rack_rejects_more_than_four_pad_banks() {
     let mut arrangement = arrangement_with_tracks(1);
     let (source_track_id, source_clip_id) = add_audio_clip(&mut arrangement, 0, 0, 6_500);
     let original = &mut arrangement.tracks[0].clips[0];
-    original.source = Some(MediaSourceRef::LocalFile {
+    original.source = MediaSourceRef::LocalFile {
         path: "overfull-loop.wav".into(),
-    });
+    };
     original
         .transient_markers
         .replace_suggestions((100..6_500).step_by(100));
-    let source = original.source.clone().unwrap();
+    let source = original.source.clone();
     let audio = Arc::clone(&original.audio);
     let mut engine = RecordingEngine::default();
 

@@ -24,7 +24,7 @@ fn clip(name: &str, value: f32) -> UiClip {
             channels: vec![vec![value; 4096]],
             sample_rate: 44_100,
         }),
-        source: None,
+        source: crate::state::UiClip::test_source(),
         position: 0,
         source_offset: 0,
         start_marker: 0,

@@ -13,6 +13,8 @@ use vibez_project::{project_format_v1::SaveObservation, Project, TimelineLocatio
 #[derive(Debug, Clone)]
 pub struct LoadedClipData {
     pub info: ClipInfo,
+    /// The saved media `audio` was decoded from.
+    pub source: MediaSourceRef,
     /// Audio the clip's geometry fields refer to. For warped clips
     /// this is the re-stretched buffer, not the raw file contents.
     pub audio: Arc<DecodedAudio>,

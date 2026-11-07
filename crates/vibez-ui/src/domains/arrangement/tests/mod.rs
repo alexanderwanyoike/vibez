@@ -59,7 +59,7 @@ fn add_audio_clip(
         id,
         name: "Clip".to_string(),
         audio,
-        source: None,
+        source: crate::state::UiClip::test_source(),
         position,
         source_offset: 0,
         start_marker: 0,

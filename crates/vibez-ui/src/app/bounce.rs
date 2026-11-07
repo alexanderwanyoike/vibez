@@ -169,7 +169,7 @@ impl App {
                 id: clip_id,
                 name: outcome.clip_name.clone(),
                 audio: Arc::clone(&outcome.audio),
-                source: Some(outcome.source.clone()),
+                source: outcome.source.clone(),
                 position: outcome.insert_position_samples,
                 source_offset: 0,
                 start_marker: 0,

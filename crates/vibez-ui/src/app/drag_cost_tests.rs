@@ -18,7 +18,7 @@ fn audio_clip(position: u64, duration: u64) -> UiClip {
             channels: vec![vec![0.25; (duration * 2) as usize]],
             sample_rate: 48_000,
         }),
-        source: None,
+        source: crate::state::UiClip::test_source(),
         position,
         source_offset: 0,
         start_marker: 0,

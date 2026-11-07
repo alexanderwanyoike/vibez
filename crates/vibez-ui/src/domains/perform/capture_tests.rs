@@ -17,7 +17,7 @@ fn audio_section(name: &str, length_beats: f64, frames: u64) -> Section {
                 channels: vec![vec![0.5; frames as usize]],
                 sample_rate: 8,
             }),
-            source: None,
+            source: crate::state::UiClip::test_source(),
             position: 0,
             source_offset: 0,
             start_marker: 0,
