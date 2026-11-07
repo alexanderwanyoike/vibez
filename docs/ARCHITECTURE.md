@@ -785,7 +785,7 @@ initialization, while loading the declared executable.
   in the `.vzp` container. Only Arrange content is replayed to the engine until
   Section launch/playback is implemented.
 - Every Audio Clip on a timeline has saved media. Audio Vibez renders
-  itself (recorded takes, joined Clips) is encoded and staged as Project
+  itself (recorded takes, joined and quantized Clips) is encoded and staged as Project
   Media off the UI thread before its Clip is inserted, because save, reopen
   and sample-rate conversion all rebuild Clips from their media.
 - Undo/redo keeps independently shared snapshots of Project Tracks, Arrange
