@@ -39,7 +39,7 @@ fn context_menu_width(target: &ContextMenuTarget) -> f32 {
     match target {
         ContextMenuTarget::Clip { .. } => CONTEXT_MENU_CLIP_WIDTH,
         ContextMenuTarget::TimeSelection { .. } | ContextMenuTarget::ArrangementEmpty => {
-            super::views_grid_menu::GRID_MENU_WIDTH + CONTEXT_MENU_CARD_PADDING
+            super::views_grid_menu::TIMELINE_MENU_WIDTH + CONTEXT_MENU_CARD_PADDING
         }
         ContextMenuTarget::AudioClipDetail { .. } | ContextMenuTarget::TrackHeader { .. } => {
             200.0 + CONTEXT_MENU_CARD_PADDING
@@ -924,7 +924,7 @@ impl App {
                 let end = *end_beats;
                 let mut col = column![]
                     .spacing(0)
-                    .width(Length::Fixed(super::views_grid_menu::GRID_MENU_WIDTH));
+                    .width(Length::Fixed(super::views_grid_menu::TIMELINE_MENU_WIDTH));
 
                 // "Create Note Clip" if track is an instrument track
                 let effective_track = track_id.or(self.state.arrangement.selected_track);
@@ -1088,7 +1088,7 @@ impl App {
                 self.view_grid_menu(),
             ]
             .spacing(0)
-            .width(Length::Fixed(super::views_grid_menu::GRID_MENU_WIDTH))
+            .width(Length::Fixed(super::views_grid_menu::TIMELINE_MENU_WIDTH))
             .into(),
         };
 

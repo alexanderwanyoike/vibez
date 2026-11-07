@@ -12,9 +12,9 @@ use crate::typography;
 use super::views_control_bar_style::segment_button;
 use super::App;
 
-/// Wide enough that a quarter-row chip holds a triplet bar label like
-/// "8 Bars T".
-pub(super) const GRID_MENU_WIDTH: f32 = 220.0;
+/// The timeline right-click menus' width, wide enough that a quarter-row
+/// grid chip holds a triplet bar label like "8 Bars T".
+pub(super) const TIMELINE_MENU_WIDTH: f32 = 220.0;
 const CHIP_GAP: f32 = 2.0;
 const CHIP_HEIGHT: f32 = 24.0;
 const CHIPS_PER_ROW: usize = 4;
@@ -26,7 +26,7 @@ impl App {
         let current = grid.choice(pixels_per_beat);
         let auto = grid.auto_choice(pixels_per_beat);
         let width =
-            (GRID_MENU_WIDTH - (CHIPS_PER_ROW - 1) as f32 * CHIP_GAP) / CHIPS_PER_ROW as f32;
+            (TIMELINE_MENU_WIDTH - (CHIPS_PER_ROW - 1) as f32 * CHIP_GAP) / CHIPS_PER_ROW as f32;
         let chip = |label: String, span: f32, lit: bool, command: GridCommand| {
             segment_button(
                 text(label).size(11),
@@ -80,7 +80,7 @@ impl App {
             .spacing(CHIP_GAP),
         ]
         .spacing(CHIP_GAP)
-        .width(Length::Fixed(GRID_MENU_WIDTH));
+        .width(Length::Fixed(TIMELINE_MENU_WIDTH));
 
         let fixed: Vec<_> = grid.fixed_choices().collect();
         for choices in fixed.chunks(CHIPS_PER_ROW) {
