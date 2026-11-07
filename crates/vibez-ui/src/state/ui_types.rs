@@ -706,7 +706,7 @@ impl UiClip {
                 channels: vec![vec![0.0; duration as usize]],
                 sample_rate: 48_000,
             }),
-            source: crate::state::UiClip::test_source(),
+            source: Self::test_source(),
             position,
             source_offset: 0,
             start_marker: 0,
