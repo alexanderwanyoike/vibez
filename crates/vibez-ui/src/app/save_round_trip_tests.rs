@@ -1,7 +1,6 @@
 //! Random sequences of Audio Clip edits survive save and reopen unchanged.
 
 use std::collections::HashSet;
-use std::sync::Arc;
 
 use proptest::prelude::*;
 use vibez_core::audio_buffer::DecodedAudio;
@@ -9,14 +8,13 @@ use vibez_core::id::{ClipId, TrackId};
 use vibez_core::track::MediaSourceRef;
 use vibez_project::TimelineLocation;
 
-use super::test_support::{app, run_until_idle};
+use super::test_support::{app, app_with_two_break_clips, run_until_idle};
 use super::{load_project_async, save_project_async, App};
 use crate::domains::arrangement::ArrangementMsg;
 use crate::domains::project::ProjectMsg;
 use crate::message::Message;
 use crate::state::{
-    ArrangementSelection, AudioClipInspectorField, AudioClipRotaryField, ProjectTrack, SnapGrid,
-    UiClip,
+    ArrangementSelection, AudioClipInspectorField, AudioClipRotaryField, SnapGrid, UiClip,
 };
 
 /// Producer edits on Audio Clips. Clip indexes wrap around the Clips on the
@@ -57,7 +55,7 @@ fn edit() -> impl Strategy<Value = Edit> {
 }
 
 /// Half a second of decaying noise bursts, so Quantize finds transients.
-fn break_audio(sample_rate: u32) -> Arc<DecodedAudio> {
+fn break_audio(sample_rate: u32) -> DecodedAudio {
     let frames = sample_rate as usize / 2;
     let mut samples = vec![0.0f32; frames];
     for hit in (0..4).map(|index| 500 + index * frames / 4) {
@@ -69,40 +67,16 @@ fn break_audio(sample_rate: u32) -> Arc<DecodedAudio> {
             *sample = noise * 0.5 * (-(offset as f32) / 400.0).exp();
         }
     }
-    Arc::new(DecodedAudio {
+    DecodedAudio {
         channels: vec![samples],
         sample_rate,
-    })
+    }
 }
 
-/// An App with one Audio track holding two Clips of a staged break.
 fn project_with_breaks(directory: &std::path::Path) -> (App, TrackId) {
-    let mut app = app();
+    let sample_rate = app().state.transport.sample_rate;
+    let (mut app, track_id) = app_with_two_break_clips(directory, &break_audio(sample_rate));
     app.state.transport.bpm = 120.0;
-    let source_path = directory.join("break.wav");
-    vibez_audio_io::file_io::write_wav_file(
-        &source_path,
-        &break_audio(app.state.transport.sample_rate),
-    )
-    .unwrap();
-    // Imports play what was decoded from the file, so reopen decodes the same samples.
-    let audio = Arc::new(vibez_audio_io::file_io::decode_audio_file(&source_path).unwrap());
-    let source = vibez_project::project_format_v1::stage_local_file(&source_path).unwrap();
-    let track = ProjectTrack::new(TrackId::new(), "Breaks".into(), 0);
-    let track_id = track.id;
-    Arc::make_mut(&mut app.state.project_tracks)
-        .tracks
-        .push(track);
-    let frames = audio.num_frames() as u64;
-    for position in [0, frames] {
-        let clip = UiClip {
-            name: "break.wav".into(),
-            audio: Arc::clone(&audio),
-            source: Some(source.clone()),
-            ..UiClip::test_clip(position, frames)
-        };
-        app.state.arrange_content_mut(track_id).clips.push(clip);
-    }
     (app, track_id)
 }
 

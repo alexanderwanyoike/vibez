@@ -119,3 +119,46 @@ pub(super) async fn join_selected_audio_clips(app: &mut super::App) {
     )
     .await;
 }
+
+/// An App with one Audio track holding two adjacent Clips of `audio`, played
+/// as decoded from a staged WAV in `directory`, the way an import plays it.
+pub(super) fn app_with_two_break_clips(
+    directory: &std::path::Path,
+    audio: &vibez_core::audio_buffer::DecodedAudio,
+) -> (super::App, vibez_core::id::TrackId) {
+    let source_path = directory.join("break.wav");
+    vibez_audio_io::file_io::write_wav_file(&source_path, audio).unwrap();
+    let source = vibez_project::project_format_v1::stage_local_file(&source_path).unwrap();
+    let decoded =
+        std::sync::Arc::new(vibez_audio_io::file_io::decode_audio_file(&source_path).unwrap());
+    let mut app = app();
+    let track = crate::state::ProjectTrack::new(vibez_core::id::TrackId::new(), "Breaks".into(), 0);
+    let track_id = track.id;
+    std::sync::Arc::make_mut(&mut app.state.project_tracks)
+        .tracks
+        .push(track);
+    let frames = decoded.num_frames() as u64;
+    for position in [0, frames] {
+        let clip = crate::state::UiClip {
+            name: "break.wav".into(),
+            audio: std::sync::Arc::clone(&decoded),
+            source: Some(source.clone()),
+            ..crate::state::UiClip::test_clip(position, frames)
+        };
+        app.state.arrange_content_mut(track_id).clips.push(clip);
+    }
+    (app, track_id)
+}
+
+/// Selects every Audio Clip on `track_id`.
+pub(super) fn select_all_audio_clips(app: &mut super::App, track_id: vibez_core::id::TrackId) {
+    let clips: Vec<_> = app
+        .state
+        .arrange_content(track_id)
+        .map(|content| content.clips.iter().map(|clip| clip.id).collect())
+        .unwrap_or_default();
+    app.state.arrangement.selected_clips = clips
+        .into_iter()
+        .map(|clip_id| crate::state::ArrangementSelection::AudioClip { track_id, clip_id })
+        .collect();
+}
