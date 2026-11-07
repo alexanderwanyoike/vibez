@@ -727,18 +727,23 @@ mod tests {
         let failures: Vec<String> = builtins()
             .iter()
             .flat_map(|theme| {
-                let lane = [("lane", theme.lane())];
+                let lane = theme.lane();
+                let band = crate::theme::blend(lane, theme.text, theme.lane_style.band);
                 let lines = theme.lane_style.lines;
-                [
-                    ("label line", lines.label, GRID_LABEL_LINE_CONTRAST),
-                    ("bar line", lines.bar, GRID_BAR_LINE_CONTRAST),
-                    ("fine line", lines.fine, GRID_FINE_LINE_CONTRAST),
-                ]
-                .into_iter()
-                .flat_map(move |(role, strength, floor)| {
-                    let colour = crate::theme::blend(theme.lane(), theme.text, strength);
-                    shortfalls(theme, role, colour, &lane, floor)
-                })
+                [("lane", lane), ("bar band", band)].into_iter().flat_map(
+                    move |(surface, under)| {
+                        [
+                            ("label line", lines.label, GRID_LABEL_LINE_CONTRAST),
+                            ("bar line", lines.bar, GRID_BAR_LINE_CONTRAST),
+                            ("fine line", lines.fine, GRID_FINE_LINE_CONTRAST),
+                        ]
+                        .into_iter()
+                        .flat_map(move |(role, strength, floor)| {
+                            let colour = crate::theme::blend(under, theme.text, strength);
+                            shortfalls(theme, role, colour, &[(surface, under)], floor)
+                        })
+                    },
+                )
             })
             .collect();
         assert!(failures.is_empty(), "{}", failures.join("\n"));
