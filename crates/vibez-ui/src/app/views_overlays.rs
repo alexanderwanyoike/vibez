@@ -38,10 +38,12 @@ const CONTEXT_MENU_CLIP_WIDTH: f32 = 220.0 + CONTEXT_MENU_CARD_PADDING;
 fn context_menu_width(target: &ContextMenuTarget) -> f32 {
     match target {
         ContextMenuTarget::Clip { .. } => CONTEXT_MENU_CLIP_WIDTH,
-        ContextMenuTarget::TimeSelection { .. }
-        | ContextMenuTarget::AudioClipDetail { .. }
-        | ContextMenuTarget::TrackHeader { .. }
-        | ContextMenuTarget::ArrangementEmpty => 200.0 + CONTEXT_MENU_CARD_PADDING,
+        ContextMenuTarget::TimeSelection { .. } | ContextMenuTarget::ArrangementEmpty => {
+            super::views_grid_menu::GRID_MENU_WIDTH + CONTEXT_MENU_CARD_PADDING
+        }
+        ContextMenuTarget::AudioClipDetail { .. } | ContextMenuTarget::TrackHeader { .. } => {
+            200.0 + CONTEXT_MENU_CARD_PADDING
+        }
     }
 }
 
@@ -920,7 +922,9 @@ impl App {
             } => {
                 let start = *start_beats;
                 let end = *end_beats;
-                let mut col = column![].spacing(0).width(Length::Fixed(200.0));
+                let mut col = column![]
+                    .spacing(0)
+                    .width(Length::Fixed(super::views_grid_menu::GRID_MENU_WIDTH));
 
                 // "Create Note Clip" if track is an instrument track
                 let effective_track = track_id.or(self.state.arrangement.selected_track);
@@ -956,6 +960,7 @@ impl App {
                     "Bounce Selection".into(),
                     Message::BounceSelectionToAudio,
                 ));
+                col = col.push(self.view_grid_menu());
 
                 col.into()
             }
@@ -1080,9 +1085,10 @@ impl App {
                     "Add MIDI Track".into(),
                     Message::Arrangement(ArrangementMsg::AddInstrumentTrack),
                 ),
+                self.view_grid_menu(),
             ]
             .spacing(0)
-            .width(Length::Fixed(200.0))
+            .width(Length::Fixed(super::views_grid_menu::GRID_MENU_WIDTH))
             .into(),
         };
 

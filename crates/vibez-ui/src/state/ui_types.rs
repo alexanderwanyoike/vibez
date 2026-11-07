@@ -1297,7 +1297,8 @@ impl GridConfig {
             .map(move |grid| GridChoice::Fixed(if triplet { grid.triplet() } else { grid }))
     }
 
-    fn auto_choice(self, pixels_per_beat: f32) -> GridChoice {
+    /// The snap list's Auto entry at this zoom.
+    pub fn auto_choice(self, pixels_per_beat: f32) -> GridChoice {
         GridChoice::Auto(SnapGrid::adaptive(
             pixels_per_beat,
             self.adaptive_bias,
