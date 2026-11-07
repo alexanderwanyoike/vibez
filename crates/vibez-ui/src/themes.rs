@@ -681,9 +681,8 @@ mod tests {
     /// A fader handle is the control itself, so it keeps WCAG's 3:1 for
     /// graphics.
     const FADER_HANDLE_CONTRAST: f32 = 3.0;
-    /// Lane grid lines are texture behind see-through clips, so their floors
-    /// sit far below text's, yet each rank must still read against the lane
-    /// on the dimmest theme.
+    /// Floors for each rank of lane grid line; why they sit so low is on
+    /// [`crate::theme::LaneStyle`].
     const GRID_LABEL_LINE_CONTRAST: f32 = 1.5;
     const GRID_BAR_LINE_CONTRAST: f32 = 1.2;
     const GRID_FINE_LINE_CONTRAST: f32 = 1.12;
