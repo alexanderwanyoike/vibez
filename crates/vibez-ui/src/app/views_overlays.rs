@@ -1126,8 +1126,8 @@ mod tests {
     use std::sync::Arc;
 
     use super::{
-        context_menu_x, drum_rack_slice_can_create, project_track_deletion_list_height,
-        track_header_menu, CONTEXT_MENU_CLIP_WIDTH,
+        context_menu_opens_upward, context_menu_x, drum_rack_slice_can_create,
+        project_track_deletion_list_height, track_header_menu, CONTEXT_MENU_CLIP_WIDTH,
     };
     use crate::domains::view::ViewMsg;
     use crate::message::{MenuOverlay, Message};
@@ -1169,6 +1169,12 @@ mod tests {
         let x = context_menu_x(1_862.0, CONTEXT_MENU_CLIP_WIDTH, 1_920.0);
 
         assert_eq!(x, 1_676.0);
+    }
+
+    #[test]
+    fn a_context_menu_opened_low_in_the_window_opens_upward() {
+        assert!(!context_menu_opens_upward(200.0, 720.0));
+        assert!(context_menu_opens_upward(600.0, 720.0));
     }
 
     #[test]
