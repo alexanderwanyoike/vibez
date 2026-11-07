@@ -1288,6 +1288,15 @@ impl GridConfig {
             .collect()
     }
 
+    /// The grid menu's fixed entries, coarsest first. They keep the grid's
+    /// triplet feel, as Ableton's Fixed Grid menu keeps Triplet Grid on.
+    pub fn fixed_choices(self) -> impl Iterator<Item = GridChoice> {
+        let triplet = self.selected.is_triplet();
+        SnapGrid::ADAPTIVE_STEPS
+            .into_iter()
+            .map(move |grid| GridChoice::Fixed(if triplet { grid.triplet() } else { grid }))
+    }
+
     fn auto_choice(self, pixels_per_beat: f32) -> GridChoice {
         GridChoice::Auto(SnapGrid::adaptive(
             pixels_per_beat,
