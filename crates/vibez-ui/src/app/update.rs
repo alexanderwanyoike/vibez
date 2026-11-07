@@ -528,11 +528,6 @@ impl App {
                     else {
                         return Task::none();
                     };
-                    if clip.source.is_none() {
-                        self.state.status_text =
-                            "Slice to Drum Rack needs available Source Media".into();
-                        return Task::none();
-                    }
                     let transient_count = crate::domains::arrangement::slice_region_count(
                         &clip,
                         crate::domains::arrangement::AudioSliceMarkers::Transients,

@@ -18,7 +18,7 @@ fn add_move_and_delete_transient_markers_each_restore_through_undo() {
                 channels: vec![vec![0.0; 1_000]],
                 sample_rate: 48_000,
             }),
-            source: None,
+            source: crate::state::UiClip::test_source(),
             position: 0,
             source_offset: 0,
             start_marker: 0,
@@ -164,7 +164,7 @@ fn one_marker_slice_action_undoes_back_to_the_original_audio_clip() {
             channels: vec![vec![0.0; 1_000]],
             sample_rate: 48_000,
         }),
-        source: None,
+        source: crate::state::UiClip::test_source(),
         position: 0,
         source_offset: 0,
         start_marker: 0,
@@ -235,9 +235,9 @@ fn slice_to_drum_rack_undo_removes_the_track_instrument_and_midi_clip_together()
             channels: vec![vec![0.0; 1_000]],
             sample_rate: 48_000,
         }),
-        source: Some(vibez_core::track::MediaSourceRef::LocalFile {
+        source: vibez_core::track::MediaSourceRef::LocalFile {
             path: "loop.wav".into(),
-        }),
+        },
         position: 0,
         source_offset: 0,
         start_marker: 0,
@@ -258,7 +258,7 @@ fn slice_to_drum_rack_undo_removes_the_track_instrument_and_midi_clip_together()
     };
     clip.transient_markers.replace_suggestions([500]);
     let prepared_audio = Arc::clone(&clip.audio);
-    let prepared_source = clip.source.clone().unwrap();
+    let prepared_source = clip.source.clone();
     Arc::make_mut(&mut state.arrangement.timeline)
         .ensure(source_track_id)
         .clips

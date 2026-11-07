@@ -195,7 +195,7 @@ struct ClipShape {
     id: ClipId,
     position: u64,
     duration: u64,
-    media: Option<String>,
+    media: String,
 }
 
 /// Saving turns staged media into Project Media with the same content id, so
@@ -216,7 +216,7 @@ fn lane_shape(app: &App, track_id: TrackId) -> Vec<ClipShape> {
             id: clip.id,
             position: clip.position,
             duration: clip.duration,
-            media: clip.source.as_ref().map(media_identity),
+            media: media_identity(&clip.source),
         })
         .collect()
 }
@@ -242,10 +242,6 @@ async fn assert_survives_save_and_reopen(edits: &[Edit]) -> Result<(), TestCaseE
     }
     let before = lane_shape(&app, track_id);
     let heard_before = render_master(&app);
-    prop_assert!(
-        before.iter().all(|clip| clip.media.is_some()),
-        "a Clip has no saved media: {before:?}"
-    );
 
     save_project_async(project_path.clone(), None, app.project_for_save())
         .await

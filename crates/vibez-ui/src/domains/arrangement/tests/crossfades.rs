@@ -18,7 +18,7 @@ fn join_merges_adjacent_audio_clips_into_one() {
     assert_eq!(a.tracks[0].clips.len(), 1);
     assert_eq!(a.tracks[0].clips[0].position, 0);
     assert_eq!(a.tracks[0].clips[0].duration, 300);
-    assert_eq!(a.tracks[0].clips[0].source, Some(joined_source()));
+    assert_eq!(a.tracks[0].clips[0].source, joined_source());
     assert_eq!(action.status.as_deref(), Some("Joined audio clips"));
 }
 

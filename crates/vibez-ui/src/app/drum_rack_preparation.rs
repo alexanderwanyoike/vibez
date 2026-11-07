@@ -8,10 +8,7 @@ pub(super) async fn prepare_drum_rack_audio_async(
     clip: crate::state::UiClip,
 ) -> Result<crate::message::PreparedDrumRackAudio, String> {
     tokio::task::spawn_blocking(move || {
-        let source = clip
-            .source
-            .clone()
-            .ok_or_else(|| "Slice to Drum Rack needs available Source Media".to_string())?;
+        let source = clip.source.clone();
         let frame_count = usize::try_from(clip.duration)
             .map_err(|_| "Audio Clip is too long to prepare as Drum Rack media".to_string())?;
         if frame_count == 0 || clip.audio.num_channels() == 0 {
@@ -107,9 +104,9 @@ mod tests {
             id: vibez_core::id::ClipId::new(),
             name: "Loop".into(),
             audio,
-            source: Some(MediaSourceRef::LocalFile {
+            source: MediaSourceRef::LocalFile {
                 path: source_path.clone(),
-            }),
+            },
             position: 0,
             source_offset: 0,
             start_marker: 2,
@@ -154,7 +151,7 @@ mod tests {
                 channels: vec![(0..8).map(|frame| frame as f32 / 10.0).collect()],
                 sample_rate: 48_000,
             }),
-            source: Some(MediaSourceRef::LocalFile { path: source_path }),
+            source: MediaSourceRef::LocalFile { path: source_path },
             position: 0,
             source_offset: 0,
             start_marker: 0,

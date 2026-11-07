@@ -70,6 +70,7 @@ pub(in crate::app) async fn save_project_async(
 /// clip is CPU-heavy).
 pub(in crate::app) async fn finish_loaded_clip(
     info: ClipInfo,
+    source: MediaSourceRef,
     raw: Arc<vibez_core::audio_buffer::DecodedAudio>,
 ) -> LoadedClipData {
     let transpose = info.transpose.semitones();
@@ -84,6 +85,7 @@ pub(in crate::app) async fn finish_loaded_clip(
             if let Some(warped) = warped {
                 return LoadedClipData {
                     info,
+                    source,
                     audio: warped,
                     original_audio: Some(raw),
                 };
@@ -91,12 +93,12 @@ pub(in crate::app) async fn finish_loaded_clip(
         }
     }
     if transpose != 0 {
-        let source = Arc::clone(&raw);
+        let unpitched = Arc::clone(&raw);
         let rendered = tokio::task::spawn_blocking(move || {
             Arc::new(
                 vibez_dsp::time_stretch::pitch_preserving_stretch_transposed(
-                    &source,
-                    source.num_frames(),
+                    &unpitched,
+                    unpitched.num_frames(),
                     f32::from(transpose),
                 ),
             )
@@ -105,12 +107,14 @@ pub(in crate::app) async fn finish_loaded_clip(
         .unwrap_or_else(|_| Arc::clone(&raw));
         return LoadedClipData {
             info,
+            source,
             audio: rendered,
             original_audio: Some(raw),
         };
     }
     LoadedClipData {
         info,
+        source,
         audio: raw,
         original_audio: None,
     }
@@ -215,7 +219,7 @@ pub(in crate::app) async fn hydrate_project_async(
                 {
                     Ok(audio) => clips.push(crate::message::LoadedTimelineClip {
                         location,
-                        clip: finish_loaded_clip(clip.clone(), Arc::new(audio)).await,
+                        clip: finish_loaded_clip(clip.clone(), source, Arc::new(audio)).await,
                     }),
                     Err(err) => {
                         warnings.push(format!(

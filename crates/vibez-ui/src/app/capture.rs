@@ -484,7 +484,7 @@ mod tests {
                 channels: vec![vec![0.5; 32]],
                 sample_rate: 8,
             }),
-            source: None,
+            source: crate::state::UiClip::test_source(),
             position,
             source_offset: 0,
             start_marker: 0,

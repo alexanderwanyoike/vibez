@@ -45,7 +45,7 @@ impl App {
             name: name.clone(),
             audio,
             original_audio,
-            source: Some(source),
+            source,
             position: 0,
             source_offset: 0,
             start_marker: 0,

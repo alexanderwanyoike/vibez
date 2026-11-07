@@ -24,11 +24,11 @@ pub(super) fn timeline_info_from_ui(timeline: &ArrangementTimeline) -> TimelineI
             source_offset: clip.source_offset,
             start_marker: Some(clip.start_marker),
             duration: clip.duration,
-            source: clip.source.clone(),
-            file_path: clip.source.as_ref().and_then(|source| match source {
+            source: Some(clip.source.clone()),
+            file_path: match &clip.source {
                 MediaSourceRef::LocalFile { path } => Some(path.clone()),
                 _ => None,
-            }),
+            },
             loop_enabled: clip.loop_enabled,
             loop_start: clip.loop_start,
             loop_end: clip.loop_end,
@@ -165,7 +165,7 @@ pub(super) fn install_loaded_clip(
         id: loaded.info.id,
         name: loaded.info.name,
         audio: loaded.audio,
-        source: loaded.info.source.clone(),
+        source: loaded.source,
         position: loaded.info.position,
         source_offset,
         start_marker,
@@ -267,7 +267,9 @@ pub(super) fn apply_timeline_sources(timeline: &mut ArrangementTimeline, saved: 
                 .iter_mut()
                 .find(|clip| clip.id == saved_clip.id)
         }) {
-            clip.source = saved_clip.source.clone();
+            if let Some(source) = &saved_clip.source {
+                clip.source = source.clone();
+            }
         }
     }
 }
@@ -311,6 +313,7 @@ mod tests {
         crate::message::LoadedTimelineClip {
             location,
             clip: crate::message::LoadedClipData {
+                source: crate::state::UiClip::test_source(),
                 info: ClipInfo {
                     id: clip_id,
                     track_id,

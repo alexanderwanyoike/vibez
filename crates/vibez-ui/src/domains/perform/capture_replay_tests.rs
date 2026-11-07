@@ -49,7 +49,7 @@ fn source(early: TrackId, full: TrackId, second: bool) -> CapturedTimelineSource
                 id: ClipId::new(),
                 name: "Section pulse".into(),
                 audio,
-                source: None,
+                source: crate::state::UiClip::test_source(),
                 position: 0,
                 source_offset: 0,
                 start_marker: 0,
