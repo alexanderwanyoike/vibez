@@ -248,33 +248,11 @@ fn lane_shape(app: &App, track_id: TrackId) -> Vec<ClipShape> {
 }
 
 fn render_master(app: &App) -> Vec<f32> {
-    let project = app.project_for_offline_render();
-    let end = project
-        .arrange
-        .clips
-        .iter()
-        .map(|clip| clip.position + clip.duration)
-        .max()
-        .unwrap_or(0);
+    let end = app.state.total_duration_samples();
     if end == 0 {
         return Vec::new();
     }
-    let assets = app.collect_bounce_assets();
-    let request = vibez_engine::render::BounceRequest {
-        tracks: project.tracks,
-        master: project.master,
-        buses: project.buses,
-        audio_clips: project.arrange.clips,
-        note_clips: project.arrange.note_clips,
-        clip_audio: assets.clips,
-        sampler_audio: assets.samplers,
-        drum_pad_audio: assets.pads,
-        mode: vibez_engine::render::BounceMode::Master,
-        range_samples: (0, end),
-        bpm: app.state.transport.bpm,
-        sample_rate: app.state.transport.sample_rate,
-        swing: project.swing,
-    };
+    let request = app.offline_render_request(vibez_engine::render::BounceMode::Master, (0, end));
     vibez_engine::render::render_offline(&request)
         .audio
         .channels
