@@ -55,6 +55,12 @@ fn track_header_menu(track_id: vibez_core::id::TrackId) -> [(char, &'static str,
     )]
 }
 
+/// A menu opened in the window's lower half grows up from the pointer, since
+/// the timeline menus can be taller than the room left below it.
+fn context_menu_opens_upward(y: f32, window_height: f32) -> bool {
+    y > window_height / 2.0
+}
+
 fn context_menu_x(requested_x: f32, menu_width: f32, window_width: f32) -> f32 {
     let maximum_x = (window_width - menu_width - CONTEXT_MENU_EDGE_INSET).max(0.0);
     requested_x.clamp(0.0, maximum_x)
@@ -1105,10 +1111,17 @@ impl App {
             .padding(4);
 
         // Position menu at (x, y) using spacers in a column+row layout
-        let positioned = column![
-            vertical_space().height(Length::Fixed(y)),
-            row![horizontal_space().width(Length::Fixed(x)), menu_container,]
-        ];
+        let menu_row = row![horizontal_space().width(Length::Fixed(x)), menu_container,];
+        let positioned = if context_menu_opens_upward(y, self.state.view.window_height) {
+            column![
+                vertical_space(),
+                menu_row,
+                vertical_space()
+                    .height(Length::Fixed((self.state.view.window_height - y).max(0.0))),
+            ]
+        } else {
+            column![vertical_space().height(Length::Fixed(y)), menu_row]
+        };
 
         // Full-screen click-eating backdrop
         mouse_area(
