@@ -43,6 +43,7 @@ rustfft = "6.4"
 
 # GUI
 iced = { version = "0.13", features = ["advanced", "canvas", "lazy", "tokio"] }
+iced_runtime = "0.13"
 
 # Shared
 serde = { version = "1", features = ["derive"] }
