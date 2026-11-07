@@ -772,6 +772,15 @@ mod tests {
     }
 
     #[test]
+    fn the_delete_button_centres_on_the_header_band() {
+        let film = film(Size::new(240.0, 72.0));
+        assert_eq!(
+            DELETE_PADDING.top + BUTTON_SIZE / 2.0,
+            film.y + HEADER_H / 2.0
+        );
+    }
+
+    #[test]
     fn a_clip_fills_its_slots_tile_with_no_well_around_it() {
         for size in [Size::new(140.0, 48.0), Size::new(240.0, 72.0)] {
             assert_eq!(film(size), tile(size));
