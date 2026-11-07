@@ -13,7 +13,10 @@ use super::{load_project_async, save_project_async, App};
 use crate::domains::arrangement::ArrangementMsg;
 use crate::domains::project::ProjectMsg;
 use crate::message::Message;
-use crate::state::{ArrangementSelection, AudioClipRotaryField, ProjectTrack, SnapGrid, UiClip};
+use crate::state::{
+    ArrangementSelection, AudioClipInspectorField, AudioClipRotaryField, ProjectTrack, SnapGrid,
+    UiClip,
+};
 
 /// Producer edits on Audio Clips. Clip indexes wrap around the Clips on the
 /// lane, sorted by position, so every generated edit targets a real Clip.
@@ -174,10 +177,15 @@ async fn apply(app: &mut App, track_id: TrackId, edit: &Edit) {
         Edit::Warp { clip, source_bpm } => pick(clip)
             .map(|clip| {
                 vec![
-                    Message::Arrangement(ArrangementMsg::SetClipNominalBpm {
+                    Message::Arrangement(ArrangementMsg::AudioClipInspectorInputChanged {
+                        clip_id: clip.id,
+                        field: AudioClipInspectorField::SourceBpm,
+                        text: source_bpm.to_string(),
+                    }),
+                    Message::Arrangement(ArrangementMsg::SubmitAudioClipInspectorField {
                         track_id,
                         clip_id: clip.id,
-                        bpm: source_bpm,
+                        field: AudioClipInspectorField::SourceBpm,
                     }),
                     Message::WarpClipToProject {
                         location: TimelineLocation::Arrange,
