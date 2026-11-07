@@ -73,6 +73,31 @@ fn the_snap_list_shows_the_step_the_grid_snaps_to() {
     assert!(fixed.choices(80.0).contains(&fixed.choice(80.0)));
 }
 
+#[test]
+fn the_grid_menu_offers_every_fixed_division_from_eight_bars_to_a_thirty_second() {
+    let labels: Vec<String> = GridConfig::default()
+        .fixed_choices()
+        .map(|choice| choice.to_string())
+        .collect();
+    assert_eq!(
+        labels,
+        ["8 Bars", "4 Bars", "2 Bars", "1 Bar", "1/4", "1/8", "1/16", "1/32"]
+    );
+}
+
+#[test]
+fn picking_a_division_from_the_grid_menu_keeps_the_triplet_grid() {
+    let mut grid = GridConfig::default();
+    grid.choose(GridChoice::Fixed(SnapGrid::EIGHTH.triplet()));
+    let sixteenth = grid
+        .fixed_choices()
+        .find(|choice| choice.to_string() == "1/16T")
+        .expect("a triplet grid lists triplet divisions");
+    grid.choose(sixteenth);
+    assert_eq!(grid.choice(80.0), sixteenth);
+    assert_eq!(grid.effective_grid(80.0), SnapGrid::SIXTEENTH.triplet());
+}
+
 fn trimmed_note_clip(loop_enabled: bool) -> UiNoteClip {
     UiNoteClip {
         name: "Trimmed".into(),
