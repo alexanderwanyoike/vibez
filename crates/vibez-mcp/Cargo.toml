@@ -1,0 +1,29 @@
+[package]
+name = "vibez-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Model Context Protocol server for building and rendering Vibez projects"
+
+[[bin]]
+name = "vibez-mcp"
+path = "src/main.rs"
+
+[dependencies]
+vibez-core = { workspace = true }
+vibez-dsp = { workspace = true }
+vibez-instruments = { workspace = true }
+vibez-engine = { workspace = true }
+vibez-audio-io = { workspace = true }
+vibez-project = { workspace = true }
+vibez-dropbox = { workspace = true }
+rmcp = { version = "=3.5.1", features = ["server", "macros", "transport-io"] }
+schemars = "1"
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "sync"] }
+thiserror = "2"
+dirs = "5"
+
+[dev-dependencies]
+tempfile = "3"
