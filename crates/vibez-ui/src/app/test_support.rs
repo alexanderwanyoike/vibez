@@ -87,36 +87,78 @@ pub(super) fn app() -> super::App {
     }
 }
 
-/// Joins the selected Arrange Audio Clips the way Ctrl+J does, running the
-/// background render and staging step the returned Task would run.
-pub(super) async fn join_selected_audio_clips(
-    app: &mut super::App,
-    track_id: vibez_core::id::TrackId,
-) {
-    let mut clips: Vec<_> = app
+/// Delivers `message` and every message its Tasks produce, as the iced
+/// runtime would, until nothing is left. Window, clipboard and other runtime
+/// actions are dropped.
+pub(super) async fn run_until_idle(app: &mut super::App, message: crate::message::Message) {
+    use iced_runtime::futures::futures::StreamExt;
+
+    const MAX_MESSAGES: usize = 1_000;
+    let mut pending = std::collections::VecDeque::from([message]);
+    let mut delivered = 0;
+    while let Some(message) = pending.pop_front() {
+        delivered += 1;
+        assert!(delivered <= MAX_MESSAGES, "Tasks kept producing messages");
+        if let Some(mut actions) = iced_runtime::task::into_stream(app.update(message)) {
+            while let Some(action) = actions.next().await {
+                if let iced_runtime::Action::Output(next) = action {
+                    pending.push_back(next);
+                }
+            }
+        }
+    }
+}
+
+/// Joins the selected Audio Clips the way Ctrl+J does.
+pub(super) async fn join_selected_audio_clips(app: &mut super::App) {
+    run_until_idle(
+        app,
+        crate::message::Message::Arrangement(
+            crate::domains::arrangement::ArrangementMsg::JoinSelectedClips,
+        ),
+    )
+    .await;
+}
+
+/// An App with one Audio track holding two adjacent Clips of `audio`, played
+/// as decoded from a staged WAV in `directory`, the way an import plays it.
+pub(super) fn app_with_two_break_clips(
+    directory: &std::path::Path,
+    audio: &vibez_core::audio_buffer::DecodedAudio,
+) -> (super::App, vibez_core::id::TrackId) {
+    let source_path = directory.join("break.wav");
+    vibez_audio_io::file_io::write_wav_file(&source_path, audio).unwrap();
+    let source = vibez_project::project_format_v1::stage_local_file(&source_path).unwrap();
+    let decoded =
+        std::sync::Arc::new(vibez_audio_io::file_io::decode_audio_file(&source_path).unwrap());
+    let mut app = app();
+    let track = crate::state::ProjectTrack::new(vibez_core::id::TrackId::new(), "Breaks".into(), 0);
+    let track_id = track.id;
+    std::sync::Arc::make_mut(&mut app.state.project_tracks)
+        .tracks
+        .push(track);
+    let frames = decoded.num_frames() as u64;
+    for position in [0, frames] {
+        let clip = crate::state::UiClip {
+            name: "break.wav".into(),
+            audio: std::sync::Arc::clone(&decoded),
+            source: Some(source.clone()),
+            ..crate::state::UiClip::test_clip(position, frames)
+        };
+        app.state.arrange_content_mut(track_id).clips.push(clip);
+    }
+    (app, track_id)
+}
+
+/// Selects every Audio Clip on `track_id`.
+pub(super) fn select_all_audio_clips(app: &mut super::App, track_id: vibez_core::id::TrackId) {
+    let clips: Vec<_> = app
         .state
         .arrange_content(track_id)
-        .unwrap()
-        .clips
-        .iter()
-        .filter(|clip| {
-            app.state.arrangement.selected_clips.contains(
-                &crate::state::ArrangementSelection::AudioClip {
-                    track_id,
-                    clip_id: clip.id,
-                },
-            )
-        })
-        .cloned()
+        .map(|content| content.clips.iter().map(|clip| clip.id).collect())
+        .unwrap_or_default();
+    app.state.arrangement.selected_clips = clips
+        .into_iter()
+        .map(|clip_id| crate::state::ArrangementSelection::AudioClip { track_id, clip_id })
         .collect();
-    clips.sort_by_key(|clip| clip.position);
-    let _ = app.update(crate::message::Message::Arrangement(
-        crate::domains::arrangement::ArrangementMsg::JoinSelectedClips,
-    ));
-    let result = super::audio_join_preparation::prepare_audio_join_async(clips.clone()).await;
-    let _ = app.update(crate::message::Message::AudioJoinPrepared {
-        location: vibez_project::TimelineLocation::Arrange,
-        request: crate::domains::arrangement::AudioJoinRequest { track_id, clips },
-        result,
-    });
 }

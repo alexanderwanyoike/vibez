@@ -989,33 +989,12 @@ async fn uncached_degraded_materialization_requires_explicit_reconnect() {
     assert!(error.contains("Reconnect Required"));
 }
 
-/// An App holding one Arrange Audio track with a break chopped into two
-/// selected Clips backed by staged Project Media.
+/// An App holding one Arrange Audio track with two selected Clips of a
+/// staged break.
 fn app_with_two_selected_break_clips(directory: &Path) -> (App, vibez_core::id::TrackId) {
-    let source_path = directory.join("break.wav");
-    vibez_audio_io::file_io::write_wav_file(&source_path, &one_second_audio()).unwrap();
-    let source = vibez_project::project_format_v1::stage_local_file(&source_path).unwrap();
-    let mut app = super::test_support::app();
-    let track = crate::state::ProjectTrack::new(vibez_core::id::TrackId::new(), "Breaks".into(), 0);
-    let track_id = track.id;
-    Arc::make_mut(&mut app.state.project_tracks)
-        .tracks
-        .push(track);
-    for position in [0, 22_050] {
-        let clip = crate::state::UiClip {
-            name: "break.wav".into(),
-            audio: one_second_audio(),
-            source: Some(source.clone()),
-            ..crate::state::UiClip::test_clip(position, 22_050)
-        };
-        app.state.arrangement.selected_clips.insert(
-            crate::state::ArrangementSelection::AudioClip {
-                track_id,
-                clip_id: clip.id,
-            },
-        );
-        app.state.arrange_content_mut(track_id).clips.push(clip);
-    }
+    let (mut app, track_id) =
+        super::test_support::app_with_two_break_clips(directory, &one_second_audio());
+    super::test_support::select_all_audio_clips(&mut app, track_id);
     (app, track_id)
 }
 
@@ -1025,7 +1004,7 @@ async fn joined_audio_clips_survive_save_and_reopen() {
     let project_path = directory.path().join("jungle.vzp");
     let (mut app, track_id) = app_with_two_selected_break_clips(directory.path());
 
-    super::test_support::join_selected_audio_clips(&mut app, track_id).await;
+    super::test_support::join_selected_audio_clips(&mut app).await;
     let _ = app.update(Message::Arrangement(
         crate::domains::arrangement::ArrangementMsg::DuplicateSelectedClip,
     ));
@@ -1048,15 +1027,15 @@ async fn joined_audio_clips_survive_save_and_reopen() {
     assert!(reopened
         .clips
         .iter()
-        .all(|clip| clip.clip.audio.num_frames() == 44_100));
+        .all(|clip| clip.clip.audio.num_frames() == 88_200));
 }
 
 #[tokio::test]
 async fn joined_audio_clip_survives_sample_rate_conversion() {
     let directory = tempfile::tempdir().unwrap();
-    let (mut app, track_id) = app_with_two_selected_break_clips(directory.path());
+    let (mut app, _) = app_with_two_selected_break_clips(directory.path());
 
-    super::test_support::join_selected_audio_clips(&mut app, track_id).await;
+    super::test_support::join_selected_audio_clips(&mut app).await;
     let converted = super::tasks::convert_project_sample_rate_async(
         super::tasks::SampleRateConversion {
             project: app.project_for_save(),

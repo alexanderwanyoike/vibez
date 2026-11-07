@@ -38,6 +38,9 @@ required-features = ["dev-gallery"]
 vibez-engine = { workspace = true, features = ["test-support"] }
 vibez-plugin-host = { workspace = true, features = ["test-fixtures"] }
 tempfile = "3"
+# Runs the Tasks `App::update` returns, so tests exercise real background round trips.
+iced_runtime = { workspace = true }
+proptest = "1"
 
 [target.'cfg(not(any(target_os = "macos", windows)))'.dependencies]
 x11rb = "0.13"

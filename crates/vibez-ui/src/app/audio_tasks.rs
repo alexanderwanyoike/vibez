@@ -155,15 +155,15 @@ pub(crate) fn compute_audio_quantize(
         sample_rate,
     });
 
-    let new_source = super::generated_media::stage_generated_audio(
+    let staged = super::generated_media::stage_generated_audio(
         "Quantized Audio",
         "Quantized.wav",
         &new_audio,
     )?;
     Ok(crate::message::AudioQuantizeSuccess {
         new_clip_id,
-        new_audio,
-        new_source,
+        new_audio: staged.audio,
+        new_source: staged.source,
         new_name: format!("{original_name} (Q {})", grid.label()),
         new_position: target_positions[0],
         new_duration: total_out_len as u64,

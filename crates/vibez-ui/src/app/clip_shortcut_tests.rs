@@ -145,7 +145,7 @@ async fn audio_join_makes_one_clip_in_one_undo_step() {
         app.state.arrange_content_mut(track_id).clips.push(clip);
     }
 
-    super::test_support::join_selected_audio_clips(&mut app, track_id).await;
+    super::test_support::join_selected_audio_clips(&mut app).await;
 
     let clips = &app.state.arrange_content(track_id).unwrap().clips;
     assert_eq!(clips.len(), 1);

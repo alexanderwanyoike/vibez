@@ -56,11 +56,12 @@ pub(super) async fn finalize_audio_take(
             ],
             sample_rate,
         });
-        let source = super::generated_media::stage_generated_audio(
-            "Recorded Audio",
-            &format!("{clip_name}.wav"),
-            &audio,
-        )?;
+        let super::generated_media::StagedAudio { source, audio } =
+            super::generated_media::stage_generated_audio(
+                "Recorded Audio",
+                &format!("{clip_name}.wav"),
+                &audio,
+            )?;
         let mut warnings = Vec::new();
         if truncated {
             warnings
