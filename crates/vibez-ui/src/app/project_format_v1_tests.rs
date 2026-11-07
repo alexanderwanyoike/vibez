@@ -907,3 +907,53 @@ async fn uncached_degraded_materialization_requires_explicit_reconnect() {
         .unwrap_err();
     assert!(error.contains("Reconnect Required"));
 }
+
+/// Joins the selected Audio Clips the way Ctrl+J does.
+async fn join_selected_audio_clips(app: &mut App) {
+    let _ = app.update(Message::Arrangement(
+        crate::domains::arrangement::ArrangementMsg::JoinSelectedClips,
+    ));
+}
+
+#[tokio::test]
+async fn joined_audio_clips_survive_save_and_reopen() {
+    let directory = tempfile::tempdir().unwrap();
+    let source_path = directory.path().join("break.wav");
+    let project_path = directory.path().join("jungle.vzp");
+    vibez_audio_io::file_io::write_wav_file(&source_path, &one_second_audio()).unwrap();
+    let source = vibez_project::project_format_v1::stage_local_file(&source_path).unwrap();
+    let mut app = super::test_support::app();
+    let track = crate::state::ProjectTrack::new(vibez_core::id::TrackId::new(), "Breaks".into(), 0);
+    let track_id = track.id;
+    Arc::make_mut(&mut app.state.project_tracks)
+        .tracks
+        .push(track);
+    for position in [0, 22_050] {
+        let clip = crate::state::UiClip {
+            name: "break.wav".into(),
+            audio: one_second_audio(),
+            source: Some(source.clone()),
+            ..crate::state::UiClip::test_clip(position, 22_050)
+        };
+        app.state.arrangement.selected_clips.insert(
+            crate::state::ArrangementSelection::AudioClip {
+                track_id,
+                clip_id: clip.id,
+            },
+        );
+        app.state.arrange_content_mut(track_id).clips.push(clip);
+    }
+
+    join_selected_audio_clips(&mut app).await;
+    assert_eq!(app.state.arrange_content(track_id).unwrap().clips.len(), 1);
+    save_project_async(project_path.clone(), None, app.project_for_save())
+        .await
+        .unwrap();
+    let reopened = load_project_async(project_path, None, 44_100)
+        .await
+        .unwrap();
+
+    assert!(reopened.warnings.is_empty(), "{:?}", reopened.warnings);
+    assert_eq!(reopened.clips.len(), 1, "joined clip audio lost on reopen");
+    assert_eq!(reopened.clips[0].clip.audio.num_frames(), 44_100);
+}
