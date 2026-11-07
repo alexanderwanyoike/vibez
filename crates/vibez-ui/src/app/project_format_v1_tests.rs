@@ -1044,6 +1044,9 @@ async fn quantized_audio_clip_survives_save_and_reopen() {
     })
     .await;
     assert!(result.is_ok(), "{result:?}");
+    let quantized_frames = result
+        .as_ref()
+        .map_or(0, |success| success.new_audio.num_frames());
     let _ = app.update(Message::AudioQuantizeReady {
         location: vibez_project::TimelineLocation::Arrange,
         track_id,
@@ -1063,4 +1066,9 @@ async fn quantized_audio_clip_survives_save_and_reopen() {
         1,
         "quantized clip audio lost on reopen"
     );
+    assert_eq!(reopened.clips[0].clip.audio.num_frames(), quantized_frames);
+    assert!(matches!(
+        reopened.project.arrange.clips[0].source,
+        Some(MediaSourceRef::ProjectMedia { .. })
+    ));
 }
