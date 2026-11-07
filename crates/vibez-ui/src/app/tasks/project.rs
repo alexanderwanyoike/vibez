@@ -228,10 +228,16 @@ pub(in crate::app) async fn hydrate_project_async(
                         });
                     }
                 },
-                None => warnings.push(format!(
-                    "Skipped clip '{}' (missing source reference)",
-                    clip.name
-                )),
+                None => {
+                    warnings.push(format!(
+                        "Clip '{}' has no saved audio; kept so saving does not remove it",
+                        clip.name
+                    ));
+                    unresolved_clips.push(crate::message::UnresolvedTimelineClip {
+                        location,
+                        info: clip.clone(),
+                    });
+                }
             }
         }
     }

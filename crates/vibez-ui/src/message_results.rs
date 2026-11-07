@@ -238,6 +238,8 @@ impl std::fmt::Debug for RemoteCatalogStartupResult {
 pub struct AudioQuantizeSuccess {
     pub new_clip_id: ClipId,
     pub new_audio: Arc<DecodedAudio>,
+    /// Project Media `new_audio` was staged as.
+    pub new_source: MediaSourceRef,
     pub new_name: String,
     pub new_position: u64,
     pub new_duration: u64,

@@ -267,11 +267,7 @@ fn join_looped_audio_consolidates_wrapped_samples_and_remains_looped() {
     }
     let mut engine = RecordingEngine::default();
 
-    a.update(
-        ArrangementMsg::JoinSelectedClips,
-        &mut engine,
-        ArrangementCtx::default(),
-    );
+    join_selected_audio(&mut a, &mut engine);
 
     let joined = &a.tracks[0].clips[0];
     assert!(joined.loop_enabled);
@@ -324,4 +320,72 @@ fn join_looped_midi_expands_repetitions_and_remains_looped() {
     assert_eq!(joined.loop_end_beats, 16.0);
     let starts: Vec<_> = joined.notes.iter().map(|note| note.start_beat).collect();
     assert_eq!(starts, vec![0.0, 4.0, 8.0, 12.0]);
+}
+
+fn two_selected_audio_clips() -> (ArrangementFixture, TrackId, ClipId) {
+    let mut a = arrangement_with_tracks(1);
+    let (track_id, first_id) = add_audio_clip(&mut a, 0, 0, 100);
+    let (_, second_id) = add_audio_clip(&mut a, 0, 100, 100);
+    for clip_id in [first_id, second_id] {
+        a.selected_clips
+            .insert(ArrangementSelection::AudioClip { track_id, clip_id });
+    }
+    (a, track_id, first_id)
+}
+
+#[test]
+fn audio_join_waits_for_staged_media_before_changing_clips() {
+    let (mut a, _, _) = two_selected_audio_clips();
+    let mut engine = RecordingEngine::default();
+
+    let action = a.update(
+        ArrangementMsg::JoinSelectedClips,
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+
+    assert_eq!(
+        action.join_audio.map(|request| request.clips.len()),
+        Some(2)
+    );
+    assert!(!action.mark_dirty);
+    assert_eq!(a.tracks[0].clips.len(), 2);
+    assert!(engine.0.is_empty());
+}
+
+#[test]
+fn audio_join_is_cancelled_when_a_clip_moved_while_staging() {
+    let (mut a, _, first_id) = two_selected_audio_clips();
+    let mut engine = RecordingEngine::default();
+    let request = a
+        .update(
+            ArrangementMsg::JoinSelectedClips,
+            &mut engine,
+            ArrangementCtx::default(),
+        )
+        .join_audio
+        .unwrap();
+    let prepared = PreparedAudioJoin {
+        joined: render_joined_audio(&request.clips),
+        source: joined_source(),
+    };
+    a.tracks[0]
+        .clips
+        .iter_mut()
+        .find(|clip| clip.id == first_id)
+        .unwrap()
+        .position = 50;
+
+    let action = a.update(
+        ArrangementMsg::ApplyAudioJoin { request, prepared },
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+
+    assert!(!action.mark_dirty);
+    assert_eq!(
+        action.status.as_deref(),
+        Some("Join cancelled because the Audio Clips changed")
+    );
+    assert_eq!(a.tracks[0].clips.len(), 2);
 }

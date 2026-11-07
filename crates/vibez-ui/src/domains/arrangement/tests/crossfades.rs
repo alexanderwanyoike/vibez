@@ -14,14 +14,11 @@ fn join_merges_adjacent_audio_clips_into_one() {
         clip_id: c2,
     });
     let mut engine = RecordingEngine::default();
-    let action = a.update(
-        ArrangementMsg::JoinSelectedClips,
-        &mut engine,
-        ArrangementCtx::default(),
-    );
+    let (_, action) = join_selected_audio(&mut a, &mut engine);
     assert_eq!(a.tracks[0].clips.len(), 1);
     assert_eq!(a.tracks[0].clips[0].position, 0);
     assert_eq!(a.tracks[0].clips[0].duration, 300);
+    assert_eq!(a.tracks[0].clips[0].source, Some(joined_source()));
     assert_eq!(action.status.as_deref(), Some("Joined audio clips"));
 }
 

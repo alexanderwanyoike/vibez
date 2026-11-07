@@ -1,5 +1,5 @@
 //! Heavier arrangement operations: warp/quantize result
-//! application and clip joining (audio-buffer merges).
+//! application, track-mute trims and note clip joining.
 
 use std::collections::HashSet;
 
@@ -19,10 +19,6 @@ use crate::state::{
 };
 
 use super::*;
-
-fn audio_source_frame(clip: &UiClip, local_frame: u64) -> usize {
-    clip.source_frame_at(local_frame) as usize
-}
 
 impl TimelineEditorState {
     pub(super) fn op_trim_selected_by_track_mutes(
@@ -292,7 +288,7 @@ impl TimelineEditorState {
                 id: success.new_clip_id,
                 name: success.new_name,
                 audio: Arc::clone(&success.new_audio),
-                source: None,
+                source: Some(success.new_source),
                 position: success.new_position,
                 source_offset: 0,
                 start_marker: 0,
@@ -362,145 +358,6 @@ impl TimelineEditorState {
             }
         }
         action
-    }
-
-    pub(super) fn join_audio_clips(
-        &mut self,
-        track_id: TrackId,
-        selections: &[ArrangementSelection],
-        engine: &mut impl EngineHandle,
-    ) -> Option<String> {
-        // Collect clip data sorted by position
-        let clip_ids: Vec<ClipId> = selections
-            .iter()
-            .filter_map(|s| match s {
-                ArrangementSelection::AudioClip { clip_id, .. } => Some(*clip_id),
-                _ => None,
-            })
-            .collect();
-
-        let mut clip_data: Vec<UiClip> = Vec::new();
-        if let Some(track) = self.find_content(track_id) {
-            for cid in &clip_ids {
-                if let Some(clip) = track.clips.iter().find(|c| c.id == *cid) {
-                    clip_data.push(clip.clone());
-                }
-            }
-        }
-
-        if clip_data.len() < 2 {
-            return None;
-        }
-
-        // Sort by position
-        clip_data.sort_by_key(|clip| clip.position);
-
-        let start_pos = clip_data[0].position;
-        let end_pos = clip_data
-            .iter()
-            .map(|clip| clip.position.saturating_add(clip.duration))
-            .max()
-            .unwrap_or(start_pos);
-        let total_duration = end_pos - start_pos;
-        let joined_loop_enabled = clip_data.iter().any(|clip| clip.loop_enabled);
-
-        // Determine channel count from first clip
-        let channels = clip_data[0].audio.num_channels();
-        let sr = clip_data[0].audio.sample_rate;
-
-        // Create joined buffer filled with silence
-        let mut joined_channels: Vec<Vec<f32>> = (0..channels)
-            .map(|_| vec![0.0f32; total_duration as usize])
-            .collect();
-
-        // Consolidate the audible arrangement result, including source
-        // wrapping for clips whose visible duration exceeds their loop.
-        for clip in &clip_data {
-            let offset_in_joined = (clip.position - start_pos) as usize;
-            let dur = clip.duration as usize;
-            let ch_count = channels.min(clip.audio.num_channels());
-            for (ch, dst) in joined_channels.iter_mut().enumerate().take(ch_count) {
-                for local in 0..dur {
-                    let dst_frame = offset_in_joined + local;
-                    if dst_frame >= dst.len() {
-                        break;
-                    }
-                    let source_frame = audio_source_frame(clip, local as u64);
-                    if let Some(sample) = clip.audio.channels[ch].get(source_frame) {
-                        dst[dst_frame] += *sample
-                            * clip.gain_db.linear()
-                            * clip.fades.gain_at(local as u64, clip.duration);
-                    }
-                }
-            }
-        }
-
-        // Create DecodedAudio
-        let joined_audio = Arc::new(vibez_core::audio_buffer::DecodedAudio {
-            channels: joined_channels,
-            sample_rate: sr,
-        });
-
-        // Remove all originals
-        for cid in &clip_ids {
-            self.unlink_crossfades_for_clip(engine, track_id, *cid);
-            engine.send(EngineCommand::RemoveClip(track_id, *cid));
-            if let Some(track) = self.find_content_mut(track_id) {
-                track.clips.retain(|c| c.id != *cid);
-            }
-        }
-
-        // Add joined clip
-        let new_id = ClipId::new();
-        engine.send(EngineCommand::AddClip {
-            insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
-            track_id,
-            clip_id: new_id,
-            audio: Arc::clone(&joined_audio),
-            position: start_pos,
-            source_offset: 0,
-            start_marker: 0,
-            duration: total_duration,
-            loop_enabled: joined_loop_enabled,
-            loop_start: 0,
-            loop_end: total_duration,
-            linear_gain: 1.0,
-            fades: Default::default(),
-            playback_direction: Default::default(),
-            warp_markers: Default::default(),
-        });
-        if let Some(track) = self.find_content_mut(track_id) {
-            track.clips.push(UiClip {
-                id: new_id,
-                name: "Joined".to_string(),
-                audio: joined_audio,
-                source: None,
-                position: start_pos,
-                source_offset: 0,
-                start_marker: 0,
-                duration: total_duration,
-                loop_enabled: joined_loop_enabled,
-                loop_start: 0,
-                loop_end: total_duration,
-                gain_db: Default::default(),
-                fades: Default::default(),
-                playback_direction: Default::default(),
-                transient_markers: Default::default(),
-                warp_markers: Default::default(),
-                transpose: Default::default(),
-                original_bpm: None,
-                warped: false,
-                warped_to_bpm: None,
-                original_audio: None,
-            });
-        }
-
-        self.selected_clips.clear();
-        self.selected_clips.insert(ArrangementSelection::AudioClip {
-            track_id,
-            clip_id: new_id,
-        });
-        Some("Joined audio clips".to_string())
     }
 
     pub(super) fn join_note_clips(

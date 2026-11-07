@@ -708,6 +708,9 @@ fn audio_quantize_replaces_and_selects_the_clip_in_its_timeline() {
         crate::message::AudioQuantizeSuccess {
             new_clip_id,
             new_audio,
+            new_source: MediaSourceRef::LocalFile {
+                path: "Quantized.wav".into(),
+            },
             new_name: "Quantized Clip".into(),
             new_position: 0,
             new_duration: 22_050,

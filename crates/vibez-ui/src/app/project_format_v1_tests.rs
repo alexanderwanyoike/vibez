@@ -639,6 +639,87 @@ async fn unavailable_media_clip_is_kept_for_relink_on_reopen() {
 }
 
 #[tokio::test]
+async fn sourceless_audio_clip_survives_reopen_and_re_save() {
+    let directory = tempfile::tempdir().unwrap();
+    let project_path = directory.path().join("joined.vzp");
+    let track = TrackInfo::new("Breaks");
+    let clip_id = ClipId::new();
+    let fades = ClipFades::new(256, 512, 2_048).with_fade_in_curve(FadeCurve::new(40));
+    let project = Project {
+        reduced_latency_monitoring: false,
+        tracks: vec![track.clone()],
+        arrange: vibez_project::TimelineInfo {
+            clips: vec![ClipInfo {
+                id: clip_id,
+                track_id: track.id,
+                name: "Joined".into(),
+                position: 4_096,
+                source_offset: 0,
+                start_marker: None,
+                duration: 2_048,
+                source: None,
+                file_path: None,
+                loop_enabled: false,
+                loop_start: 0,
+                loop_end: 2_048,
+                gain_db: Default::default(),
+                fades,
+                playback_direction: Default::default(),
+                transient_markers: Default::default(),
+                warp_markers: Default::default(),
+                transpose: Default::default(),
+                original_bpm: None,
+                warped: false,
+                warped_to_bpm: None,
+            }],
+            ..vibez_project::TimelineInfo::default()
+        },
+        ..Project::default()
+    };
+    vibez_project::project_format_v1::save_project_v1(&project_path, None, project).unwrap();
+
+    let loaded = load_project_async(
+        project_path.clone(),
+        None,
+        vibez_core::constants::DEFAULT_SAMPLE_RATE,
+    )
+    .await
+    .unwrap();
+    assert!(loaded.clips.is_empty());
+    assert_eq!(loaded.unresolved_clips.len(), 1);
+    assert_eq!(loaded.unresolved_clips[0].id, clip_id);
+    assert!(loaded
+        .warnings
+        .iter()
+        .any(|warning| warning.contains("Clip 'Joined' has no saved audio")));
+
+    let mut app = super::test_support::app();
+    app.rebuild_from_loaded_project(loaded);
+    save_project_async(
+        project_path.clone(),
+        Some(project_path.clone()),
+        app.project_for_save(),
+    )
+    .await
+    .unwrap();
+
+    let reopened = load_project_async(
+        project_path,
+        None,
+        vibez_core::constants::DEFAULT_SAMPLE_RATE,
+    )
+    .await
+    .unwrap();
+    let kept = &reopened.project.arrange.clips;
+    assert_eq!(kept.len(), 1);
+    assert_eq!(kept[0].id, clip_id);
+    assert_eq!(kept[0].name, "Joined");
+    assert_eq!(kept[0].position, 4_096);
+    assert_eq!(kept[0].duration, 2_048);
+    assert_eq!(kept[0].fades, fades);
+}
+
+#[tokio::test]
 async fn cached_remote_media_materializes_without_a_client_and_persists_metadata() {
     let directory = tempfile::tempdir().unwrap();
     let source_path = directory.path().join("source.wav");
@@ -906,4 +987,169 @@ async fn uncached_degraded_materialization_requires_explicit_reconnect() {
         .await
         .unwrap_err();
     assert!(error.contains("Reconnect Required"));
+}
+
+/// An App holding one Arrange Audio track with a break chopped into two
+/// selected Clips backed by staged Project Media.
+fn app_with_two_selected_break_clips(directory: &Path) -> (App, vibez_core::id::TrackId) {
+    let source_path = directory.join("break.wav");
+    vibez_audio_io::file_io::write_wav_file(&source_path, &one_second_audio()).unwrap();
+    let source = vibez_project::project_format_v1::stage_local_file(&source_path).unwrap();
+    let mut app = super::test_support::app();
+    let track = crate::state::ProjectTrack::new(vibez_core::id::TrackId::new(), "Breaks".into(), 0);
+    let track_id = track.id;
+    Arc::make_mut(&mut app.state.project_tracks)
+        .tracks
+        .push(track);
+    for position in [0, 22_050] {
+        let clip = crate::state::UiClip {
+            name: "break.wav".into(),
+            audio: one_second_audio(),
+            source: Some(source.clone()),
+            ..crate::state::UiClip::test_clip(position, 22_050)
+        };
+        app.state.arrangement.selected_clips.insert(
+            crate::state::ArrangementSelection::AudioClip {
+                track_id,
+                clip_id: clip.id,
+            },
+        );
+        app.state.arrange_content_mut(track_id).clips.push(clip);
+    }
+    (app, track_id)
+}
+
+#[tokio::test]
+async fn joined_audio_clips_survive_save_and_reopen() {
+    let directory = tempfile::tempdir().unwrap();
+    let project_path = directory.path().join("jungle.vzp");
+    let (mut app, track_id) = app_with_two_selected_break_clips(directory.path());
+
+    super::test_support::join_selected_audio_clips(&mut app, track_id).await;
+    let _ = app.update(Message::Arrangement(
+        crate::domains::arrangement::ArrangementMsg::DuplicateSelectedClip,
+    ));
+    let clips = &app.state.arrange_content(track_id).unwrap().clips;
+    assert_eq!(clips.len(), 2);
+    let Some(MediaSourceRef::StagedProjectMedia { staging_path, .. }) = clips[0].source.clone()
+    else {
+        panic!("joined clip has no staged media: {:?}", clips[0].source);
+    };
+    save_project_async(project_path.clone(), None, app.project_for_save())
+        .await
+        .unwrap();
+    std::fs::remove_file(staging_path).unwrap();
+    let reopened = load_project_async(project_path, None, 44_100)
+        .await
+        .unwrap();
+
+    assert!(reopened.warnings.is_empty(), "{:?}", reopened.warnings);
+    assert_eq!(reopened.clips.len(), 2, "joined clip audio lost on reopen");
+    assert!(reopened
+        .clips
+        .iter()
+        .all(|clip| clip.clip.audio.num_frames() == 44_100));
+}
+
+#[tokio::test]
+async fn joined_audio_clip_survives_sample_rate_conversion() {
+    let directory = tempfile::tempdir().unwrap();
+    let (mut app, track_id) = app_with_two_selected_break_clips(directory.path());
+
+    super::test_support::join_selected_audio_clips(&mut app, track_id).await;
+    let converted = super::tasks::convert_project_sample_rate_async(
+        super::tasks::SampleRateConversion {
+            project: app.project_for_save(),
+            path: None,
+            dirty: true,
+            sample_rate: 48_000,
+        },
+        None,
+    )
+    .await;
+
+    assert!(
+        converted.loaded.warnings.is_empty(),
+        "{:?}",
+        converted.loaded.warnings
+    );
+    assert_eq!(converted.loaded.clips.len(), 1);
+}
+
+/// One second of decaying noise bursts, so Quantize finds transients.
+fn drum_hits() -> Arc<DecodedAudio> {
+    let mut samples = vec![0.0f32; 44_100];
+    for hit in [3_000usize, 14_000, 25_000, 36_000] {
+        for (offset, sample) in samples[hit..hit + 4_000].iter_mut().enumerate() {
+            let noise = if (offset * 7919) % 13 < 6 { 1.0 } else { -1.0 };
+            *sample = noise * 0.9 * (-(offset as f32) / 600.0).exp();
+        }
+    }
+    Arc::new(DecodedAudio {
+        channels: vec![samples],
+        sample_rate: 44_100,
+    })
+}
+
+#[tokio::test]
+async fn quantized_audio_clip_survives_save_and_reopen() {
+    let directory = tempfile::tempdir().unwrap();
+    let project_path = directory.path().join("quantized.vzp");
+    let mut app = super::test_support::app();
+    let track = crate::state::ProjectTrack::new(vibez_core::id::TrackId::new(), "Drums".into(), 0);
+    let track_id = track.id;
+    Arc::make_mut(&mut app.state.project_tracks)
+        .tracks
+        .push(track);
+    let clip = crate::state::UiClip {
+        name: "hits.wav".into(),
+        audio: drum_hits(),
+        ..crate::state::UiClip::test_clip(0, 44_100)
+    };
+    let clip_id = clip.id;
+    app.state
+        .arrange_content_mut(track_id)
+        .clips
+        .push(clip.clone());
+
+    let result = super::tasks::quantize_audio_clip_async(super::audio_tasks::QuantizeInput {
+        audio: Arc::clone(&clip.audio),
+        bpm: 120.0,
+        sample_rate: 44_100,
+        grid: crate::state::SnapGrid::SIXTEENTH,
+        clip_position: 0,
+        clip_source_offset: 0,
+        clip_duration: 44_100,
+        original_name: clip.name,
+        new_clip_id: ClipId::new(),
+    })
+    .await;
+    assert!(result.is_ok(), "{result:?}");
+    let quantized_frames = result
+        .as_ref()
+        .map_or(0, |success| success.new_audio.num_frames());
+    let _ = app.update(Message::AudioQuantizeReady {
+        location: vibez_project::TimelineLocation::Arrange,
+        track_id,
+        old_clip_id: clip_id,
+        result,
+    });
+    save_project_async(project_path.clone(), None, app.project_for_save())
+        .await
+        .unwrap();
+    let reopened = load_project_async(project_path, None, 44_100)
+        .await
+        .unwrap();
+
+    assert!(reopened.warnings.is_empty(), "{:?}", reopened.warnings);
+    assert_eq!(
+        reopened.clips.len(),
+        1,
+        "quantized clip audio lost on reopen"
+    );
+    assert_eq!(reopened.clips[0].clip.audio.num_frames(), quantized_frames);
+    assert!(matches!(
+        reopened.project.arrange.clips[0].source,
+        Some(MediaSourceRef::ProjectMedia { .. })
+    ));
 }

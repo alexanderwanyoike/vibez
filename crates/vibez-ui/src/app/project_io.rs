@@ -405,7 +405,7 @@ impl App {
     }
 
     /// The full document a save must persist: the editable arrangement
-    /// plus clips whose media was unavailable at load time. Bounce and
+    /// plus clips with missing or unavailable media at load time. Bounce and
     /// export use [`Self::project_from_state`] directly, since unresolved
     /// clips have no audio to render.
     pub(super) fn project_for_save(&self) -> Project {
