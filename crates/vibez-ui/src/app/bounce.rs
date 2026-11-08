@@ -29,6 +29,31 @@ pub(super) struct BounceAssets {
 }
 
 impl App {
+    /// The Arrange as it plays now, ready for the offline renderer.
+    pub(super) fn offline_render_request(
+        &self,
+        mode: vibez_engine::render::BounceMode,
+        range_samples: (u64, u64),
+    ) -> vibez_engine::render::BounceRequest {
+        let assets = self.collect_bounce_assets();
+        let project = self.project_for_offline_render();
+        vibez_engine::render::BounceRequest {
+            tracks: project.tracks,
+            master: project.master,
+            buses: project.buses,
+            audio_clips: project.arrange.clips,
+            note_clips: project.arrange.note_clips,
+            clip_audio: assets.clips,
+            sampler_audio: assets.samplers,
+            drum_pad_audio: assets.pads,
+            mode,
+            range_samples,
+            bpm: self.state.transport.bpm,
+            sample_rate: self.state.transport.sample_rate,
+            swing: project.swing,
+        }
+    }
+
     pub(super) fn collect_bounce_assets(&self) -> BounceAssets {
         let mut clips = std::collections::HashMap::new();
         let mut samplers = std::collections::HashMap::new();
@@ -91,27 +116,8 @@ impl App {
             return Task::none();
         }
 
-        let assets = self.collect_bounce_assets();
-        let project = self.project_for_offline_render();
         let wav_path = self.next_bounce_path();
-        let sample_rate = self.state.transport.sample_rate;
-        let bpm = self.state.transport.bpm;
-
-        let request = vibez_engine::render::BounceRequest {
-            tracks: project.tracks,
-            master: project.master,
-            buses: project.buses,
-            audio_clips: project.arrange.clips,
-            note_clips: project.arrange.note_clips,
-            clip_audio: assets.clips,
-            sampler_audio: assets.samplers,
-            drum_pad_audio: assets.pads,
-            mode,
-            range_samples,
-            bpm,
-            sample_rate,
-            swing: project.swing,
-        };
+        let request = self.offline_render_request(mode, range_samples);
 
         self.start_offline_render(
             request,
@@ -163,7 +169,7 @@ impl App {
                 id: clip_id,
                 name: outcome.clip_name.clone(),
                 audio: Arc::clone(&outcome.audio),
-                source: Some(outcome.source.clone()),
+                source: outcome.source.clone(),
                 position: outcome.insert_position_samples,
                 source_offset: 0,
                 start_marker: 0,

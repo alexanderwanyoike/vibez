@@ -17,7 +17,7 @@ fn section(name: &str, early: TrackId, full: TrackId, lead: u32) -> CapturedTime
                     channels: vec![vec![0.5; 64]],
                     sample_rate: 8,
                 }),
-                source: None,
+                source: crate::state::UiClip::test_source(),
                 position: 0,
                 source_offset: 0,
                 start_marker: 0,

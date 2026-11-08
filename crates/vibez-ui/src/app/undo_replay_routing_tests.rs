@@ -38,7 +38,7 @@ fn steady_clip(frames: u64) -> UiClip {
             channels: vec![vec![0.5; frames as usize]],
             sample_rate: 44_100,
         }),
-        source: None,
+        source: crate::state::UiClip::test_source(),
         position: 0,
         source_offset: 0,
         start_marker: 0,

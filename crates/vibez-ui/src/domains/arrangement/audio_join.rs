@@ -187,7 +187,7 @@ impl TimelineEditorState {
                 id: new_id,
                 name: "Joined".to_string(),
                 audio: joined.audio,
-                source: Some(source),
+                source,
                 position: joined.position,
                 source_offset: 0,
                 start_marker: 0,

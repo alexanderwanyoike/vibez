@@ -40,25 +40,8 @@ impl App {
             self.state.status_text = "Nothing to export: project is empty".to_string();
             return Task::none();
         }
-        let assets = self.collect_bounce_assets();
-        let project = self.project_for_offline_render();
-        let sample_rate = self.state.transport.sample_rate;
-        let bpm = self.state.transport.bpm;
-        let request = vibez_engine::render::BounceRequest {
-            tracks: project.tracks,
-            master: project.master,
-            buses: project.buses,
-            audio_clips: project.arrange.clips,
-            note_clips: project.arrange.note_clips,
-            clip_audio: assets.clips,
-            sampler_audio: assets.samplers,
-            drum_pad_audio: assets.pads,
-            mode: vibez_engine::render::BounceMode::Master,
-            range_samples: (0, total),
-            bpm,
-            sample_rate,
-            swing: project.swing,
-        };
+        let request =
+            self.offline_render_request(vibez_engine::render::BounceMode::Master, (0, total));
         self.start_offline_render(request, path, None)
     }
 

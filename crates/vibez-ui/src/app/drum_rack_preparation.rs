@@ -8,10 +8,7 @@ pub(super) async fn prepare_drum_rack_audio_async(
     clip: crate::state::UiClip,
 ) -> Result<crate::message::PreparedDrumRackAudio, String> {
     tokio::task::spawn_blocking(move || {
-        let source = clip
-            .source
-            .clone()
-            .ok_or_else(|| "Slice to Drum Rack needs available Source Media".to_string())?;
+        let source = clip.source.clone();
         let frame_count = usize::try_from(clip.duration)
             .map_err(|_| "Audio Clip is too long to prepare as Drum Rack media".to_string())?;
         if frame_count == 0 || clip.audio.num_channels() == 0 {
@@ -42,16 +39,13 @@ pub(super) async fn prepare_drum_rack_audio_async(
             .filter(|stem| !stem.is_empty())
             .unwrap_or_else(|| "audio-clip".into());
         let file_name = format!("{stem}-slices.wav");
-        let bytes = vibez_audio_io::file_io::encode_wav(&rendered);
-        let staged = stage_rendered_audio(source, &file_name, &bytes)?;
-        let persisted =
-            vibez_audio_io::file_io::decode_audio_cursor(std::io::Cursor::new(bytes), Some("wav"))
-                .map_err(|error| format!("Drum Rack media verification failed: {error}"))?;
-        debug_assert_eq!(persisted.num_frames(), frame_count);
+        let saved = super::generated_media::saved_wav(&rendered)?;
+        let staged = stage_rendered_audio(source, &file_name, &saved.bytes)?;
+        debug_assert_eq!(saved.audio.num_frames(), frame_count);
 
         Ok(crate::message::PreparedDrumRackAudio {
             source: staged,
-            audio: Arc::new(persisted),
+            audio: saved.audio,
         })
     })
     .await
@@ -110,9 +104,9 @@ mod tests {
             id: vibez_core::id::ClipId::new(),
             name: "Loop".into(),
             audio,
-            source: Some(MediaSourceRef::LocalFile {
+            source: MediaSourceRef::LocalFile {
                 path: source_path.clone(),
-            }),
+            },
             position: 0,
             source_offset: 0,
             start_marker: 2,
@@ -157,7 +151,7 @@ mod tests {
                 channels: vec![(0..8).map(|frame| frame as f32 / 10.0).collect()],
                 sample_rate: 48_000,
             }),
-            source: Some(MediaSourceRef::LocalFile { path: source_path }),
+            source: MediaSourceRef::LocalFile { path: source_path },
             position: 0,
             source_offset: 0,
             start_marker: 0,

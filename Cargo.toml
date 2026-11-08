@@ -14,7 +14,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.6.4"
+version = "0.6.5"
 edition = "2021"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/vibez-daw/vibez"
@@ -43,6 +43,7 @@ rustfft = "6.4"
 
 # GUI
 iced = { version = "0.13", features = ["advanced", "canvas", "lazy", "tokio"] }
+iced_runtime = "0.13"
 
 # Shared
 serde = { version = "1", features = ["derive"] }

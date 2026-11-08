@@ -145,11 +145,11 @@ async fn audio_join_makes_one_clip_in_one_undo_step() {
         app.state.arrange_content_mut(track_id).clips.push(clip);
     }
 
-    super::test_support::join_selected_audio_clips(&mut app, track_id).await;
+    super::test_support::join_selected_audio_clips(&mut app).await;
 
     let clips = &app.state.arrange_content(track_id).unwrap().clips;
     assert_eq!(clips.len(), 1);
-    assert!(clips[0].source.is_some());
+    assert_ne!(clips[0].source, crate::state::UiClip::test_source());
     assert_eq!(app.state.project.history.undo.len(), 1);
     let _ = app.update(Message::Project(ProjectMsg::Undo));
     assert_eq!(app.state.arrange_content(track_id).unwrap().clips.len(), 2);

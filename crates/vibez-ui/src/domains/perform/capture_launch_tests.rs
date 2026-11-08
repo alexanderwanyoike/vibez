@@ -199,7 +199,7 @@ fn audio_section(name: &str, track_id: TrackId, frames: u64) -> Section {
                 channels: vec![(0..frames).map(|frame| frame as f32).collect()],
                 sample_rate: SAMPLE_RATE,
             }),
-            source: None,
+            source: crate::state::UiClip::test_source(),
             position: 0,
             source_offset: 0,
             start_marker: 0,

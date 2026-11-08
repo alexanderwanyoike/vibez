@@ -24,7 +24,7 @@ pub struct UiClip {
     pub id: ClipId,
     pub name: String,
     pub audio: Arc<DecodedAudio>,
-    pub source: Option<MediaSourceRef>,
+    pub source: MediaSourceRef,
     /// Position on the timeline in samples.
     pub position: u64,
     /// Offset into the source audio in samples.
@@ -689,6 +689,13 @@ impl UiNoteClip {
 
 #[cfg(test)]
 impl UiClip {
+    /// Saved media for test Clips whose audio never reaches a file.
+    pub(crate) fn test_source() -> MediaSourceRef {
+        MediaSourceRef::LocalFile {
+            path: "test.wav".into(),
+        }
+    }
+
     /// A silent, unlooped audio Clip `duration` frames long at `position`,
     /// for tests to fill in the fields they care about.
     pub(crate) fn test_clip(position: u64, duration: u64) -> Self {
@@ -699,7 +706,7 @@ impl UiClip {
                 channels: vec![vec![0.0; duration as usize]],
                 sample_rate: 48_000,
             }),
-            source: None,
+            source: Self::test_source(),
             position,
             source_offset: 0,
             start_marker: 0,
