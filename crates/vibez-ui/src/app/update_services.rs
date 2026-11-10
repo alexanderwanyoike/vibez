@@ -124,12 +124,6 @@ impl App {
                     let is_instrument = info.category.is_instrument();
                     let loading_name = info.name.clone();
 
-                    let is_bus = self
-                        .state
-                        .project_tracks
-                        .buses
-                        .iter()
-                        .any(|b| b.id == track_id);
                     if !is_instrument
                         && self
                             .state
@@ -140,14 +134,14 @@ impl App {
                             crate::domains::devices::DEVICE_CHAIN_FULL.to_string();
                         return Task::none();
                     }
-                    if is_instrument && (track_id.is_master() || is_bus) {
-                        // Master and buses host effects only.
-                        self.state.status_text = format!(
-                            "{loading_name} is an instrument; this channel takes effects only"
-                        );
-                        return Task::none();
-                    }
                     if is_instrument {
+                        if let Some(refusal) = crate::domains::devices::instrument_refusal(
+                            self.state.find_track(track_id),
+                            &loading_name,
+                        ) {
+                            self.state.status_text = refusal;
+                            return Task::none();
+                        }
                         let token = self
                             .plugin_load_requests
                             .begin(PluginGuiKey::Instrument { track_id });
