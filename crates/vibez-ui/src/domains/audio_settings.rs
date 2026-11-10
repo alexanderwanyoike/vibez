@@ -145,6 +145,11 @@ impl AudioSettingsState {
             .clone_from(&preferences.output_name);
     }
 
+    /// Return to the choices held before a rejected driver switch.
+    pub fn restore_after_rejected_switch(&mut self, previous: Self) {
+        *self = previous;
+    }
+
     pub fn output_choices(&self) -> Vec<AudioDeviceChoice> {
         device_choices(
             self.usable_output_devices(),
