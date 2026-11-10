@@ -9,12 +9,14 @@ on:
       - 'site/**'
       - 'docs/**'
       - '**.md'
+      - '.github/ISSUE_TEMPLATE/**'
   pull_request:
     branches: [main, dev, 'feature/**', 'codex/epic-*']
     paths-ignore:
       - 'site/**'
       - 'docs/**'
       - '**.md'
+      - '.github/ISSUE_TEMPLATE/**'
 
 env:
   CARGO_TERM_COLOR: always
