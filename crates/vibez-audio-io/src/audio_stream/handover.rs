@@ -24,3 +24,7 @@ pub(super) fn hand_over<S: StreamTrait>(
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "handover_tests.rs"]
+mod tests;
