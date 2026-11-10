@@ -1,7 +1,7 @@
 name: CI
 
 # Nothing under these paths is compiled, and no check is required to merge,
-# so a docs or site only change skips the build instead of leaving it pending.
+# so a change that only touches them skips the build instead of leaving it pending.
 on:
   push:
     branches: [main, dev, 'codex/epic-*']
