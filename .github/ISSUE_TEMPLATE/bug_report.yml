@@ -28,7 +28,7 @@ body:
     id: version
     attributes:
       label: Vibez version
-      description: Shown under File, About vibez, or in the name of the file you installed.
+      description: Shown in the File menu under About vibez, or in the name of the file you installed.
       placeholder: v0.6.5
     validations:
       required: true
@@ -51,13 +51,13 @@ body:
     id: audio
     attributes:
       label: Audio setup
-      description: For sound, device or driver problems. The backend and output device chosen in the audio settings, plus your interface if you use one.
-      placeholder: ASIO, Focusrite Scarlett 2i2, 48 kHz, 256 samples
+      description: For sound, device or driver problems. The driver type, output device, sample rate and buffer size shown in the audio settings, plus your interface if you use one.
+      placeholder: System Default, built-in output, 48 kHz, 512 samples
   - type: textarea
     id: logs
     attributes:
       label: Console output
-      description: Anything Vibez printed to the terminal or console. It is formatted as code automatically.
+      description: Anything Vibez printed if you started it from a terminal or console. Leave empty if you started it from an icon.
       render: text
   - type: textarea
     id: extra
