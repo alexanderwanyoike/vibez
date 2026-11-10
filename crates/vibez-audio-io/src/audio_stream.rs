@@ -18,6 +18,7 @@ use vibez_core::constants::DEFAULT_CHANNELS;
 use vibez_engine::engine::AudioEngine;
 
 mod callback;
+mod handover;
 #[cfg(test)]
 use crate::stream_config::buffer_size_supported;
 use callback::{
@@ -25,6 +26,7 @@ use callback::{
 };
 #[cfg(test)]
 use callback::{callback_load_basis_points, CallbackAction, StreamHealth};
+use handover::hand_over;
 
 /// A presentation-facing transition in the output stream lifecycle.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -390,16 +392,7 @@ impl AudioOutputStream {
                 Arc::clone(&self.input_bridge),
             )?;
 
-            if let Some(current) = self.stream.as_ref() {
-                current.pause()?;
-                *previous_stream_running = false;
-            }
-            if let Err(error) = stream.play() {
-                if let Some(current) = self.stream.as_ref() {
-                    *previous_stream_running = current.play().is_ok();
-                }
-                return Err(error.into());
-            }
+            hand_over(&mut self.stream, &stream, previous_stream_running)?;
 
             self.stream = Some(stream);
             self.params = Some(params);
