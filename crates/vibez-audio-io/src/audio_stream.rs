@@ -392,7 +392,13 @@ impl AudioOutputStream {
                 Arc::clone(&self.input_bridge),
             )?;
 
-            hand_over(&mut self.stream, &stream, previous_stream_running)?;
+            let handover = hand_over(&mut self.stream, &stream, previous_stream_running);
+            if self.stream.is_none() {
+                // The device details must not outlive the dead stream they
+                // described, or a failed switch would still report it active.
+                self.clear_active_stream();
+            }
+            handover?;
 
             self.stream = Some(stream);
             self.params = Some(params);
