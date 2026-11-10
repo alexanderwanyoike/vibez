@@ -448,6 +448,25 @@ mod tests {
     }
 
     #[test]
+    fn rejected_switch_that_ended_the_output_does_not_restore_it_as_active() {
+        let mut state = AudioSettingsState {
+            active_backend: Some(AudioBackend::System),
+            active_output_name: Some("Speakers".into()),
+            ..Default::default()
+        };
+        let previous = state.clone();
+        state.backend = AudioBackend::Asio;
+        state.active_backend = None;
+        state.active_output_name = None;
+
+        state.restore_after_rejected_switch(previous);
+
+        assert_eq!(state.backend, AudioBackend::System);
+        assert_eq!(state.active_backend, None);
+        assert_eq!(state.active_output_name, None);
+    }
+
+    #[test]
     fn missing_preference_stays_visible_for_reconnect() {
         let state = AudioSettingsState {
             catalog: AudioDeviceCatalog {
