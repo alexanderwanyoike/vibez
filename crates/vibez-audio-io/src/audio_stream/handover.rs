@@ -21,7 +21,8 @@ pub(super) fn hand_over<O, S: StreamTrait>(
     replacement: &S,
 ) -> Result<(), HandoverFailure> {
     if let Some(output) = previous.as_ref() {
-        if stream_of(output).pause().is_err() {
+        if let Err(error) = stream_of(output).pause() {
+            eprintln!("vibez: dropping an audio output stream that could not be paused: {error}");
             // A stream that cannot be paused has usually lost its device.
             // Dropping it is the only way left to guarantee its callback
             // never runs beside the replacement's.
