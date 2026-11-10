@@ -254,6 +254,19 @@ fn sync_pad(
 
 pub const DEVICE_CHAIN_FULL: &str = "This channel's device chain is full";
 
+/// What the status bar says when `channel` is offered the instrument
+/// `device_name`, or `None` when the channel takes it. Only MIDI tracks
+/// qualify: the engine plays an audio track's instrument in place of its
+/// clips, and buses and the master receive no notes.
+pub fn instrument_refusal(channel: Option<&ProjectTrack>, device_name: &str) -> Option<String> {
+    if channel.is_some_and(|channel| channel.kind.is_midi()) {
+        return None;
+    }
+    Some(format!(
+        "{device_name} is an instrument; only MIDI tracks take instruments"
+    ))
+}
+
 #[derive(Default)]
 pub struct DevicesCtx<'a> {
     pub sample_rate: u32,
@@ -430,8 +443,12 @@ impl DevicesState {
                 }
             }
             DevicesMsg::SetTrackInstrument(track_id, instrument_kind) => {
-                if track_id.is_master() || buses.iter().any(|b| b.id == track_id) {
-                    // The master and buses host effects only.
+                if let Some(refusal) = instrument_refusal(
+                    find_track_mut(tracks, master, buses, track_id).as_deref(),
+                    instrument_kind.name(),
+                ) {
+                    self.context_menu = None;
+                    action.status = Some(refusal);
                     return action;
                 }
                 let instrument_params =
