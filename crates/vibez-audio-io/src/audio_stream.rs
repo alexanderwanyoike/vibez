@@ -18,6 +18,7 @@ use vibez_core::constants::DEFAULT_CHANNELS;
 use vibez_engine::engine::AudioEngine;
 
 mod callback;
+mod handover;
 #[cfg(test)]
 use crate::stream_config::buffer_size_supported;
 use callback::{
@@ -25,6 +26,7 @@ use callback::{
 };
 #[cfg(test)]
 use callback::{callback_load_basis_points, CallbackAction, StreamHealth};
+use handover::hand_over;
 
 /// A presentation-facing transition in the output stream lifecycle.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -183,6 +185,17 @@ impl Default for OutputStreamConfig {
     }
 }
 
+/// The live output stream with the device details that describe it, held as
+/// one value so the details cannot outlive the stream.
+struct ActiveOutput {
+    stream: cpal::Stream,
+    params: StreamParams,
+    device: cpal::Device,
+    device_name: Option<String>,
+    backend: AudioBackend,
+    config: OutputStreamConfig,
+}
+
 /// An audio output stream backed by cpal.
 ///
 /// The stream runs the [`AudioEngine`] in the real-time callback.
@@ -202,12 +215,7 @@ impl Default for OutputStreamConfig {
 /// between replacement cpal callbacks. The callback uses `try_lock` so it
 /// never blocks if a retiring and replacement stream briefly overlap.
 pub struct AudioOutputStream {
-    stream: Option<cpal::Stream>,
-    params: Option<StreamParams>,
-    active_device: Option<cpal::Device>,
-    active_device_name: Option<String>,
-    active_backend: Option<AudioBackend>,
-    active_config: Option<OutputStreamConfig>,
+    active: Option<ActiveOutput>,
     /// Shared engine slot.  The audio callback `try_lock`s this each
     /// invocation and calls `engine.process_block()` if the lock is obtained.
     engine_slot: Arc<Mutex<Option<AudioEngine>>>,
@@ -222,12 +230,7 @@ impl AudioOutputStream {
     pub fn idle(engine: AudioEngine) -> Self {
         let (event_reporter, event_rx) = StreamEventReporter::channel();
         Self {
-            stream: None,
-            params: None,
-            active_device: None,
-            active_device_name: None,
-            active_backend: None,
-            active_config: None,
+            active: None,
             engine_slot: Arc::new(Mutex::new(Some(engine))),
             event_reporter,
             event_rx,
@@ -272,16 +275,18 @@ impl AudioOutputStream {
             Arc::clone(&output.input_bridge),
         )?;
         stream.play()?;
-        output.stream = Some(stream);
-        output.params = Some(params);
-        output.active_device = Some(device.clone());
-        output.active_device_name = device_name;
-        output.active_backend = Some(AudioBackend::System);
-        output.active_config = Some(OutputStreamConfig {
+        output.active = Some(ActiveOutput {
+            stream,
+            params,
+            device: device.clone(),
+            device_name: device_name.clone(),
             backend: AudioBackend::System,
-            device_name: output.active_device_name.clone(),
-            sample_rate: output.sample_rate(),
-            buffer_size,
+            config: OutputStreamConfig {
+                backend: AudioBackend::System,
+                device_name,
+                sample_rate: Some(params.sample_rate),
+                buffer_size,
+            },
         });
         output.event_reporter.report(AudioStreamEvent::Running);
         Ok(output)
@@ -312,8 +317,8 @@ impl AudioOutputStream {
             "at least one output request is required"
         );
         self.event_reporter.report(AudioStreamEvent::Rebuilding);
-        let mut previous_stream_running = self.stream.is_some();
-        let previous_config = self.active_config.clone();
+        let mut previous_stream_running = self.active.is_some();
+        let previous_config = self.active.as_ref().map(|active| active.config.clone());
         let requested_backend = requests[0].backend;
         // Most native hosts allow a replacement stream to be prepared while
         // the old one remains live. ASIO drivers commonly own one exclusive
@@ -321,7 +326,7 @@ impl AudioOutputStream {
         // that driver before rebuilding while the engine remains safely held
         // in `engine_slot`.
         let exclusive_stream_released =
-            requires_exclusive_reopen(self.active_backend, requested_backend);
+            requires_exclusive_reopen(self.active_backend(), requested_backend);
         if exclusive_stream_released {
             self.clear_active_stream();
             previous_stream_running = false;
@@ -390,27 +395,23 @@ impl AudioOutputStream {
                 Arc::clone(&self.input_bridge),
             )?;
 
-            if let Some(current) = self.stream.as_ref() {
-                current.pause()?;
-                *previous_stream_running = false;
-            }
-            if let Err(error) = stream.play() {
-                if let Some(current) = self.stream.as_ref() {
-                    *previous_stream_running = current.play().is_ok();
-                }
-                return Err(error.into());
+            if let Err(failure) = hand_over(&mut self.active, |active| &active.stream, &stream) {
+                *previous_stream_running = failure.previous_running;
+                return Err(failure.error);
             }
 
-            self.stream = Some(stream);
-            self.params = Some(params);
-            self.active_device = Some(device);
-            self.active_device_name = Some(device_name);
-            self.active_backend = Some(request.backend);
-            self.active_config = Some(OutputStreamConfig {
+            self.active = Some(ActiveOutput {
+                stream,
+                params,
+                device,
+                device_name: Some(device_name.clone()),
                 backend: request.backend,
-                device_name: self.active_device_name.clone(),
-                sample_rate: self.sample_rate(),
-                buffer_size: request.buffer_size,
+                config: OutputStreamConfig {
+                    backend: request.backend,
+                    device_name: Some(device_name),
+                    sample_rate: Some(params.sample_rate),
+                    buffer_size: request.buffer_size,
+                },
             });
             Ok(())
         })();
@@ -418,12 +419,7 @@ impl AudioOutputStream {
     }
 
     fn clear_active_stream(&mut self) {
-        self.stream = None;
-        self.params = None;
-        self.active_device = None;
-        self.active_device_name = None;
-        self.active_backend = None;
-        self.active_config = None;
+        self.active = None;
     }
 
     /// Internal: build a cpal stream around an existing engine slot.
@@ -484,11 +480,11 @@ impl AudioOutputStream {
 
     /// Start (or resume) audio playback.
     pub fn play(&self) -> Result<(), AudioStreamError> {
-        let stream = self
-            .stream
+        let active = self
+            .active
             .as_ref()
             .ok_or(AudioStreamError::NoActiveStream)?;
-        match stream.play().map_err(AudioStreamError::from) {
+        match active.stream.play().map_err(AudioStreamError::from) {
             Ok(()) => {
                 self.event_reporter.report(AudioStreamEvent::Running);
                 Ok(())
@@ -506,31 +502,34 @@ impl AudioOutputStream {
     /// Not all backends support pausing at the hardware level; this may
     /// silently do nothing on some platforms.
     pub fn pause(&self) -> Result<(), AudioStreamError> {
-        self.stream
+        self.active
             .as_ref()
             .ok_or(AudioStreamError::NoActiveStream)?
+            .stream
             .pause()?;
         Ok(())
     }
 
     /// Return the negotiated stream parameters.
     pub fn params(&self) -> Option<StreamParams> {
-        self.params
+        self.active.as_ref().map(|active| active.params)
     }
 
     /// Return the sample rate negotiated with the device.
     pub fn sample_rate(&self) -> Option<u32> {
-        self.params.map(|params| params.sample_rate)
+        self.params().map(|params| params.sample_rate)
     }
 
     /// Return the channel count negotiated with the device.
     pub fn channels(&self) -> Option<usize> {
-        self.params.map(|params| params.channels)
+        self.params().map(|params| params.channels)
     }
 
     /// The concrete device currently driving the callback.
     pub fn active_device_name(&self) -> Option<&str> {
-        self.active_device_name.as_deref()
+        self.active
+            .as_ref()
+            .and_then(|active| active.device_name.as_deref())
     }
 
     /// Clone the concrete device which owns the active output stream.
@@ -539,16 +538,16 @@ impl AudioOutputStream {
     /// the same CPAL device object. Re-enumerating a matching driver name can
     /// create an independent driver state which cannot join the live stream.
     pub fn active_device(&self) -> Option<cpal::Device> {
-        self.active_device.clone()
+        self.active.as_ref().map(|active| active.device.clone())
     }
 
     /// Backend currently driving the output callback.
     pub fn active_backend(&self) -> Option<AudioBackend> {
-        self.active_backend
+        self.active.as_ref().map(|active| active.backend)
     }
 
     pub fn is_running(&self) -> bool {
-        self.stream.is_some()
+        self.active.is_some()
     }
 
     /// Return the next lifecycle event without blocking the UI thread.

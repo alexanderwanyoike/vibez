@@ -252,7 +252,9 @@ impl App {
             buffer_size,
         )
         .unwrap_or_else(|| {
-            self.state.audio_settings = previous;
+            self.state
+                .audio_settings
+                .restore_after_rejected_switch(previous);
             Task::none()
         })
     }

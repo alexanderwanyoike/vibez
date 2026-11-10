@@ -254,6 +254,19 @@ fn sync_pad(
 
 pub const DEVICE_CHAIN_FULL: &str = "This channel's device chain is full";
 
+/// What the status bar says when `channel` is offered the instrument
+/// `device_name`, or `None` when the channel takes it. Only MIDI tracks
+/// qualify, because the engine plays an audio track's instrument in place
+/// of its clips, and buses and the master receive no notes.
+pub fn instrument_refusal(channel: Option<&ProjectTrack>, device_name: &str) -> Option<String> {
+    if channel.is_some_and(|channel| channel.kind.is_midi()) {
+        return None;
+    }
+    Some(format!(
+        "{device_name} is an instrument; only MIDI tracks take instruments"
+    ))
+}
+
 #[derive(Default)]
 pub struct DevicesCtx<'a> {
     pub sample_rate: u32,
@@ -430,8 +443,12 @@ impl DevicesState {
                 }
             }
             DevicesMsg::SetTrackInstrument(track_id, instrument_kind) => {
-                if track_id.is_master() || buses.iter().any(|b| b.id == track_id) {
-                    // The master and buses host effects only.
+                if let Some(refusal) = instrument_refusal(
+                    find_track_mut(tracks, master, buses, track_id).as_deref(),
+                    instrument_kind.name(),
+                ) {
+                    self.context_menu = None;
+                    action.status = Some(refusal);
                     return action;
                 }
                 let instrument_params =
@@ -1100,6 +1117,53 @@ mod tests {
             },
         );
         assert!(devices.context_menu.is_none());
+    }
+
+    #[test]
+    fn channels_that_play_no_notes_refuse_a_built_in_instrument_and_say_why() {
+        let audio_track = ProjectTrack::new(TrackId::new(), "Audio 1".to_string(), 0);
+        let bus = ProjectTrack::new(TrackId::new(), "Return A".to_string(), 0);
+        for target in [audio_track.id, bus.id, TrackId::MASTER] {
+            let mut tracks = vec![audio_track.clone()];
+            let mut master = crate::state::new_master_track();
+            let mut buses = vec![bus.clone()];
+            let mut devices = DevicesState::default();
+            let mut engine = RecordingEngine::default();
+            devices.update(
+                DevicesMsg::ShowContextMenu {
+                    x: 0.0,
+                    y: 0.0,
+                    track_id: target,
+                },
+                &mut engine,
+                &mut tracks,
+                &mut master,
+                &mut buses,
+                DevicesCtx::default(),
+            );
+            assert!(devices.context_menu.is_some());
+            let action = devices.update(
+                DevicesMsg::SetTrackInstrument(target, InstrumentKind::Sampler),
+                &mut engine,
+                &mut tracks,
+                &mut master,
+                &mut buses,
+                DevicesCtx {
+                    sample_rate: 44_100,
+                    ..Default::default()
+                },
+            );
+            for channel in tracks.iter().chain(&buses).chain([&master]) {
+                assert!(!channel.has_instrument);
+                assert_eq!(channel.instrument_kind, None);
+            }
+            assert!(engine.0.is_empty());
+            assert!(devices.context_menu.is_none());
+            assert_eq!(
+                action.status.as_deref(),
+                Some("Sampler is an instrument; only MIDI tracks take instruments")
+            );
+        }
     }
 
     #[test]

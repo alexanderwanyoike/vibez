@@ -1,7 +1,7 @@
 name: CI
 
 # Nothing under these paths is compiled, and no check is required to merge,
-# so a docs or site only change skips the build instead of leaving it pending.
+# so a change that only touches them skips the build instead of leaving it pending.
 on:
   push:
     branches: [main, dev, 'codex/epic-*']
@@ -9,12 +9,14 @@ on:
       - 'site/**'
       - 'docs/**'
       - '**.md'
+      - '.github/ISSUE_TEMPLATE/**'
   pull_request:
     branches: [main, dev, 'feature/**', 'codex/epic-*']
     paths-ignore:
       - 'site/**'
       - 'docs/**'
       - '**.md'
+      - '.github/ISSUE_TEMPLATE/**'
 
 env:
   CARGO_TERM_COLOR: always
@@ -58,7 +60,7 @@ jobs:
       - run: cargo test --workspace
 
   clippy:
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' || github.head_ref == 'dev' || github.head_ref == 'main'
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev'
     name: Clippy
     runs-on: ubuntu-latest
     steps:
@@ -77,7 +79,7 @@ jobs:
       - run: cargo clippy -p vibez-plugin-host -- -D warnings
 
   fmt:
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' || github.head_ref == 'dev' || github.head_ref == 'main'
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev'
     name: Format
     runs-on: ubuntu-latest
     steps:
