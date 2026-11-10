@@ -1103,6 +1103,39 @@ mod tests {
     }
 
     #[test]
+    fn channels_that_play_no_notes_refuse_a_built_in_instrument_and_say_why() {
+        let audio_track = ProjectTrack::new(TrackId::new(), "Audio 1".to_string(), 0);
+        let bus = ProjectTrack::new(TrackId::new(), "Return A".to_string(), 0);
+        for target in [audio_track.id, bus.id, TrackId::MASTER] {
+            let mut tracks = vec![audio_track.clone()];
+            let mut master = crate::state::new_master_track();
+            let mut buses = vec![bus.clone()];
+            let mut devices = DevicesState::default();
+            let mut engine = RecordingEngine::default();
+            let action = devices.update(
+                DevicesMsg::SetTrackInstrument(target, InstrumentKind::Sampler),
+                &mut engine,
+                &mut tracks,
+                &mut master,
+                &mut buses,
+                DevicesCtx {
+                    sample_rate: 44_100,
+                    ..Default::default()
+                },
+            );
+            for channel in tracks.iter().chain(&buses).chain([&master]) {
+                assert!(!channel.has_instrument);
+                assert_eq!(channel.instrument_kind, None);
+            }
+            assert!(engine.0.is_empty());
+            assert_eq!(
+                action.status.as_deref(),
+                Some("Sampler is an instrument; only MIDI tracks take instruments")
+            );
+        }
+    }
+
+    #[test]
     fn dirty_classification() {
         assert!(DevicesMsg::AddEffect(TrackId::new(), EffectType::Gain).marks_dirty());
         assert!(!DevicesMsg::DismissContextMenu.marks_dirty());
