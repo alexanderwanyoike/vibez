@@ -145,6 +145,17 @@ impl AudioSettingsState {
             .clone_from(&preferences.output_name);
     }
 
+    /// Return to the choices held before a rejected driver switch. The active
+    /// output stays as the stream last reported it, because the rejected
+    /// switch can end the output that `previous` remembers as active.
+    pub fn restore_after_rejected_switch(&mut self, previous: Self) {
+        let active_backend = self.active_backend;
+        let active_output_name = self.active_output_name.take();
+        *self = previous;
+        self.active_backend = active_backend;
+        self.active_output_name = active_output_name;
+    }
+
     pub fn output_choices(&self) -> Vec<AudioDeviceChoice> {
         device_choices(
             self.usable_output_devices(),
@@ -440,6 +451,25 @@ mod tests {
                 buffer_size_range: Some((128, 1024)),
             }],
         }
+    }
+
+    #[test]
+    fn rejected_switch_that_ended_the_output_does_not_restore_it_as_active() {
+        let mut state = AudioSettingsState {
+            active_backend: Some(AudioBackend::System),
+            active_output_name: Some("Speakers".into()),
+            ..Default::default()
+        };
+        let previous = state.clone();
+        state.backend = AudioBackend::Asio;
+        state.active_backend = None;
+        state.active_output_name = None;
+
+        state.restore_after_rejected_switch(previous);
+
+        assert_eq!(state.backend, AudioBackend::System);
+        assert_eq!(state.active_backend, None);
+        assert_eq!(state.active_output_name, None);
     }
 
     #[test]
