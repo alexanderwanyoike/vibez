@@ -145,9 +145,15 @@ impl AudioSettingsState {
             .clone_from(&preferences.output_name);
     }
 
-    /// Return to the choices held before a rejected driver switch.
+    /// Return to the choices held before a rejected driver switch. The active
+    /// output stays as the stream last reported it, because the rejected
+    /// switch can end the output that `previous` remembers as active.
     pub fn restore_after_rejected_switch(&mut self, previous: Self) {
+        let active_backend = self.active_backend;
+        let active_output_name = self.active_output_name.take();
         *self = previous;
+        self.active_backend = active_backend;
+        self.active_output_name = active_output_name;
     }
 
     pub fn output_choices(&self) -> Vec<AudioDeviceChoice> {
