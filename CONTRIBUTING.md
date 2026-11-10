@@ -34,10 +34,10 @@ feature PRs on all three platforms.
 
 ## CI scope
 
-Feature PRs and prototype epics run workspace tests on Linux, macOS and Windows,
-plus Clippy and Format on Linux so lint and format failures surface before a
-feature lands on `dev`. The `codex/epic-*` pattern includes future epics without
-editing the workflow. The four-runner Check job runs only for `dev`/`main` pushes
+Feature PRs and prototype epics run workspace tests on Linux, macOS and Windows.
+Every pull request also runs Clippy and Format on Linux, so lint and format
+failures surface before a feature lands on `dev`. The `codex/epic-*` pattern
+includes future epics without editing the workflow. The four-runner Check job runs only for `dev`/`main` pushes
 and promotion PRs from those branches, where Clippy and Format run as well.
 Application/package builds and Windows executable-resource
 validation run only on version-tag releases. Manual release dispatch is removed
