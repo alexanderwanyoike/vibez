@@ -1129,6 +1129,19 @@ mod tests {
             let mut buses = vec![bus.clone()];
             let mut devices = DevicesState::default();
             let mut engine = RecordingEngine::default();
+            devices.update(
+                DevicesMsg::ShowContextMenu {
+                    x: 0.0,
+                    y: 0.0,
+                    track_id: target,
+                },
+                &mut engine,
+                &mut tracks,
+                &mut master,
+                &mut buses,
+                DevicesCtx::default(),
+            );
+            assert!(devices.context_menu.is_some());
             let action = devices.update(
                 DevicesMsg::SetTrackInstrument(target, InstrumentKind::Sampler),
                 &mut engine,
@@ -1145,6 +1158,7 @@ mod tests {
                 assert_eq!(channel.instrument_kind, None);
             }
             assert!(engine.0.is_empty());
+            assert!(devices.context_menu.is_none());
             assert_eq!(
                 action.status.as_deref(),
                 Some("Sampler is an instrument; only MIDI tracks take instruments")
