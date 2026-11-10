@@ -62,7 +62,12 @@ fn replacement_takes_over_from_a_live_stream() {
     let replacement = FakeStream::default();
     let mut previous_stream_running = true;
 
-    let result = hand_over(&mut outgoing, &replacement, &mut previous_stream_running);
+    let result = hand_over(
+        &mut outgoing,
+        |stream| stream,
+        &replacement,
+        &mut previous_stream_running,
+    );
 
     assert!(result.is_ok(), "{result:?}");
     assert!(replacement.playing.get());
@@ -76,7 +81,12 @@ fn live_stream_resumes_when_the_replacement_cannot_start() {
     let replacement = FakeStream::refusing_to_play();
     let mut previous_stream_running = true;
 
-    let result = hand_over(&mut outgoing, &replacement, &mut previous_stream_running);
+    let result = hand_over(
+        &mut outgoing,
+        |stream| stream,
+        &replacement,
+        &mut previous_stream_running,
+    );
 
     assert!(matches!(result, Err(AudioStreamError::StreamOpen(_))));
     assert!(outgoing.expect("the resumed stream is kept").playing.get());
@@ -85,11 +95,16 @@ fn live_stream_resumes_when_the_replacement_cannot_start() {
 
 #[test]
 fn replacement_starts_when_nothing_was_playing() {
-    let mut outgoing = None;
+    let mut outgoing: Option<FakeStream> = None;
     let replacement = FakeStream::default();
     let mut previous_stream_running = false;
 
-    let result = hand_over(&mut outgoing, &replacement, &mut previous_stream_running);
+    let result = hand_over(
+        &mut outgoing,
+        |stream| stream,
+        &replacement,
+        &mut previous_stream_running,
+    );
 
     assert!(result.is_ok(), "{result:?}");
     assert!(replacement.playing.get());
@@ -102,7 +117,12 @@ fn dead_outgoing_stream_does_not_block_the_replacement() {
     let replacement = FakeStream::default();
     let mut previous_stream_running = true;
 
-    let result = hand_over(&mut outgoing, &replacement, &mut previous_stream_running);
+    let result = hand_over(
+        &mut outgoing,
+        |stream| stream,
+        &replacement,
+        &mut previous_stream_running,
+    );
 
     assert!(result.is_ok(), "{result:?}");
     assert!(replacement.playing.get());
@@ -116,7 +136,12 @@ fn dead_outgoing_stream_is_not_reported_running_when_the_replacement_cannot_star
     let replacement = FakeStream::refusing_to_play();
     let mut previous_stream_running = true;
 
-    let result = hand_over(&mut outgoing, &replacement, &mut previous_stream_running);
+    let result = hand_over(
+        &mut outgoing,
+        |stream| stream,
+        &replacement,
+        &mut previous_stream_running,
+    );
 
     assert!(
         matches!(result, Err(AudioStreamError::StreamOpen(_))),
