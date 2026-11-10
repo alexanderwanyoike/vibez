@@ -256,8 +256,8 @@ pub const DEVICE_CHAIN_FULL: &str = "This channel's device chain is full";
 
 /// What the status bar says when `channel` is offered the instrument
 /// `device_name`, or `None` when the channel takes it. Only MIDI tracks
-/// qualify: the engine plays an audio track's instrument in place of its
-/// clips, and buses and the master receive no notes.
+/// qualify, because the engine plays an audio track's instrument in place
+/// of its clips, and buses and the master receive no notes.
 pub fn instrument_refusal(channel: Option<&ProjectTrack>, device_name: &str) -> Option<String> {
     if channel.is_some_and(|channel| channel.kind.is_midi()) {
         return None;
