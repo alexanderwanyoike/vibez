@@ -395,12 +395,10 @@ impl AudioOutputStream {
                 Arc::clone(&self.input_bridge),
             )?;
 
-            hand_over(
-                &mut self.active,
-                |active| &active.stream,
-                &stream,
-                previous_stream_running,
-            )?;
+            if let Err(failure) = hand_over(&mut self.active, |active| &active.stream, &stream) {
+                *previous_stream_running = failure.previous_running;
+                return Err(failure.error);
+            }
 
             self.active = Some(ActiveOutput {
                 stream,

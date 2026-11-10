@@ -58,95 +58,61 @@ impl StreamTrait for FakeStream {
 
 #[test]
 fn replacement_takes_over_from_a_live_stream() {
-    let mut outgoing = Some(FakeStream::playing());
+    let mut previous = Some(FakeStream::playing());
     let replacement = FakeStream::default();
-    let mut previous_stream_running = true;
 
-    let result = hand_over(
-        &mut outgoing,
-        |stream| stream,
-        &replacement,
-        &mut previous_stream_running,
-    );
+    let result = hand_over(&mut previous, |stream| stream, &replacement);
 
     assert!(result.is_ok(), "{result:?}");
     assert!(replacement.playing.get());
-    assert!(!outgoing.expect("a paused stream is kept").playing.get());
-    assert!(!previous_stream_running);
+    assert!(!previous.expect("a paused stream is kept").playing.get());
 }
 
 #[test]
 fn live_stream_resumes_when_the_replacement_cannot_start() {
-    let mut outgoing = Some(FakeStream::playing());
+    let mut previous = Some(FakeStream::playing());
     let replacement = FakeStream::refusing_to_play();
-    let mut previous_stream_running = true;
 
-    let result = hand_over(
-        &mut outgoing,
-        |stream| stream,
-        &replacement,
-        &mut previous_stream_running,
-    );
+    let failure = hand_over(&mut previous, |stream| stream, &replacement)
+        .expect_err("the replacement refuses to play");
 
-    assert!(matches!(result, Err(AudioStreamError::StreamOpen(_))));
-    assert!(outgoing.expect("the resumed stream is kept").playing.get());
-    assert!(previous_stream_running);
+    assert!(matches!(failure.error, AudioStreamError::StreamOpen(_)));
+    assert!(failure.previous_running);
+    assert!(previous.expect("the resumed stream is kept").playing.get());
 }
 
 #[test]
 fn replacement_starts_when_nothing_was_playing() {
-    let mut outgoing: Option<FakeStream> = None;
+    let mut previous: Option<FakeStream> = None;
     let replacement = FakeStream::default();
-    let mut previous_stream_running = false;
 
-    let result = hand_over(
-        &mut outgoing,
-        |stream| stream,
-        &replacement,
-        &mut previous_stream_running,
-    );
+    let result = hand_over(&mut previous, |stream| stream, &replacement);
 
     assert!(result.is_ok(), "{result:?}");
     assert!(replacement.playing.get());
-    assert!(!previous_stream_running);
 }
 
 #[test]
-fn dead_outgoing_stream_does_not_block_the_replacement() {
-    let mut outgoing = Some(FakeStream::dead());
+fn dead_previous_stream_does_not_block_the_replacement() {
+    let mut previous = Some(FakeStream::dead());
     let replacement = FakeStream::default();
-    let mut previous_stream_running = true;
 
-    let result = hand_over(
-        &mut outgoing,
-        |stream| stream,
-        &replacement,
-        &mut previous_stream_running,
-    );
+    let result = hand_over(&mut previous, |stream| stream, &replacement);
 
     assert!(result.is_ok(), "{result:?}");
     assert!(replacement.playing.get());
-    assert!(outgoing.is_none(), "a dead stream is dropped");
-    assert!(!previous_stream_running);
+    assert!(previous.is_none(), "a dead stream is dropped");
 }
 
 #[test]
-fn dead_outgoing_stream_is_not_reported_running_when_the_replacement_cannot_start() {
-    let mut outgoing = Some(FakeStream::dead());
+fn dead_previous_stream_is_not_reported_running_when_the_replacement_cannot_start() {
+    let mut previous = Some(FakeStream::dead());
     let replacement = FakeStream::refusing_to_play();
-    let mut previous_stream_running = true;
 
-    let result = hand_over(
-        &mut outgoing,
-        |stream| stream,
-        &replacement,
-        &mut previous_stream_running,
-    );
+    let failure = hand_over(&mut previous, |stream| stream, &replacement)
+        .expect_err("the replacement refuses to play");
 
-    assert!(
-        matches!(result, Err(AudioStreamError::StreamOpen(_))),
-        "{result:?}"
-    );
-    assert!(outgoing.is_none(), "a dead stream is dropped");
-    assert!(!previous_stream_running);
+    assert!(matches!(failure.error, AudioStreamError::StreamOpen(_)));
+    assert!(!failure.previous_running);
+    assert!(previous.is_none(), "a dead stream is dropped");
 }
