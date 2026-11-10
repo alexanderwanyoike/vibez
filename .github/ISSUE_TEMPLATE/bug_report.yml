@@ -1,0 +1,66 @@
+name: Bug report
+description: Something in Vibez is broken or behaves unexpectedly
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. One problem per issue, please. If you have several, open one issue for each so they can be fixed and closed separately.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe what you saw and what you expected to happen instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The exact clicks and keys, starting from a new project if you can.
+      placeholder: |
+        1. Add an audio track
+        2. Drag a sample onto it
+        3. Press Space
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Vibez version
+      description: Shown under File, About vibez, or in the name of the file you installed.
+      placeholder: v0.6.5
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS
+        - Linux
+    validations:
+      required: true
+  - type: input
+    id: os-version
+    attributes:
+      label: Operating system version
+      placeholder: Windows 10 22H2, macOS 15.1, Ubuntu 24.04
+  - type: input
+    id: audio
+    attributes:
+      label: Audio setup
+      description: For sound, device or driver problems. The backend and output device chosen in the audio settings, plus your interface if you use one.
+      placeholder: ASIO, Focusrite Scarlett 2i2, 48 kHz, 256 samples
+  - type: textarea
+    id: logs
+    attributes:
+      label: Console output
+      description: Anything Vibez printed to the terminal or console. It is formatted as code automatically.
+      render: text
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Screenshots, a screen recording, or a project file that shows the problem. Drag files into this box to attach them.
