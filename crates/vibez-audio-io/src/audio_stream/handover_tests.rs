@@ -10,12 +10,22 @@ use std::cell::Cell;
 struct FakeStream {
     playing: Cell<bool>,
     refuses_to_play: bool,
+    dead: bool,
 }
 
 impl FakeStream {
     fn playing() -> Self {
         Self {
             playing: Cell::new(true),
+            ..Self::default()
+        }
+    }
+
+    /// A stream whose backend thread has exited, as WASAPI reports after its
+    /// device goes away.
+    fn dead() -> Self {
+        Self {
+            dead: true,
             ..Self::default()
         }
     }
@@ -30,7 +40,7 @@ impl FakeStream {
 
 impl StreamTrait for FakeStream {
     fn play(&self) -> Result<(), PlayStreamError> {
-        if self.refuses_to_play {
+        if self.refuses_to_play || self.dead {
             return Err(PlayStreamError::DeviceNotAvailable);
         }
         self.playing.set(true);
@@ -38,6 +48,9 @@ impl StreamTrait for FakeStream {
     }
 
     fn pause(&self) -> Result<(), PauseStreamError> {
+        if self.dead {
+            return Err(PauseStreamError::DeviceNotAvailable);
+        }
         self.playing.set(false);
         Ok(())
     }
@@ -80,5 +93,35 @@ fn replacement_starts_when_nothing_was_playing() {
 
     assert!(result.is_ok(), "{result:?}");
     assert!(replacement.playing.get());
+    assert!(!previous_stream_running);
+}
+
+#[test]
+fn dead_outgoing_stream_does_not_block_the_replacement() {
+    let mut outgoing = Some(FakeStream::dead());
+    let replacement = FakeStream::default();
+    let mut previous_stream_running = true;
+
+    let result = hand_over(&mut outgoing, &replacement, &mut previous_stream_running);
+
+    assert!(result.is_ok(), "{result:?}");
+    assert!(replacement.playing.get());
+    assert!(outgoing.is_none(), "a dead stream is dropped");
+    assert!(!previous_stream_running);
+}
+
+#[test]
+fn dead_outgoing_stream_is_not_reported_running_when_the_replacement_cannot_start() {
+    let mut outgoing = Some(FakeStream::dead());
+    let replacement = FakeStream::refusing_to_play();
+    let mut previous_stream_running = true;
+
+    let result = hand_over(&mut outgoing, &replacement, &mut previous_stream_running);
+
+    assert!(
+        matches!(result, Err(AudioStreamError::StreamOpen(_))),
+        "{result:?}"
+    );
+    assert!(outgoing.is_none(), "a dead stream is dropped");
     assert!(!previous_stream_running);
 }
