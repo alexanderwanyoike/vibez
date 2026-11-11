@@ -1278,15 +1278,34 @@ fn a_sampler_card_hover_says_the_drop_loads_into_it() {
 }
 
 #[test]
-fn a_drum_rack_card_off_its_pads_asks_for_a_pad() {
+fn a_drum_rack_card_off_its_pads_names_the_selected_pad() {
     let mut b = dragging();
     let track_id = TrackId::new();
-    let action = b.update(BrowserMsg::DragHoverDrumRack { track_id });
+    let action = b.update(BrowserMsg::DragHoverDrumRack {
+        track_id,
+        pad_index: 3,
+    });
     assert_eq!(
         b.drag_target,
-        Some(crate::state::BrowserDropTarget::DrumRack { track_id })
+        Some(crate::state::BrowserDropTarget::DrumRack {
+            track_id,
+            pad_index: 3
+        })
     );
-    assert_eq!(action.status.as_deref(), Some("Drop on a Drum Rack pad"));
+    assert_eq!(
+        action.status.as_deref(),
+        Some("Load into selected Drum Rack pad 4")
+    );
+}
+
+#[test]
+fn a_drum_rack_pad_hover_says_the_drop_loads_into_it() {
+    let mut b = dragging();
+    let action = b.update(BrowserMsg::DragHoverDrumRackPad {
+        track_id: TrackId::new(),
+        pad_index: 2,
+    });
+    assert_eq!(action.status.as_deref(), Some("Load into Drum Rack pad 3"));
 }
 
 #[test]
@@ -1302,7 +1321,10 @@ fn an_instrument_card_under_the_cursor_outranks_the_panel_behind_it() {
             track_id,
             pad_index: 2,
         },
-        BrowserMsg::DragHoverDrumRack { track_id },
+        BrowserMsg::DragHoverDrumRack {
+            track_id,
+            pad_index: 0,
+        },
     ] {
         let mut b = dragging();
         b.update(card);
@@ -1311,12 +1333,20 @@ fn an_instrument_card_under_the_cursor_outranks_the_panel_behind_it() {
         assert_eq!(b.drag_target, under_cursor);
         assert_eq!(action.status, None);
     }
+}
+
+#[test]
+fn a_pad_under_the_cursor_outranks_the_rack_card_around_it() {
     let mut b = dragging();
+    let track_id = TrackId::new();
     b.update(BrowserMsg::DragHoverDrumRackPad {
         track_id,
         pad_index: 2,
     });
-    b.update(BrowserMsg::DragHoverDrumRack { track_id });
+    let action = b.update(BrowserMsg::DragHoverDrumRack {
+        track_id,
+        pad_index: 0,
+    });
     assert_eq!(
         b.drag_target,
         Some(crate::state::BrowserDropTarget::DrumRackPad {
@@ -1324,6 +1354,83 @@ fn an_instrument_card_under_the_cursor_outranks_the_panel_behind_it() {
             pad_index: 2
         })
     );
+    assert_eq!(action.status, None);
+}
+
+#[test]
+fn clearing_the_target_puts_the_status_back_to_the_drag_itself() {
+    let mut b = dragging();
+    b.drag_label = Some("kick.wav".into());
+    b.update(BrowserMsg::DragHoverDevicePanel {
+        track_id: TrackId::new(),
+        drop: DevicePanelDrop::ReplaceWithSampler {
+            instrument: "Surge XT".into(),
+        },
+    });
+    let action = b.update(BrowserMsg::ClearDragTarget);
+    assert!(b.drag_target.is_none());
+    assert!(action.status.unwrap().starts_with("Moving kick.wav"));
+}
+
+#[test]
+fn leaving_a_target_clears_only_that_target() {
+    let mut b = dragging();
+    b.drag_label = Some("kick.wav".into());
+    let track_id = TrackId::new();
+    b.update(BrowserMsg::DragHoverDrumRackPad {
+        track_id,
+        pad_index: 2,
+    });
+    let pad = |pad_index| crate::state::BrowserDropTarget::DrumRackPad {
+        track_id,
+        pad_index,
+    };
+    let action = b.update(BrowserMsg::LeaveDragTarget(pad(1)));
+    assert_eq!(b.drag_target, Some(pad(2)));
+    assert_eq!(action.status, None);
+    let action = b.update(BrowserMsg::LeaveDragTarget(pad(2)));
+    assert!(b.drag_target.is_none());
+    assert!(action.status.unwrap().starts_with("Moving kick.wav"));
+}
+
+#[test]
+fn the_status_and_the_ghost_read_each_target_from_one_place() {
+    let track_id = TrackId::new();
+    for hover in [
+        BrowserMsg::DragHoverTrack {
+            track_id,
+            beat: 4.0,
+            compatible: true,
+        },
+        BrowserMsg::DragHoverEmptyArrangement { beat: 2.0 },
+        BrowserMsg::DragHoverSampler { track_id },
+        BrowserMsg::DragHoverDrumRackPad {
+            track_id,
+            pad_index: 1,
+        },
+        BrowserMsg::DragHoverDrumRack {
+            track_id,
+            pad_index: 1,
+        },
+        BrowserMsg::DragHoverDevicePanel {
+            track_id,
+            drop: DevicePanelDrop::AddSampler,
+        },
+    ] {
+        let mut b = dragging();
+        let action = b.update(hover);
+        let target = b.drag_target.clone().unwrap();
+        assert!(!target.status().is_empty());
+        assert_eq!(action.status, Some(target.status()));
+        assert!(target.accepts_drop());
+    }
+    let mut b = dragging();
+    b.update(BrowserMsg::DragHoverTrack {
+        track_id,
+        beat: 4.0,
+        compatible: false,
+    });
+    assert!(!b.drag_target.unwrap().accepts_drop());
 }
 
 #[test]

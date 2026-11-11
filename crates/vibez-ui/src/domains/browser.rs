@@ -57,12 +57,15 @@ pub enum BrowserMsg {
     },
     DragHoverDrumRack {
         track_id: TrackId,
+        pad_index: usize,
     },
     DragHoverDevicePanel {
         track_id: TrackId,
         drop: DevicePanelDrop,
     },
     ClearDragTarget,
+    /// The cursor left `target`; another target it entered meanwhile stays.
+    LeaveDragTarget(crate::state::BrowserDropTarget),
     CancelDrag(String),
     EndDragSample,
     LocalRootWatchEvent(LocalRootWatchEvent),
@@ -100,6 +103,18 @@ pub struct BrowserAction {
     pub scan_root: Option<(PathBuf, u64)>,
 }
 
+impl crate::state::BrowserDropTarget {
+    /// What a release here does, as the status bar says it.
+    pub fn status(&self) -> String {
+        String::new()
+    }
+
+    /// Whether a release here takes the audio.
+    pub fn accepts_drop(&self) -> bool {
+        true
+    }
+}
+
 impl BrowserState {
     fn hovers_drum_rack_pad(&self, track_id: TrackId) -> bool {
         matches!(
@@ -115,7 +130,7 @@ impl BrowserState {
                 self.drag_target,
                 Some(
                     crate::state::BrowserDropTarget::Sampler { track_id: card }
-                    | crate::state::BrowserDropTarget::DrumRack { track_id: card }
+                    | crate::state::BrowserDropTarget::DrumRack { track_id: card, .. }
                 ) if card == track_id
             )
     }
@@ -245,11 +260,17 @@ impl BrowserState {
                 });
                 action.status = Some(format!("Assign Drum Rack pad {}", pad_index + 1));
             }
-            BrowserMsg::DragHoverDrumRack { track_id } => {
+            BrowserMsg::DragHoverDrumRack {
+                track_id,
+                pad_index,
+            } => {
                 if self.drag_source.is_none() || self.hovers_drum_rack_pad(track_id) {
                     return action;
                 }
-                self.drag_target = Some(crate::state::BrowserDropTarget::DrumRack { track_id });
+                self.drag_target = Some(crate::state::BrowserDropTarget::DrumRack {
+                    track_id,
+                    pad_index,
+                });
                 action.status = Some("Drop on a Drum Rack pad".into());
             }
             BrowserMsg::DragHoverDevicePanel { track_id, drop } => {
@@ -262,6 +283,7 @@ impl BrowserState {
                 self.drag_target =
                     Some(crate::state::BrowserDropTarget::DevicePanel { track_id, drop });
             }
+            BrowserMsg::LeaveDragTarget(_) => {}
             BrowserMsg::ClearDragTarget => {
                 self.drag_target = None;
             }

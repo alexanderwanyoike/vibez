@@ -102,9 +102,11 @@ pub enum BrowserDropTarget {
         track_id: TrackId,
         pad_index: usize,
     },
-    /// A Drum Rack card away from its pads, where a drop loads nothing.
+    /// A Drum Rack card away from its pads, where a drop loads the selected
+    /// pad.
     DrumRack {
         track_id: TrackId,
+        pad_index: usize,
     },
     /// A device panel outside any instrument card, and what a drop there does.
     DevicePanel {
