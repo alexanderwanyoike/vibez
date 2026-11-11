@@ -49,6 +49,7 @@ impl FittedLabel {
                 .size(self.size)
                 .font(self.font)
                 .color(self.color)
+                .shaping(text::Shaping::Advanced)
                 .wrapping(text::Wrapping::None);
             if cut && self.whole_on_hover {
                 with_hint(label, self.content.clone())
