@@ -347,12 +347,11 @@ impl App {
             .and_then(|track_id| self.state.find_track(track_id))?;
         match track.instrument_kind {
             Some(InstrumentKind::Sampler) => Some(BrowserImportTarget::Sampler(track.id)),
-            Some(InstrumentKind::DrumRack) => Some(BrowserImportTarget::DrumRackPad {
-                track_id: track.id,
-                pad_index: track
-                    .selected_drum_pad
-                    .min(track.drum_rack_pads.len().saturating_sub(1)),
-            }),
+            Some(InstrumentKind::DrumRack) => crate::domains::sampler::selected_drum_pad(track)
+                .map(|pad_index| BrowserImportTarget::DrumRackPad {
+                    track_id: track.id,
+                    pad_index,
+                }),
             _ => None,
         }
     }
