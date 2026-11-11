@@ -25,13 +25,16 @@ struct Widths {
 
 type WidthsKey = (String, u32, Font);
 
+/// A text's key with the width it was fitted to.
+type MiddleFitKey = (WidthsKey, u32);
+
 thread_local! {
     /// Shaping text is far too slow to repeat for every clip on every
     /// frame, and a song repeats a few names many times.
     static WIDTHS: RefCell<HashMap<WidthsKey, Rc<Widths>>> = RefCell::new(HashMap::new());
 
     /// Browser rows fit their names again on every frame.
-    static MIDDLE_FITS: RefCell<HashMap<(String, u32, Font, u32), String>> =
+    static MIDDLE_FITS: RefCell<HashMap<MiddleFitKey, String>> =
         RefCell::new(HashMap::new());
 }
 
@@ -91,7 +94,7 @@ pub fn fit_text(text: &str, width: f32, size: f32, font: Font, min_kept: usize) 
 /// start and its end around an ellipsis, so names that share a long prefix
 /// stay told apart.
 pub fn fit_text_middle(text: &str, width: f32, size: f32, font: Font) -> String {
-    let key = (text.to_owned(), size.to_bits(), font, width.to_bits());
+    let key = ((text.to_owned(), size.to_bits(), font), width.to_bits());
     if let Some(fitted) = MIDDLE_FITS.with(|cache| cache.borrow().get(&key).cloned()) {
         return fitted;
     }
