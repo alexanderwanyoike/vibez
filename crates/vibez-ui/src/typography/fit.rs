@@ -12,7 +12,7 @@ use crate::widgets::device_controls::text_width;
 const ELLIPSIS: char = '\u{2026}';
 /// Fewer kept letters than this read better as one run from the start
 /// than as two fragments.
-const MIN_SPLIT_KEPT: usize = 8;
+const MIN_SPLIT_KEPT: usize = 5;
 
 /// Measured widths of a text, whole and shortened to each length.
 struct Widths {
