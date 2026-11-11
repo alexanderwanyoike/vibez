@@ -392,7 +392,7 @@ impl App {
                         .color(cell_color)
                         .width(Length::Fixed(42.0))
                 ]
-                .spacing(0)
+                .spacing(4)
                 .align_y(iced::Alignment::Center)
                 .into()
             };
@@ -531,6 +531,7 @@ impl App {
                     .color(th::text_dim())
                     .width(Length::Fixed(42.0))
             ]
+            .spacing(4)
             .align_y(iced::Alignment::Center)
             .into()
         };

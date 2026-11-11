@@ -247,6 +247,7 @@ impl App {
                         .color(availability_color)
                         .width(Length::Fixed(42.0))
                 ]
+                .spacing(4)
                 .align_y(iced::Alignment::Center)
                 .into()
             };
@@ -328,6 +329,7 @@ impl App {
                         .color(cell_color)
                         .width(Length::Fixed(42.0))
                 ]
+                .spacing(4)
                 .align_y(iced::Alignment::Center)
                 .into()
             };
