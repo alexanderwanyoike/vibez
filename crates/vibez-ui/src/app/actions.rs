@@ -511,12 +511,9 @@ impl App {
         msg: crate::domains::devices::DevicesMsg,
         undo_gesture: Option<crate::state::UndoGestureId>,
     ) {
-        if let crate::domains::devices::DevicesMsg::SetTrackInstrument(track_id, _)
-        | crate::domains::devices::DevicesMsg::RemoveTrackInstrument(track_id) = &msg
-        {
-            self.plugin_load_requests.cancel(PluginGuiKey::Instrument {
-                track_id: *track_id,
-            });
+        if let Some(track_id) = msg.instrument_change_track() {
+            self.plugin_load_requests
+                .cancel(PluginGuiKey::Instrument { track_id });
         }
         let routing_edit = matches!(
             msg,
