@@ -103,6 +103,10 @@ pub fn fit_text_middle(text: &str, width: f32, size: f32, font: Font) -> String 
     } else {
         let chars: Vec<char> = text.chars().collect();
         let fits = |kept: usize| text_width(&middle_shortened(&chars, kept), size, font) <= width;
+        // Widths only roughly grow with the letters kept (the switch to a
+        // split and trimmed spaces break it), so the search can stop a
+        // letter short. Every cut it settles on fits, except the bare
+        // ellipsis it falls back to.
         let (mut low, mut high) = (0, chars.len().saturating_sub(1));
         while low < high {
             let kept = (low + high).div_ceil(2);
