@@ -139,6 +139,12 @@ impl App {
         let Some(drop) = drop else {
             return panel.into();
         };
+        let left = Message::Browser(BrowserMsg::LeaveDragTarget(
+            crate::state::BrowserDropTarget::DevicePanel {
+                track_id,
+                drop: drop.clone(),
+            },
+        ));
         panel
             .on_move(move |_| {
                 Message::Browser(BrowserMsg::DragHoverDevicePanel {
@@ -146,7 +152,7 @@ impl App {
                     drop: drop.clone(),
                 })
             })
-            .on_exit(Message::Browser(BrowserMsg::ClearDragTarget))
+            .on_exit(left)
             .on_release(Message::DropSampleOnDevicePanel { track_id })
             .into()
     }

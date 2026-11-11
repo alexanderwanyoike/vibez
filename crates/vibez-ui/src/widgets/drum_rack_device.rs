@@ -742,12 +742,21 @@ impl<'a> DrumRackView<'a> {
                 ..Default::default()
             });
         let track_id = self.track_id;
+        // Hovering on every move, not only on entry, so a pad reclaims the
+        // target from the rack card whatever order one event reports them in.
         mouse_area(bezel)
-            .on_enter(Message::Browser(BrowserMsg::DragHoverDrumRackPad {
-                track_id,
-                pad_index: index,
-            }))
-            .on_exit(Message::Browser(BrowserMsg::ClearDragTarget))
+            .on_move(move |_| {
+                Message::Browser(BrowserMsg::DragHoverDrumRackPad {
+                    track_id,
+                    pad_index: index,
+                })
+            })
+            .on_exit(Message::Browser(BrowserMsg::LeaveDragTarget(
+                crate::state::BrowserDropTarget::DrumRackPad {
+                    track_id,
+                    pad_index: index,
+                },
+            )))
             // Selects the pad, or loads the sample being dragged onto it.
             .on_release(Message::DropSampleOnDrumPad {
                 track_id,

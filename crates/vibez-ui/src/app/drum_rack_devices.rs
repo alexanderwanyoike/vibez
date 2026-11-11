@@ -72,15 +72,21 @@ impl App {
         }
         // A near miss of a pad loads the selected pad, so the device panel
         // behind the card can never replace the rack.
-        let pad_index = crate::domains::sampler::selected_drum_pad(track).unwrap_or_default();
+        let card = card.on_release(Message::DropSampleOnDrumRack { track_id });
+        let Some(pad_index) = crate::domains::sampler::selected_drum_pad(track) else {
+            return card.into();
+        };
+        let target = BrowserDropTarget::DrumRack {
+            track_id,
+            pad_index,
+        };
         card.on_move(move |_| {
             Message::Browser(BrowserMsg::DragHoverDrumRack {
                 track_id,
                 pad_index,
             })
         })
-        .on_exit(Message::Browser(BrowserMsg::ClearDragTarget))
-        .on_release(Message::DropSampleOnDrumRack { track_id })
+        .on_exit(Message::Browser(BrowserMsg::LeaveDragTarget(target)))
         .into()
     }
 }
