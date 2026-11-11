@@ -301,7 +301,9 @@ impl canvas::Program<Message> for PadView<'_> {
     ) -> Vec<canvas::Geometry> {
         let size = bounds.size();
         let mut frame = canvas::Frame::new(renderer, size);
-        if state.hovered_since.is_some() && !self.firing {
+        // The pad a drop will load looks hovered even when the cursor is on
+        // the card around it.
+        if (state.hovered_since.is_some() || self.drop_target) && !self.firing {
             let face = canvas::Path::rounded_rectangle(Point::ORIGIN, size, FACE_RADIUS.into());
             frame.fill(&face, th::with_alpha(th::text(), 0.05));
         }
@@ -742,12 +744,21 @@ impl<'a> DrumRackView<'a> {
                 ..Default::default()
             });
         let track_id = self.track_id;
+        // Hovering on every move, not only on entry, so a pad reclaims the
+        // target from the rack card whatever order one event reports them in.
         mouse_area(bezel)
-            .on_enter(Message::Browser(BrowserMsg::DragHoverDrumRackPad {
-                track_id,
-                pad_index: index,
-            }))
-            .on_exit(Message::Browser(BrowserMsg::ClearDragTarget))
+            .on_move(move |_| {
+                Message::Browser(BrowserMsg::DragHoverDrumRackPad {
+                    track_id,
+                    pad_index: index,
+                })
+            })
+            .on_exit(Message::Browser(BrowserMsg::LeaveDragTarget(
+                crate::state::BrowserDropTarget::DrumRackPad {
+                    track_id,
+                    pad_index: index,
+                },
+            )))
             // Selects the pad, or loads the sample being dragged onto it.
             .on_release(Message::DropSampleOnDrumPad {
                 track_id,

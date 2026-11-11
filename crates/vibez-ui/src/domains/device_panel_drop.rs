@@ -45,6 +45,17 @@ impl DevicePanelDrop {
         Some(Self::ReplaceWithSampler { instrument })
     }
 
+    /// The status while the drag hovers the panel, before release.
+    pub fn hover_status(&self) -> String {
+        match self {
+            Self::AddSampler => "Add a Sampler with this sample".to_string(),
+            Self::ReplaceWithSampler { instrument } => {
+                format!("Replace {instrument} with Sampler")
+            }
+            Self::LoadIntoExisting => "Load into Sampler".to_string(),
+        }
+    }
+
     /// The status once the Sampler holds `sample`.
     pub fn loaded_status(&self, sample: &str) -> String {
         match self {
@@ -119,6 +130,21 @@ mod tests {
         assert_eq!(
             DevicePanelDrop::for_channel(&crate::state::new_master_track()),
             None
+        );
+    }
+
+    #[test]
+    fn the_hover_status_says_whether_the_drop_adds_or_replaces() {
+        assert_eq!(
+            DevicePanelDrop::AddSampler.hover_status(),
+            "Add a Sampler with this sample"
+        );
+        assert_eq!(
+            DevicePanelDrop::ReplaceWithSampler {
+                instrument: "Surge XT".into()
+            }
+            .hover_status(),
+            "Replace Surge XT with Sampler"
         );
     }
 

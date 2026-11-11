@@ -5,6 +5,7 @@ use iced::{Color, Element};
 use vibez_core::id::TrackId;
 use vibez_core::track::{drum_rack_pad_pitch, DRUM_RACK_BANK_COUNT, DRUM_RACK_BANK_SIZE};
 
+use crate::domains::browser::BrowserMsg;
 use crate::domains::device_params::{DeviceParams, DeviceSlot};
 use crate::message::Message;
 use crate::state::{BrowserDropTarget, UiTrack};
@@ -41,13 +42,7 @@ impl App {
         });
         let banks_firing: [bool; DRUM_RACK_BANK_COUNT] =
             std::array::from_fn(|bank| view.drum_pad_bank_is_flashing(track_id, bank, now));
-        let drop_target = match self.state.browser.drag_target {
-            Some(BrowserDropTarget::DrumRackPad {
-                track_id: target,
-                pad_index,
-            }) if target == track_id => Some(pad_index),
-            _ => None,
-        };
+        let drop_target = self.state.browser.drum_pad_drop_target(track_id);
         let body = iced::widget::responsive(move |size| {
             crate::widgets::drum_rack_device::DrumRackView {
                 track_id,
@@ -71,7 +66,21 @@ impl App {
         }
         // A near miss of a pad loads the selected pad, so the device panel
         // behind the card can never replace the rack.
-        card.on_release(Message::DropSampleOnDrumRack { track_id })
-            .into()
+        let card = card.on_release(Message::DropSampleOnDrumRack { track_id });
+        let Some(pad_index) = crate::domains::sampler::selected_drum_pad(track) else {
+            return card.into();
+        };
+        let target = BrowserDropTarget::DrumRack {
+            track_id,
+            pad_index,
+        };
+        card.on_move(move |_| {
+            Message::Browser(BrowserMsg::DragHoverDrumRack {
+                track_id,
+                pad_index,
+            })
+        })
+        .on_exit(Message::Browser(BrowserMsg::LeaveDragTarget(target)))
+        .into()
     }
 }

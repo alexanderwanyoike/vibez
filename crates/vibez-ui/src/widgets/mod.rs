@@ -25,6 +25,7 @@ pub mod drag;
 pub mod drag_phase;
 pub mod drive_device;
 pub mod drive_display;
+pub mod drop_highlight;
 pub mod drum_rack_device;
 pub mod echo_device;
 pub mod echo_display;

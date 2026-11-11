@@ -116,6 +116,12 @@ impl App {
             self.device_chain_row(track_id, track, track_color, size.width)
         });
 
+        let highlighted = matches!(
+            &self.state.browser.drag_target,
+            Some(crate::state::BrowserDropTarget::DevicePanel { track_id: target, .. })
+                if *target == track_id
+        );
+        let content = crate::widgets::drop_highlight::drop_highlight(content.into(), highlighted);
         // Wrap in mouse_area for right-click context menu
         let panel = mouse_area(content).on_right_press(Message::Devices(
             crate::domains::devices::DevicesMsg::ShowContextMenu {
@@ -126,15 +132,29 @@ impl App {
         ));
         // Only while dragging, so an ordinary click's release still reaches
         // whatever the shell does with it.
-        let takes_drop = self.state.browser.drag_source.is_some()
-            && crate::domains::device_panel_drop::DevicePanelDrop::for_channel(track).is_some();
-        if takes_drop {
-            panel
-                .on_release(Message::DropSampleOnDevicePanel { track_id })
-                .into()
-        } else {
-            panel.into()
-        }
+        let drop =
+            self.state.browser.drag_source.as_ref().and_then(|_| {
+                crate::domains::device_panel_drop::DevicePanelDrop::for_channel(track)
+            });
+        let Some(drop) = drop else {
+            return panel.into();
+        };
+        let left = Message::Browser(BrowserMsg::LeaveDragTarget(
+            crate::state::BrowserDropTarget::DevicePanel {
+                track_id,
+                drop: drop.clone(),
+            },
+        ));
+        panel
+            .on_move(move |_| {
+                Message::Browser(BrowserMsg::DragHoverDevicePanel {
+                    track_id,
+                    drop: drop.clone(),
+                })
+            })
+            .on_exit(left)
+            .on_release(Message::DropSampleOnDevicePanel { track_id })
+            .into()
     }
 
     /// The cards of one channel, laid out for the section's measured width.

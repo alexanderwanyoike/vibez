@@ -151,53 +151,31 @@ impl App {
         let base_layout: Element<'_, Message> = mouse_area(layout_container)
             .on_release(Message::Browser(BrowserMsg::EndDragSample))
             .into();
-        let base_layout: Element<'_, Message> = if let Some(label) =
-            self.state.browser.drag_label.as_ref()
-        {
-            let mode = match self.state.browser.audition_mode {
-                crate::state::AuditionMode::Raw => "RAW",
-                crate::state::AuditionMode::Warp => "WARP",
+        let base_layout: Element<'_, Message> =
+            if let Some(label) = self.state.browser.drag_label.as_ref() {
+                let mode = match self.state.browser.audition_mode {
+                    crate::state::AuditionMode::Raw => "RAW",
+                    crate::state::AuditionMode::Warp => "WARP",
+                };
+                let length = self
+                    .state
+                    .browser
+                    .drag_preview_beats(self.state.transport.bpm)
+                    .map(|beats| format!(" · {beats:.2} beats"))
+                    .unwrap_or_default();
+                let (target, valid) = self.state.browser.drag_ghost_label();
+                let ghost = canvas(crate::widgets::browser_drag_ghost::BrowserDragGhost {
+                    cursor: iced::Point::new(self.state.view.cursor_x, self.state.view.cursor_y),
+                    title: format!("{label} · {mode}{length}"),
+                    detail: target,
+                    valid,
+                })
+                .width(Length::Fill)
+                .height(Length::Fill);
+                stack![base_layout, ghost].into()
+            } else {
+                base_layout
             };
-            let length = self
-                .state
-                .browser
-                .drag_preview_beats(self.state.transport.bpm)
-                .map(|beats| format!(" · {beats:.2} beats"))
-                .unwrap_or_default();
-            let (target, valid) = match self.state.browser.drag_target {
-                Some(crate::state::BrowserDropTarget::ArrangementLane {
-                    beat, compatible, ..
-                }) => (
-                    if compatible {
-                        format!("AUDIO LANE · BEAT {beat:.2}")
-                    } else {
-                        "INVALID · MIDI/INSTRUMENT LANE".into()
-                    },
-                    Some(compatible),
-                ),
-                Some(crate::state::BrowserDropTarget::EmptyArrangement { beat }) => {
-                    (format!("NEW AUDIO TRACK · BEAT {beat:.2}"), Some(true))
-                }
-                Some(crate::state::BrowserDropTarget::Sampler { .. }) => {
-                    ("LOAD SAMPLER".into(), Some(true))
-                }
-                Some(crate::state::BrowserDropTarget::DrumRackPad { pad_index, .. }) => {
-                    (format!("ASSIGN DRUM PAD {}", pad_index + 1), Some(true))
-                }
-                None => ("CHOOSE A DROP TARGET".into(), None),
-            };
-            let ghost = canvas(crate::widgets::browser_drag_ghost::BrowserDragGhost {
-                cursor: iced::Point::new(self.state.view.cursor_x, self.state.view.cursor_y),
-                title: format!("{label} · {mode}{length}"),
-                detail: target,
-                valid,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill);
-            stack![base_layout, ghost].into()
-        } else {
-            base_layout
-        };
 
         // Quitting outranks every other overlay: whatever menu was open, the
         // answer to "are you about to lose work" has to be the visible one.
