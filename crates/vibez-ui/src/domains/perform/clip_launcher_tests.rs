@@ -494,6 +494,40 @@ fn clip_playhead_and_progress_share_loop_and_one_shot_boundaries() {
 }
 
 #[test]
+fn a_refresh_without_its_pending_clip_adopts_the_store_copy_of_the_playing_clip() {
+    let track = TrackId::new();
+    let id = ClipId::new();
+    let short = super::super::clip_record::empty_midi_clip(id, track, 0, "Take".into(), 4.0);
+    let longer = super::super::clip_record::empty_midi_clip(id, track, 0, "Take".into(), 8.0);
+    let store = ClipStore {
+        clips: vec![longer],
+        ..Default::default()
+    };
+    let mut editor = ClipEditor::default();
+    editor.playing.insert(track, short);
+    editor.started_at.insert(track, 0);
+
+    let adopted = editor.source_refreshed(track, 9, 4, 20, &store);
+
+    assert_eq!(adopted.map(|clip| clip.length_and_loop(4.0).0), Some(32));
+    assert_eq!(editor.playhead_samples(id, 36, 4.0), Some(20));
+}
+
+#[test]
+fn a_refresh_for_a_track_playing_nothing_changes_nothing() {
+    let track = TrackId::new();
+    let mut editor = ClipEditor::default();
+
+    assert!(editor
+        .source_refreshed(track, 9, 4, 20, &ClipStore::default())
+        .is_none());
+    editor.anchor(track, 4, 20);
+
+    assert!(editor.playing.is_empty());
+    assert!(editor.started_at.is_empty());
+}
+
+#[test]
 fn resync_preserves_queued_sources_and_newer_intent_while_reclaiming_obsolete_pending_entries() {
     use vibez_engine::events::{ClipPlayingState, ClipQueuedState, ClipTrackState};
     let track = TrackId::new();
