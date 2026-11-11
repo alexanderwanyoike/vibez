@@ -118,6 +118,11 @@ pub fn pitch_controls(pad: bool) -> &'static [usize] {
     }
 }
 
+/// How the status names a sample loaded into a Sampler.
+pub fn imported_headline(sample: &str) -> String {
+    format!("Imported '{sample}' to Sampler")
+}
+
 pub fn is_native_sampler(track: &crate::state::UiTrack) -> bool {
     is_native(track, vibez_core::midi::InstrumentKind::Sampler)
 }
@@ -125,6 +130,16 @@ pub fn is_native_sampler(track: &crate::state::UiTrack) -> bool {
 /// A Drum Rack, whose pads are Samplers.
 pub fn is_native_drum_rack(track: &crate::state::UiTrack) -> bool {
     is_native(track, vibez_core::midi::InstrumentKind::DrumRack)
+}
+
+/// The Drum Rack pad a drop that names no pad loads into, the one the rack
+/// has selected, or `None` when `track` holds no Drum Rack.
+pub fn selected_drum_pad(track: &crate::state::UiTrack) -> Option<usize> {
+    if !is_native_drum_rack(track) {
+        return None;
+    }
+    let last = track.drum_rack_pads.len().checked_sub(1)?;
+    Some(track.selected_drum_pad.min(last))
 }
 
 fn is_native(track: &crate::state::UiTrack, kind: vibez_core::midi::InstrumentKind) -> bool {
@@ -171,5 +186,31 @@ mod tests {
         for page in SamplerPage::ALL {
             assert_eq!(SamplerPage::at(page.index()), page);
         }
+    }
+
+    #[test]
+    fn a_drop_that_names_no_pad_loads_into_the_selected_one() {
+        use vibez_core::id::TrackId;
+        use vibez_core::midi::{InstrumentKind, TrackKind};
+        let mut rack = crate::state::ProjectTrack::new_instrument(
+            TrackId::new(),
+            "Drums".into(),
+            TrackKind::Instrument(InstrumentKind::DrumRack),
+            0,
+        );
+        rack.selected_drum_pad = 3;
+        assert_eq!(selected_drum_pad(&rack), Some(3));
+        rack.selected_drum_pad = usize::MAX;
+        assert_eq!(
+            selected_drum_pad(&rack),
+            Some(rack.drum_rack_pads.len() - 1)
+        );
+        let keys = crate::state::ProjectTrack::new_instrument(
+            TrackId::new(),
+            "Keys".into(),
+            TrackKind::Instrument(InstrumentKind::Sampler),
+            0,
+        );
+        assert_eq!(selected_drum_pad(&keys), None);
     }
 }

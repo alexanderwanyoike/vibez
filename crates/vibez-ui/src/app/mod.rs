@@ -272,6 +272,9 @@ mod window_policy;
 mod sample_retirement;
 
 #[cfg(test)]
+mod device_panel_drop_tests;
+
+#[cfg(test)]
 mod instrument_media_retirement_tests;
 
 #[cfg(test)]

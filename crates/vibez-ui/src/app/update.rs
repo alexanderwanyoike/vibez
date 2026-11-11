@@ -350,46 +350,7 @@ impl App {
                 };
                 return self.apply_transport_action(action);
             }
-            // Devices domain: same routing pattern. Tracks are the
-            // shared model handed in explicitly; the returned action
-            // carries GUI teardown / selection / status effects.
-            Message::Devices(msg) => {
-                if let crate::domains::devices::DevicesMsg::SetTrackInstrument(track_id, _)
-                | crate::domains::devices::DevicesMsg::RemoveTrackInstrument(track_id) = &msg
-                {
-                    self.plugin_load_requests.cancel(PluginGuiKey::Instrument {
-                        track_id: *track_id,
-                    });
-                }
-                let routing_edit = matches!(
-                    msg,
-                    crate::domains::devices::DevicesMsg::SetSidechainSource { .. }
-                        | crate::domains::devices::DevicesMsg::SetSidechainTap { .. }
-                );
-                let routing = routing_edit.then(|| self.sidechain_model());
-                let snapshot = routing_edit.then(|| self.take_snapshot());
-                let sample_rate = self.state.transport.sample_rate;
-                let action = {
-                    let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
-                    let project_tracks = Arc::make_mut(&mut self.state.project_tracks);
-                    self.state.devices.update(
-                        msg,
-                        &mut engine,
-                        &mut project_tracks.tracks,
-                        &mut project_tracks.master,
-                        &mut project_tracks.buses,
-                        crate::domains::devices::DevicesCtx {
-                            sample_rate,
-                            routing: routing.as_deref(),
-                        },
-                    )
-                };
-                if let (Some(true), Some(snapshot)) = (action.routing_changed, snapshot) {
-                    self.state.project.history.push_edit(snapshot, undo_gesture);
-                    self.mark_project_dirty();
-                }
-                self.apply_devices_action(action);
-            }
+            Message::Devices(msg) => self.route_devices(msg, undo_gesture),
             Message::SetDrumRackSliceMarkers(markers) => {
                 if let Some(dialog) = self.state.view.drum_rack_slice_dialog.as_mut() {
                     dialog.markers = markers;
@@ -829,6 +790,8 @@ impl App {
             | Message::DropSampleOnEmptyArrangement
             | Message::DropSampleOnDrumPad { .. }
             | Message::DropSampleOnSampler { .. }
+            | Message::DropSampleOnDrumRack { .. }
+            | Message::DropSampleOnDevicePanel { .. }
             | Message::LocalSamplePreviewReady(..)
             | Message::BrowserWaveformReady(..)
             | Message::BrowserAuditionReady { .. }

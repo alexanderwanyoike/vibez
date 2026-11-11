@@ -11,6 +11,7 @@ use vibez_core::midi::{InstrumentKind, TrackKind};
 use vibez_core::track::MediaSourceRef;
 use vibez_engine::commands::{AuditionStart, EngineCommand};
 
+use crate::domains::device_panel_drop::DevicePanelDrop;
 use crate::message::{BrowserImportTarget, Message, PreparedBrowserImport};
 use crate::state::{AuditionMode, SampleBrowserEntry, UiClip, UiDrumPad};
 
@@ -346,12 +347,11 @@ impl App {
             .and_then(|track_id| self.state.find_track(track_id))?;
         match track.instrument_kind {
             Some(InstrumentKind::Sampler) => Some(BrowserImportTarget::Sampler(track.id)),
-            Some(InstrumentKind::DrumRack) => Some(BrowserImportTarget::DrumRackPad {
-                track_id: track.id,
-                pad_index: track
-                    .selected_drum_pad
-                    .min(track.drum_rack_pads.len().saturating_sub(1)),
-            }),
+            Some(InstrumentKind::DrumRack) => crate::domains::sampler::selected_drum_pad(track)
+                .map(|pad_index| BrowserImportTarget::DrumRackPad {
+                    track_id: track.id,
+                    pad_index,
+                }),
             _ => None,
         }
     }
@@ -528,22 +528,31 @@ impl App {
                 self.add_audio_clip_to_track_at(track_id, position_samples, payload)
             }
             BrowserImportTarget::Sampler(track_id) => {
-                let PreparedBrowserImport {
-                    treatment,
-                    audio,
-                    name,
-                    source,
-                    ..
-                } = payload;
-                let provenance = source.provenance().map(|value| value.display_label());
-                self.apply_sampler_sample_loaded(track_id, audio, name.clone(), source);
-                self.state.status_text = format!(
-                    "Imported '{name}' to Sampler ({}){}",
-                    treatment.mode.label(),
-                    provenance
-                        .map(|value| format!(" · source {value}"))
-                        .unwrap_or_default()
+                self.load_sampler_import(
+                    track_id,
+                    payload,
+                    crate::domains::sampler::imported_headline,
                 );
+                Task::none()
+            }
+            BrowserImportTarget::ImpliedSampler(track_id) => {
+                let Some(outcome) = self
+                    .state
+                    .find_track(track_id)
+                    .and_then(DevicePanelDrop::for_channel)
+                else {
+                    return Task::none();
+                };
+                if outcome != DevicePanelDrop::LoadIntoExisting {
+                    self.route_devices(
+                        crate::domains::devices::DevicesMsg::SetTrackInstrument(
+                            track_id,
+                            InstrumentKind::Sampler,
+                        ),
+                        None,
+                    );
+                }
+                self.load_sampler_import(track_id, payload, |name| outcome.loaded_status(name));
                 Task::none()
             }
             BrowserImportTarget::DrumRackPad {
@@ -570,6 +579,34 @@ impl App {
                 Task::none()
             }
         }
+    }
+
+    /// Loads a prepared import into `track_id`'s Sampler; the status leads
+    /// with `headline` for the sample's name and adds the import mode and
+    /// source.
+    fn load_sampler_import(
+        &mut self,
+        track_id: TrackId,
+        payload: PreparedBrowserImport,
+        headline: impl FnOnce(&str) -> String,
+    ) {
+        let PreparedBrowserImport {
+            treatment,
+            audio,
+            name,
+            source,
+            ..
+        } = payload;
+        let provenance = source.provenance().map(|value| value.display_label());
+        self.apply_sampler_sample_loaded(track_id, audio, name.clone(), source);
+        self.state.status_text = format!(
+            "{} ({}){}",
+            headline(&name),
+            treatment.mode.label(),
+            provenance
+                .map(|value| format!(" · source {value}"))
+                .unwrap_or_default()
+        );
     }
 
     pub(super) fn add_audio_clip_to_track_at(

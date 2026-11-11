@@ -117,15 +117,24 @@ impl App {
         });
 
         // Wrap in mouse_area for right-click context menu
-        mouse_area(content)
-            .on_right_press(Message::Devices(
-                crate::domains::devices::DevicesMsg::ShowContextMenu {
-                    x: self.state.view.cursor_x,
-                    y: self.state.view.cursor_y,
-                    track_id,
-                },
-            ))
-            .into()
+        let panel = mouse_area(content).on_right_press(Message::Devices(
+            crate::domains::devices::DevicesMsg::ShowContextMenu {
+                x: self.state.view.cursor_x,
+                y: self.state.view.cursor_y,
+                track_id,
+            },
+        ));
+        // Only while dragging, so an ordinary click's release still reaches
+        // whatever the shell does with it.
+        let takes_drop = self.state.browser.drag_source.is_some()
+            && crate::domains::device_panel_drop::DevicePanelDrop::for_channel(track).is_some();
+        if takes_drop {
+            panel
+                .on_release(Message::DropSampleOnDevicePanel { track_id })
+                .into()
+        } else {
+            panel.into()
+        }
     }
 
     /// The cards of one channel, laid out for the section's measured width.

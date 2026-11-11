@@ -503,6 +503,51 @@ impl App {
         }
     }
 
+    /// Tracks are the devices domain's shared model, handed in explicitly;
+    /// the domain's action carries GUI teardown, selection and status effects,
+    /// which this applies.
+    pub(super) fn route_devices(
+        &mut self,
+        msg: crate::domains::devices::DevicesMsg,
+        undo_gesture: Option<crate::state::UndoGestureId>,
+    ) {
+        if let crate::domains::devices::DevicesMsg::SetTrackInstrument(track_id, _)
+        | crate::domains::devices::DevicesMsg::RemoveTrackInstrument(track_id) = &msg
+        {
+            self.plugin_load_requests.cancel(PluginGuiKey::Instrument {
+                track_id: *track_id,
+            });
+        }
+        let routing_edit = matches!(
+            msg,
+            crate::domains::devices::DevicesMsg::SetSidechainSource { .. }
+                | crate::domains::devices::DevicesMsg::SetSidechainTap { .. }
+        );
+        let routing = routing_edit.then(|| self.sidechain_model());
+        let snapshot = routing_edit.then(|| self.take_snapshot());
+        let sample_rate = self.state.transport.sample_rate;
+        let action = {
+            let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
+            let project_tracks = Arc::make_mut(&mut self.state.project_tracks);
+            self.state.devices.update(
+                msg,
+                &mut engine,
+                &mut project_tracks.tracks,
+                &mut project_tracks.master,
+                &mut project_tracks.buses,
+                crate::domains::devices::DevicesCtx {
+                    sample_rate,
+                    routing: routing.as_deref(),
+                },
+            )
+        };
+        if let (Some(true), Some(snapshot)) = (action.routing_changed, snapshot) {
+            self.state.project.history.push_edit(snapshot, undo_gesture);
+            self.mark_project_dirty();
+        }
+        self.apply_devices_action(action);
+    }
+
     /// Route cross-domain effects requested by the devices domain.
     pub(super) fn apply_devices_action(&mut self, action: crate::domains::devices::DevicesAction) {
         if let Some(key) = action.close_gui {
