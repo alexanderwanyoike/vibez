@@ -104,6 +104,39 @@ async fn a_drop_on_the_panel_replaces_a_built_in_instrument_and_one_undo_restore
 }
 
 #[tokio::test]
+async fn a_drop_on_the_panel_replaces_a_plugin_instrument_and_one_undo_restores_its_state() {
+    let directory = tempfile::tempdir().unwrap();
+    let (mut app, track_id) = app_with_midi_track();
+    let plugin = vibez_core::effect::PluginDeviceInfo {
+        format: "clap".into(),
+        uid: "test.synth".into(),
+        path: "/nonexistent/Test Synth.clap".into(),
+        name: "Test Synth".into(),
+        state_b64: Some("saved-state".into()),
+    };
+    let track = Arc::make_mut(&mut app.state.project_tracks)
+        .find_mut(track_id)
+        .unwrap();
+    track.has_instrument = true;
+    track.plugin_instrument_name = Some("Test Synth".into());
+    track.plugin_instrument_ref = Some(plugin.clone());
+
+    drop_on_panel(&mut app, track_id, kick(directory.path())).await;
+
+    assert_holds_kick(&app, track_id);
+    assert_eq!(
+        app.state.status_text,
+        "Replaced Test Synth with a Sampler holding 'kick.wav' (RAW)"
+    );
+    let _ = app.update(Message::Project(ProjectMsg::Undo));
+    let track = app.state.find_track(track_id).unwrap();
+    assert_eq!(track.instrument_kind, None);
+    assert_eq!(track.plugin_instrument_ref.as_ref(), Some(&plugin));
+    assert!(track.sample_audio.is_none());
+    assert!(app.state.project.history.undo.is_empty());
+}
+
+#[tokio::test]
 async fn a_drop_on_an_audio_tracks_panel_changes_nothing() {
     let directory = tempfile::tempdir().unwrap();
     let mut app = app();

@@ -42,9 +42,14 @@ impl App {
         if matches!(&msg, ProjectMsg::ToggleFileMenu) {
             self.state.view.edit_menu_open = false;
         }
-        let ctx = ProjectCtx {
-            snapshot_now: self.take_snapshot(),
+        // Capturing plugin state is real work, so only the messages that
+        // push this snapshot pay for it.
+        let snapshot_now = if matches!(&msg, ProjectMsg::Undo | ProjectMsg::Redo) {
+            self.snapshot_with_live_plugin_states()
+        } else {
+            self.take_snapshot()
         };
+        let ctx = ProjectCtx { snapshot_now };
         let action = self.state.project.update(msg, ctx);
         if let Some(status) = action.status {
             self.state.status_text = status;

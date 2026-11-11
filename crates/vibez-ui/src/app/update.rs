@@ -267,7 +267,7 @@ impl App {
             || matches!(&message, Message::Automation(m) if m.marks_dirty())
             || matches!(&message, Message::Perform(m) if m.marks_dirty());
         if should_mark_dirty && !deferred_arrangement_project_edit {
-            self.push_undo_snapshot(undo_gesture);
+            self.push_undo_step_before(&message, undo_gesture);
             self.mark_project_dirty();
         }
 

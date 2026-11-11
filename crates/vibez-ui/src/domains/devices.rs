@@ -85,6 +85,15 @@ pub enum DevicesMsg {
 }
 
 impl DevicesMsg {
+    /// The track whose instrument this message replaces or removes.
+    pub fn instrument_change_track(&self) -> Option<TrackId> {
+        match self {
+            DevicesMsg::SetTrackInstrument(track_id, _)
+            | DevicesMsg::RemoveTrackInstrument(track_id) => Some(*track_id),
+            _ => None,
+        }
+    }
+
     /// Whether this message edits the project (drives the dirty flag).
     pub fn marks_dirty(&self) -> bool {
         !matches!(
