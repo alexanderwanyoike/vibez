@@ -504,7 +504,8 @@ impl App {
     }
 
     /// Tracks are the devices domain's shared model, handed in explicitly;
-    /// the returned action carries GUI teardown, selection and status effects.
+    /// the domain's action carries GUI teardown, selection and status effects,
+    /// which this applies.
     pub(super) fn route_devices(
         &mut self,
         msg: crate::domains::devices::DevicesMsg,
