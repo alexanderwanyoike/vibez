@@ -13,7 +13,7 @@ pub enum DevicePanelDrop {
     /// The named instrument gives way to a Sampler holding the audio.
     ReplaceWithSampler { instrument: String },
     /// The track's Sampler loads the audio and keeps its settings.
-    LoadIntoSampler,
+    LoadIntoExisting,
 }
 
 impl DevicePanelDrop {
@@ -29,7 +29,7 @@ impl DevicePanelDrop {
             return Some(Self::AddSampler);
         }
         if super::sampler::is_native_sampler(channel) {
-            return Some(Self::LoadIntoSampler);
+            return Some(Self::LoadIntoExisting);
         }
         let instrument = channel
             .plugin_instrument_name
@@ -52,7 +52,7 @@ impl DevicePanelDrop {
             Self::ReplaceWithSampler { instrument } => {
                 format!("Replaced {instrument} with a Sampler holding '{sample}'")
             }
-            Self::LoadIntoSampler => format!("Imported '{sample}' to Sampler"),
+            Self::LoadIntoExisting => format!("Imported '{sample}' to Sampler"),
         }
     }
 }
@@ -95,7 +95,7 @@ mod tests {
         track.instrument_kind = Some(InstrumentKind::Sampler);
         assert_eq!(
             DevicePanelDrop::for_channel(&track),
-            Some(DevicePanelDrop::LoadIntoSampler)
+            Some(DevicePanelDrop::LoadIntoExisting)
         );
     }
 
@@ -136,7 +136,7 @@ mod tests {
             "Replaced Surge XT with a Sampler holding 'kick.wav'"
         );
         assert_eq!(
-            DevicePanelDrop::LoadIntoSampler.loaded_status("kick.wav"),
+            DevicePanelDrop::LoadIntoExisting.loaded_status("kick.wav"),
             "Imported 'kick.wav' to Sampler"
         );
     }

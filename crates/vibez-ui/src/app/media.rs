@@ -529,7 +529,7 @@ impl App {
             }
             BrowserImportTarget::Sampler(track_id) => {
                 self.load_sampler_import(track_id, payload, |name| {
-                    DevicePanelDrop::LoadIntoSampler.loaded_status(name)
+                    DevicePanelDrop::LoadIntoExisting.loaded_status(name)
                 });
                 Task::none()
             }
@@ -541,7 +541,7 @@ impl App {
                 else {
                     return Task::none();
                 };
-                if outcome != DevicePanelDrop::LoadIntoSampler {
+                if outcome != DevicePanelDrop::LoadIntoExisting {
                     self.route_devices(
                         crate::domains::devices::DevicesMsg::SetTrackInstrument(
                             track_id,
