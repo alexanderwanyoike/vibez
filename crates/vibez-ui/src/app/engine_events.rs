@@ -1170,3 +1170,7 @@ mod compensation_recording_tests;
 #[cfg(test)]
 #[path = "recording_observation_tests.rs"]
 mod recording_observation_tests;
+
+#[cfg(test)]
+#[path = "clip_length_change_tests.rs"]
+mod clip_length_change_tests;
