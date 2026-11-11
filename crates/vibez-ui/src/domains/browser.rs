@@ -7,6 +7,7 @@
 
 use std::path::PathBuf;
 
+use crate::domains::device_panel_drop::DevicePanelDrop;
 use crate::message::{LocalRootWatchEvent, SampleLibraryScanResult};
 use crate::remote_provider::RemoteCatalogEntry;
 use crate::state::{BrowserState, LocalRootCatalogState, SampleBrowserMode};
@@ -53,6 +54,13 @@ pub enum BrowserMsg {
     DragHoverDrumRackPad {
         track_id: TrackId,
         pad_index: usize,
+    },
+    DragHoverDrumRack {
+        track_id: TrackId,
+    },
+    DragHoverDevicePanel {
+        track_id: TrackId,
+        drop: DevicePanelDrop,
     },
     ClearDragTarget,
     CancelDrag(String),
@@ -218,6 +226,7 @@ impl BrowserState {
                 });
                 action.status = Some(format!("Assign Drum Rack pad {}", pad_index + 1));
             }
+            BrowserMsg::DragHoverDrumRack { .. } | BrowserMsg::DragHoverDevicePanel { .. } => {}
             BrowserMsg::ClearDragTarget => {
                 self.drag_target = None;
             }

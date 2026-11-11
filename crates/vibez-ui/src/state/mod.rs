@@ -102,6 +102,14 @@ pub enum BrowserDropTarget {
         track_id: TrackId,
         pad_index: usize,
     },
+    /// A Drum Rack card away from its pads, where a drop loads nothing.
+    DrumRack {
+        track_id: TrackId,
+    },
+    /// A device panel outside any instrument card.
+    DevicePanel {
+        track_id: TrackId,
+    },
 }
 /// View-domain state; none of it is part of the project itself.
 #[derive(Debug)]

@@ -184,7 +184,11 @@ impl App {
                 Some(crate::state::BrowserDropTarget::DrumRackPad { pad_index, .. }) => {
                     (format!("ASSIGN DRUM PAD {}", pad_index + 1), Some(true))
                 }
-                None => ("CHOOSE A DROP TARGET".into(), None),
+                Some(
+                    crate::state::BrowserDropTarget::DrumRack { .. }
+                    | crate::state::BrowserDropTarget::DevicePanel { .. },
+                )
+                | None => ("CHOOSE A DROP TARGET".into(), None),
             };
             let ghost = canvas(crate::widgets::browser_drag_ghost::BrowserDragGhost {
                 cursor: iced::Point::new(self.state.view.cursor_x, self.state.view.cursor_y),
