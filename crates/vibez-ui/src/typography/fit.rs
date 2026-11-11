@@ -3,6 +3,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::hash::Hash;
 use std::rc::Rc;
 
 use iced::Font;
@@ -34,15 +35,23 @@ thread_local! {
         RefCell::new(HashMap::new());
 }
 
+/// Each cache starts over at this size, so names from closed projects and
+/// left folders do not pile up.
+const CACHE_LIMIT: usize = 1024;
+
+fn remember<K: Eq + Hash, V>(cache: &mut HashMap<K, V>, key: K, value: V) {
+    if cache.len() >= CACHE_LIMIT {
+        cache.clear();
+    }
+    cache.insert(key, value);
+}
+
 fn widths(text: &str, size: f32, font: Font) -> Rc<Widths> {
     WIDTHS.with(|cache| {
         let mut cache = cache.borrow_mut();
         let key = (text.to_owned(), size.to_bits(), font);
         if let Some(widths) = cache.get(&key) {
             return Rc::clone(widths);
-        }
-        if cache.len() >= 1024 {
-            cache.clear();
         }
         let measure = |content: &str| text_width(content, size, font);
         let widths = Rc::new(Widths {
@@ -52,7 +61,7 @@ fn widths(text: &str, size: f32, font: Font) -> Rc<Widths> {
                 .map(|(end, _)| measure(&shortened(text, end)))
                 .collect(),
         });
-        cache.insert(key, Rc::clone(&widths));
+        remember(&mut cache, key, Rc::clone(&widths));
         widths
     })
 }
@@ -102,13 +111,7 @@ pub fn fit_text_middle(text: &str, width: f32, size: f32, font: Font) -> String 
         }
         middle_shortened(&chars, low)
     };
-    MIDDLE_FITS.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        if cache.len() >= 1024 {
-            cache.clear();
-        }
-        cache.insert(key, fitted.clone());
-    });
+    MIDDLE_FITS.with(|cache| remember(&mut cache.borrow_mut(), key, fitted.clone()));
     fitted
 }
 
