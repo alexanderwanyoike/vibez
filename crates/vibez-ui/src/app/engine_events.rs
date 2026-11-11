@@ -410,12 +410,9 @@ impl App {
                     } => {
                         let editor = &mut self.state.perform.clip_editor;
                         editor.acknowledge_transition(track_id, request_id);
-                        editor.started_at.insert(
-                            track_id,
-                            effective_at_samples.saturating_sub(start_position),
-                        );
                         if let Some(clip) = editor.pending.remove(&request_id) {
                             editor.playing.insert(track_id, clip);
+                            editor.anchor(track_id, start_position, effective_at_samples);
                         } else {
                             editor.playing.remove(&track_id);
                         }

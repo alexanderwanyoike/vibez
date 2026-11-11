@@ -136,8 +136,7 @@ impl ClipEditor {
         });
         if let Some((clip, position)) = playing {
             self.playing.insert(track, clip);
-            self.started_at
-                .insert(track, state.effective_at_samples.saturating_sub(position));
+            self.anchor(track, position, state.effective_at_samples);
         } else {
             self.playing.remove(&track);
             self.started_at.remove(&track);
@@ -187,8 +186,9 @@ impl ClipEditor {
         self.playing.get(&track)
     }
 
-    /// The engine plays `track`'s clip from `position` at `effective_at`;
-    /// after a length change it wraps there, not where the UI last counted.
+    /// The engine plays `track`'s clip from `position` at `effective_at`,
+    /// so its playhead counts from there; after a length change the engine
+    /// wraps its position, so the UI's earlier start no longer holds.
     pub fn anchor(&mut self, track: TrackId, position: u64, effective_at: u64) {
         if self.playing.contains_key(&track) {
             self.started_at
