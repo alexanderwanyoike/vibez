@@ -3,12 +3,13 @@
 
 use std::path::Path;
 
-use iced::widget::{button, container, text, text_input, Space};
+use iced::widget::{button, column, container, text, text_input, Space};
 use iced::{Element, Length, Theme};
 
 use crate::message::Message;
 use crate::state::SampleBrowserEntry;
 use crate::theme as th;
+use crate::widgets::fitted_label::FittedLabel;
 
 pub(super) const REMOTE_CONNECTION_INDENT: f32 = 14.0;
 pub(super) const BROWSER_TREE_INDENT_STEP: f32 = 8.0;
@@ -269,6 +270,21 @@ pub(super) fn browser_footer_style(_theme: &Theme) -> container::Style {
         },
         ..Default::default()
     }
+}
+
+/// A Browser result's name over its detail line, such as its folder.
+pub(super) fn result_name_cell<'a>(
+    name: String,
+    detail: String,
+    detail_color: iced::Color,
+) -> Element<'a, Message> {
+    column![
+        FittedLabel::name(name, 12.0, th::text()).view(14.0),
+        FittedLabel::detail(detail, 9.0, detail_color).view(11.0)
+    ]
+    .spacing(2)
+    .width(Length::Fill)
+    .into()
 }
 
 #[cfg(test)]

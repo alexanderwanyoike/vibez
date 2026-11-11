@@ -10,7 +10,6 @@ use crate::state::{SampleBrowserEntry, SampleBrowserMode};
 use crate::theme as th;
 use vibez_core::track::MediaSourceRef;
 
-use super::views_browser::result_name_cell;
 use super::views_browser_style::*;
 use super::*;
 

@@ -9,7 +9,6 @@ use crate::icons;
 use crate::message::Message;
 use crate::state::SampleBrowserMode;
 use crate::theme as th;
-use crate::widgets::fitted_label::FittedLabel;
 
 use super::views_browser_style::*;
 use super::*;
@@ -553,19 +552,4 @@ impl App {
         .style(|_theme: &iced::Theme, status| browser_place_button_style(false, status))
         .into()
     }
-}
-
-/// A Browser result's name over its detail line, such as its folder.
-pub(super) fn result_name_cell<'a>(
-    name: String,
-    detail: String,
-    detail_color: iced::Color,
-) -> Element<'a, Message> {
-    column![
-        FittedLabel::name(name, 12.0, th::text()).view(14.0),
-        FittedLabel::detail(detail, 9.0, detail_color).view(11.0)
-    ]
-    .spacing(2)
-    .width(Length::Fill)
-    .into()
 }
