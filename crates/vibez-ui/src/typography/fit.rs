@@ -160,4 +160,15 @@ mod tests {
 
         assert_eq!(fit_text_middle(name, width, SIZE, Font::DEFAULT), name);
     }
+
+    #[test]
+    fn a_narrow_cut_keeps_more_of_the_end_than_the_start() {
+        let name = "UNDRGRND Sounds - Deep Dub";
+        let width = text_width("UNDRGR\u{2026}p Dub", SIZE, Font::DEFAULT);
+
+        let fitted = fit_text_middle(name, width, SIZE, Font::DEFAULT);
+
+        let (start, end) = fitted.split_once('\u{2026}').expect("cut");
+        assert!(end.chars().count() > start.chars().count(), "{fitted}");
+    }
 }
