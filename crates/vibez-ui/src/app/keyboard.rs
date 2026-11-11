@@ -450,8 +450,9 @@ pub(crate) fn global_key_handler(
         return Some(Message::EscapePressed);
     }
 
-    // Plain Up/Down moves the Active Source Entry through Browser Results.
-    // Text inputs consume these before the global ignored-event subscription.
+    // Plain Up/Down moves the Active Source Entry through Browser Results
+    // and Right auditions it again. Text inputs consume these before the
+    // global ignored-event subscription.
     if modifiers.is_empty() {
         match key {
             iced::keyboard::Key::Named(Named::ArrowUp) => {
@@ -459,6 +460,9 @@ pub(crate) fn global_key_handler(
             }
             iced::keyboard::Key::Named(Named::ArrowDown) => {
                 return Some(Message::SelectAdjacentBrowserResult(1));
+            }
+            iced::keyboard::Key::Named(Named::ArrowRight) => {
+                return Some(Message::ReplaySelectedBrowserSample);
             }
             _ => {}
         }

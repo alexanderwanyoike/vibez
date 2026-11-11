@@ -231,6 +231,22 @@ impl App {
         Task::batch([selection, scroll])
     }
 
+    /// Auditions the selected sample again once its audio is loaded, as a
+    /// second click on it does.
+    pub(super) fn replay_selected_browser_sample(&mut self) -> Task<Message> {
+        let browser = &self.state.browser;
+        if !browser.open || !browser.audition_enabled {
+            return Task::none();
+        }
+        let Some(source) = browser.selected_source.clone() else {
+            return Task::none();
+        };
+        match browser.waveform_for_source(&source) {
+            Some(raw) => self.play_browser_mode(source, raw),
+            None => Task::none(),
+        }
+    }
+
     pub(super) fn stop_browser_audition(&mut self) {
         self.send_command(EngineCommand::StopAudition);
         self.state.browser.cancel_audition_requests();
