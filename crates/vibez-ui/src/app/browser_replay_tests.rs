@@ -65,3 +65,23 @@ fn replay_stays_silent_after_the_producer_works_outside_the_browser() {
 
     assert_eq!(started_auditions(&mut received), 0);
 }
+
+#[test]
+fn replay_waits_until_the_selected_sample_has_loaded() {
+    let (mut app, mut received) = app_with_loaded_selection();
+    app.state.browser.waveform_audio = None;
+
+    let _ = app.update(Message::ReplaySelectedBrowserSample);
+
+    assert_eq!(started_auditions(&mut received), 0);
+}
+
+#[test]
+fn replay_stays_silent_while_the_browser_is_closed() {
+    let (mut app, mut received) = app_with_loaded_selection();
+    app.state.browser.open = false;
+
+    let _ = app.update(Message::ReplaySelectedBrowserSample);
+
+    assert_eq!(started_auditions(&mut received), 0);
+}
