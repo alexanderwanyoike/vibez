@@ -1048,6 +1048,20 @@ mod tests {
     }
 
     #[test]
+    fn held_right_replays_the_selected_sample_once() {
+        let mut state = EdgeShortcutState::default();
+        let started = std::time::Instant::now();
+        let replay = Message::ReplaySelectedBrowserSample;
+
+        assert!(state.should_dispatch("Named(ArrowRight)", &replay, started));
+        assert!(!state.should_dispatch(
+            "Named(ArrowRight)",
+            &replay,
+            started + std::time::Duration::from_millis(500),
+        ));
+    }
+
+    #[test]
     fn perform_pad_keys_keep_z_and_x_in_perform() {
         use crate::domains::perform::ComputerKey;
         use crate::state::Workspace;
