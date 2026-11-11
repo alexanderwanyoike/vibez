@@ -189,4 +189,13 @@ mod tests {
 
         assert_eq!(fitted, "UNDR\u{2026}");
     }
+
+    #[test]
+    fn a_short_cut_of_a_long_name_still_keeps_its_end() {
+        let width = text_width("UN\u{2026}Dub", SIZE, Font::DEFAULT);
+
+        let fitted = fit_text_middle("UNDRGRND Sounds - Deep Dub", width, SIZE, Font::DEFAULT);
+
+        assert!(fitted.ends_with("Dub"), "{fitted}");
+    }
 }
