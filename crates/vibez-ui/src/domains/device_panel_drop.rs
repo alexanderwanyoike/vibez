@@ -28,6 +28,9 @@ impl DevicePanelDrop {
         if !channel.has_instrument {
             return Some(Self::AddSampler);
         }
+        if super::sampler::is_native_sampler(channel) {
+            return Some(Self::LoadIntoSampler);
+        }
         let instrument = channel
             .plugin_instrument_name
             .clone()
@@ -49,7 +52,7 @@ impl DevicePanelDrop {
             Self::ReplaceWithSampler { instrument } => {
                 format!("Replaced {instrument} with a Sampler holding '{sample}'")
             }
-            Self::LoadIntoSampler => String::new(),
+            Self::LoadIntoSampler => format!("Imported '{sample}' to Sampler"),
         }
     }
 }

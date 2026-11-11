@@ -303,7 +303,8 @@ pub enum BrowserImportTarget {
         position_samples: u64,
     },
     Sampler(TrackId),
-    /// A Sampler that takes the place of whatever instrument the track has.
+    /// The track's Sampler, added or in place of another instrument when it
+    /// has none.
     NewSampler(TrackId),
     DrumRackPad {
         track_id: TrackId,

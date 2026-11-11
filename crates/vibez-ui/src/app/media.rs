@@ -530,7 +530,7 @@ impl App {
             }
             BrowserImportTarget::Sampler(track_id) => {
                 self.load_sampler_import(track_id, payload, |name| {
-                    format!("Imported '{name}' to Sampler")
+                    DevicePanelDrop::LoadIntoSampler.loaded_status(name)
                 });
                 Task::none()
             }
@@ -542,13 +542,15 @@ impl App {
                 else {
                     return Task::none();
                 };
-                self.route_devices(
-                    crate::domains::devices::DevicesMsg::SetTrackInstrument(
-                        track_id,
-                        InstrumentKind::Sampler,
-                    ),
-                    None,
-                );
+                if outcome != DevicePanelDrop::LoadIntoSampler {
+                    self.route_devices(
+                        crate::domains::devices::DevicesMsg::SetTrackInstrument(
+                            track_id,
+                            InstrumentKind::Sampler,
+                        ),
+                        None,
+                    );
+                }
                 self.load_sampler_import(track_id, payload, |name| outcome.loaded_status(name));
                 Task::none()
             }
