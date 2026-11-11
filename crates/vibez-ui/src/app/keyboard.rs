@@ -35,6 +35,7 @@ impl EdgeShortcutState {
                 ))
                 | Message::Perform(PerformMsg::Capture(CaptureMsg::Toggle))
                 | Message::View(ViewMsg::ZoomToSelection | ViewMsg::ZoomBack)
+                | Message::ReplaySelectedBrowserSample
         );
         if !edge_triggered {
             return true;
@@ -209,7 +210,7 @@ impl super::App {
                     let movement = clip_window_movement(
                         key,
                         modifiers,
-                        self.state.browser.open && self.state.browser.keyboard_focus,
+                        self.state.browser.has_keyboard_focus(),
                     );
                     if let Some((tracks, rows)) = movement {
                         return self.update(Message::Perform(PerformMsg::Clips(
@@ -450,8 +451,9 @@ pub(crate) fn global_key_handler(
         return Some(Message::EscapePressed);
     }
 
-    // Plain Up/Down moves the Active Source Entry through Browser Results.
-    // Text inputs consume these before the global ignored-event subscription.
+    // Plain Up/Down moves the Active Source Entry through Browser Results
+    // and Right auditions it again. Text inputs consume these before the
+    // global ignored-event subscription.
     if modifiers.is_empty() {
         match key {
             iced::keyboard::Key::Named(Named::ArrowUp) => {
@@ -459,6 +461,9 @@ pub(crate) fn global_key_handler(
             }
             iced::keyboard::Key::Named(Named::ArrowDown) => {
                 return Some(Message::SelectAdjacentBrowserResult(1));
+            }
+            iced::keyboard::Key::Named(Named::ArrowRight) => {
+                return Some(Message::ReplaySelectedBrowserSample);
             }
             _ => {}
         }
@@ -832,6 +837,16 @@ mod tests {
     }
 
     #[test]
+    fn plain_right_replays_the_selected_sample() {
+        use iced::keyboard::{key::Named, Key, Modifiers};
+
+        assert!(matches!(
+            global_key_handler(Key::Named(Named::ArrowRight), Modifiers::empty()),
+            Some(Message::ReplaySelectedBrowserSample)
+        ));
+    }
+
+    #[test]
     fn space_is_transport_and_escape_routes_through_audition_priority() {
         use iced::keyboard::{key::Named, Key, Modifiers};
 
@@ -1034,6 +1049,20 @@ mod tests {
     }
 
     #[test]
+    fn held_right_replays_the_selected_sample_once() {
+        let mut state = EdgeShortcutState::default();
+        let started = std::time::Instant::now();
+        let replay = Message::ReplaySelectedBrowserSample;
+
+        assert!(state.should_dispatch("Named(ArrowRight)", &replay, started));
+        assert!(!state.should_dispatch(
+            "Named(ArrowRight)",
+            &replay,
+            started + std::time::Duration::from_millis(500),
+        ));
+    }
+
+    #[test]
     fn perform_pad_keys_keep_z_and_x_in_perform() {
         use crate::domains::perform::ComputerKey;
         use crate::state::Workspace;
@@ -1107,6 +1136,12 @@ mod clip_browser_focus_tests {
             clip_window_movement(&Key::Named(Named::ArrowRight), Modifiers::SHIFT, false),
             Some((4, 0))
         );
+        let right = Key::Named(Named::ArrowRight);
+        assert_eq!(clip_window_movement(&right, Modifiers::empty(), true), None);
+        assert!(matches!(
+            global_key_handler(right, Modifiers::empty()),
+            Some(Message::ReplaySelectedBrowserSample)
+        ));
     }
 }
 
