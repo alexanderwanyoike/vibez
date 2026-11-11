@@ -341,10 +341,8 @@ impl App {
                     Message::BrowserWaveformReady(source.clone(), result)
                 });
             }
-        } else if self.state.browser.audition_enabled {
-            if let Some(raw) = self.state.browser.waveform_for_source(&source) {
-                return self.play_browser_mode(source, raw);
-            }
+        } else {
+            return self.replay_selected_browser_sample();
         }
         Task::none()
     }
