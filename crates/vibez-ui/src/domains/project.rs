@@ -101,11 +101,6 @@ pub struct PluginReloadRequests {
     pub instruments: Vec<(TrackId, PluginDeviceInfo)>,
 }
 
-/// Strip plugin devices out of a snapshot's tracks and return reload
-/// requests for them.
-///
-/// `capture_state` gives the live state of devices that still have an
-/// instance (see [`record_live_plugin_states`]).
 // A reload may outlive slot deletion, replacement or project reset. Its saved
 // identity must still belong to the current project before phase-two init.
 pub fn accepts_effect_load(
@@ -176,6 +171,12 @@ pub fn keep_live_state(device: &mut PluginDeviceInfo, live: Option<String>) {
     }
 }
 
+/// Strip plugin devices out of a snapshot's tracks and return reload
+/// requests for them.
+///
+/// `capture_state` gives the live state of devices that still have an
+/// instance (see [`record_live_plugin_states`]).
+///
 /// Retaining unavailable slots preserves sidechain assignments and chain identity
 /// while plugin reloads complete asynchronously.
 pub fn collect_plugin_reload_requests(
