@@ -128,6 +128,18 @@ impl crate::state::BrowserDropTarget {
         }
     }
 
+    /// Whether `other` names the same place under the cursor; a panel's
+    /// outcome can change while the cursor stays on it.
+    fn is_place_of(&self, other: &Self) -> bool {
+        use crate::state::BrowserDropTarget as Target;
+        match (self, other) {
+            (Target::DevicePanel { track_id, .. }, Target::DevicePanel { track_id: left, .. }) => {
+                track_id == left
+            }
+            _ => self == other,
+        }
+    }
+
     /// Whether a release here takes the audio.
     pub fn accepts_drop(&self) -> bool {
         !matches!(
@@ -340,7 +352,11 @@ impl BrowserState {
                 );
             }
             BrowserMsg::LeaveDragTarget(target) => {
-                if self.drag_target.as_ref() == Some(&target) {
+                if self
+                    .drag_target
+                    .as_ref()
+                    .is_some_and(|current| current.is_place_of(&target))
+                {
                     action.status = self.clear_drag_target();
                 }
             }
