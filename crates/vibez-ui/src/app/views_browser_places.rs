@@ -18,6 +18,7 @@ const TREE_ICON_SIZE: f32 = 12.0;
 const PLACE_ICON_SIZE: f32 = 13.0;
 const PLACE_ROW_H: f32 = 26.0;
 const PLACE_LABEL_SIZE: f32 = 11.5;
+const PLACE_LABEL_H: f32 = 16.0;
 /// A disclosure chevron's width, kept by leaves too so icons line up.
 const TOGGLE_W: f32 = 14.0;
 
@@ -95,7 +96,7 @@ impl<'a> PlaceRow<'a> {
                     },
                     ..iced::Font::DEFAULT
                 })
-                .view(PLACE_LABEL_SIZE * 1.4),
+                .view(PLACE_LABEL_H),
         ]
         .spacing(7)
         .align_y(iced::Alignment::Center);
