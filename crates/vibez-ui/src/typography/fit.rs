@@ -10,6 +10,9 @@ use iced::Font;
 use crate::widgets::device_controls::text_width;
 
 const ELLIPSIS: char = '\u{2026}';
+/// Fewer kept letters than this read better as one run from the start
+/// than as two fragments.
+const MIN_SPLIT_KEPT: usize = 8;
 
 /// Measured widths of a text, whole and shortened to each length.
 struct Widths {
@@ -113,7 +116,11 @@ pub fn fit_text_middle(text: &str, width: f32, size: f32, font: Font) -> String 
 /// end, around an ellipsis. Names in one pack or folder tend to share their
 /// start and differ at their end.
 fn middle_shortened(chars: &[char], kept: usize) -> String {
-    let head_len = kept / 3;
+    let head_len = if kept < MIN_SPLIT_KEPT {
+        kept
+    } else {
+        kept / 3
+    };
     let tail = kept - head_len;
     let head: String = chars[..head_len].iter().collect();
     let end: String = chars[chars.len() - tail..].iter().collect();
