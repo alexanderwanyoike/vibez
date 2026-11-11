@@ -231,6 +231,15 @@ impl App {
         Task::batch([selection, scroll])
     }
 
+    /// Right replays only while the producer works in the Browser; a click
+    /// on a row needs no such check.
+    pub(super) fn on_replay_key(&mut self) -> Task<Message> {
+        if !self.state.browser.has_keyboard_focus() {
+            return Task::none();
+        }
+        self.replay_selected_browser_sample()
+    }
+
     /// Auditions the selected sample again once its audio is loaded, as a
     /// second click on it does.
     pub(super) fn replay_selected_browser_sample(&mut self) -> Task<Message> {

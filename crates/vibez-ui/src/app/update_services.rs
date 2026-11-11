@@ -362,7 +362,7 @@ impl App {
                 return self.select_adjacent_browser_result(direction);
             }
             Message::ReplaySelectedBrowserSample => {
-                return self.replay_selected_browser_sample();
+                return self.on_replay_key();
             }
             Message::LoadSelectedBrowserSampleToDevice => {
                 return self.handle_load_selected_browser_sample_to_device();
