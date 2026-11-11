@@ -167,6 +167,27 @@ impl ClipEditor {
         }
     }
 
+    /// The engine now plays `track`'s edited clip from `position` at
+    /// `effective_at`. A latent track hears this after the edit's request
+    /// retired and dropped its pending clip, so the store's copy stands in.
+    pub fn source_refreshed(
+        &mut self,
+        track: TrackId,
+        request_id: u64,
+        position: u64,
+        effective_at: u64,
+        clips: &ClipStore,
+    ) -> Option<&LauncherClip> {
+        let clip = self.pending.remove(&request_id).or_else(|| {
+            let id = self.playing.get(&track)?.id;
+            clips.by_id(id).cloned()
+        })?;
+        self.started_at
+            .insert(track, effective_at.saturating_sub(position));
+        self.playing.insert(track, clip);
+        self.playing.get(&track)
+    }
+
     pub fn playhead_samples(&self, id: ClipId, position: u64, spb: f64) -> Option<u64> {
         let clip = self.playing.values().find(|clip| clip.id == id)?;
         let start = *self.started_at.get(&clip.track_id)?;
