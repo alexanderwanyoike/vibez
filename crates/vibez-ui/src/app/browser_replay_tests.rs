@@ -20,6 +20,7 @@ fn app_with_loaded_selection() -> (super::App, rtrb::Consumer<EngineCommand>) {
     };
     let browser = &mut app.state.browser;
     browser.open = true;
+    browser.keyboard_focus = true;
     browser.selected_source = Some(source.clone());
     browser.waveform_source = Some(source);
     browser.waveform_audio = Some(Arc::new(DecodedAudio {
@@ -49,6 +50,16 @@ fn replaying_the_selected_sample_starts_its_audition_again() {
 fn replay_stays_silent_while_audition_is_off() {
     let (mut app, mut received) = app_with_loaded_selection();
     app.state.browser.audition_enabled = false;
+
+    let _ = app.update(Message::ReplaySelectedBrowserSample);
+
+    assert_eq!(started_auditions(&mut received), 0);
+}
+
+#[test]
+fn replay_stays_silent_after_the_producer_works_outside_the_browser() {
+    let (mut app, mut received) = app_with_loaded_selection();
+    app.state.browser.keyboard_focus = false;
 
     let _ = app.update(Message::ReplaySelectedBrowserSample);
 
