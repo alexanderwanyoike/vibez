@@ -127,6 +127,17 @@ pub fn accepts_effect_load(
     })
 }
 
+/// Records the live state of `track_id`'s plugin instrument in `snapshot`,
+/// the undo step taken just before an edit that removes the instance, so
+/// undoing that edit restores the sound the plugin had rather than the one
+/// it loaded with.
+pub fn record_plugin_instrument_state(
+    _snapshot: &mut ProjectSnapshot,
+    _track_id: TrackId,
+    _capture_state: impl FnOnce(PluginGuiKey) -> Option<String>,
+) {
+}
+
 /// Retaining unavailable slots preserves sidechain assignments and chain identity
 /// while plugin reloads complete asynchronously.
 pub fn collect_plugin_reload_requests(
@@ -295,6 +306,39 @@ mod tests {
         let mut snap = snapshot_with(vec![effect(Some(plugin_device("eq")))]);
         let requests = collect_plugin_reload_requests(&mut snap, |_| Some("fresh".to_string()));
         assert_eq!(requests.effects[0].3.state_b64.as_deref(), Some("fresh"));
+    }
+
+    fn snapshot_with_plugin_instrument() -> (ProjectSnapshot, TrackId) {
+        let mut snap = snapshot_with(Vec::new());
+        let track = &mut std::sync::Arc::make_mut(&mut snap.project_tracks).tracks[0];
+        track.has_instrument = true;
+        track.plugin_instrument_name = Some("synth".to_string());
+        track.plugin_instrument_ref = Some(plugin_device("synth"));
+        let track_id = track.id;
+        (snap, track_id)
+    }
+
+    fn recorded_instrument_state(snap: &ProjectSnapshot) -> Option<&str> {
+        snap.project_tracks.tracks[0]
+            .plugin_instrument_ref
+            .as_ref()
+            .and_then(|device| device.state_b64.as_deref())
+    }
+
+    #[test]
+    fn a_departing_plugin_instrument_leaves_its_live_state_in_the_undo_step() {
+        let (mut snap, track_id) = snapshot_with_plugin_instrument();
+        record_plugin_instrument_state(&mut snap, track_id, |key| {
+            (key == PluginGuiKey::Instrument { track_id }).then(|| "live".to_string())
+        });
+        assert_eq!(recorded_instrument_state(&snap), Some("live"));
+    }
+
+    #[test]
+    fn a_departing_plugin_without_a_live_instance_keeps_its_recorded_state() {
+        let (mut snap, track_id) = snapshot_with_plugin_instrument();
+        record_plugin_instrument_state(&mut snap, track_id, |_| None);
+        assert_eq!(recorded_instrument_state(&snap), Some("stale"));
     }
 
     #[test]
