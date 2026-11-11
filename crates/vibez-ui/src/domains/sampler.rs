@@ -129,8 +129,12 @@ pub fn is_native_drum_rack(track: &crate::state::UiTrack) -> bool {
 
 /// The Drum Rack pad a drop that names no pad loads into, the one the rack
 /// has selected, or `None` when `track` holds no Drum Rack.
-pub fn selected_drum_pad(_track: &crate::state::UiTrack) -> Option<usize> {
-    None
+pub fn selected_drum_pad(track: &crate::state::UiTrack) -> Option<usize> {
+    if !is_native_drum_rack(track) {
+        return None;
+    }
+    let last = track.drum_rack_pads.len().checked_sub(1)?;
+    Some(track.selected_drum_pad.min(last))
 }
 
 fn is_native(track: &crate::state::UiTrack, kind: vibez_core::midi::InstrumentKind) -> bool {

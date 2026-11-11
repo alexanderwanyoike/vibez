@@ -5,7 +5,6 @@ use iced::{Color, Element};
 use vibez_core::id::TrackId;
 use vibez_core::track::{drum_rack_pad_pitch, DRUM_RACK_BANK_COUNT, DRUM_RACK_BANK_SIZE};
 
-use crate::domains::browser::BrowserMsg;
 use crate::domains::device_params::{DeviceParams, DeviceSlot};
 use crate::message::Message;
 use crate::state::{BrowserDropTarget, UiTrack};
@@ -70,9 +69,9 @@ impl App {
         if self.state.browser.drag_source.is_none() {
             return card.into();
         }
-        // A near miss of a pad cancels the drag as it always has, so the
-        // device panel behind the card can never replace the rack.
-        card.on_release(Message::Browser(BrowserMsg::EndDragSample))
+        // A near miss of a pad loads the selected pad, so the device panel
+        // behind the card can never replace the rack.
+        card.on_release(Message::DropSampleOnDrumRack { track_id })
             .into()
     }
 }

@@ -524,8 +524,17 @@ impl App {
         self.dispatch_drop_for_target(source, BrowserImportTarget::Sampler(track_id))
     }
 
-    pub(super) fn on_drop_sample_on_drum_rack(&mut self, _track_id: TrackId) -> Task<Message> {
-        self.update(Message::Browser(BrowserMsg::EndDragSample))
+    pub(super) fn on_drop_sample_on_drum_rack(&mut self, track_id: TrackId) -> Task<Message> {
+        let pad_index = self
+            .state
+            .find_track(track_id)
+            .and_then(crate::domains::sampler::selected_drum_pad);
+        match pad_index {
+            Some(pad_index) if self.state.browser.drag_source.is_some() => {
+                self.handle_drop_sample_on_drum_pad(track_id, pad_index)
+            }
+            _ => self.update(Message::Browser(BrowserMsg::EndDragSample)),
+        }
     }
 
     pub(super) fn on_drop_sample_on_device_panel(&mut self, track_id: TrackId) -> Task<Message> {
