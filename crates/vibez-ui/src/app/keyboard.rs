@@ -35,6 +35,7 @@ impl EdgeShortcutState {
                 ))
                 | Message::Perform(PerformMsg::Capture(CaptureMsg::Toggle))
                 | Message::View(ViewMsg::ZoomToSelection | ViewMsg::ZoomBack)
+                | Message::ReplaySelectedBrowserSample
         );
         if !edge_triggered {
             return true;
