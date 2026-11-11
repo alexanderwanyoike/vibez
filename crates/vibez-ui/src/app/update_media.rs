@@ -524,6 +524,10 @@ impl App {
         self.dispatch_drop_for_target(source, BrowserImportTarget::Sampler(track_id))
     }
 
+    pub(super) fn on_drop_sample_on_drum_rack(&mut self, _track_id: TrackId) -> Task<Message> {
+        self.update(Message::Browser(BrowserMsg::EndDragSample))
+    }
+
     pub(super) fn on_drop_sample_on_device_panel(&mut self, track_id: TrackId) -> Task<Message> {
         let takes_drop = self
             .state

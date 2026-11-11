@@ -12,6 +12,8 @@ pub enum DevicePanelDrop {
     AddSampler,
     /// The named instrument gives way to a Sampler holding the audio.
     ReplaceWithSampler { instrument: String },
+    /// The track's Sampler loads the audio and keeps its settings.
+    LoadIntoSampler,
 }
 
 impl DevicePanelDrop {
@@ -47,6 +49,7 @@ impl DevicePanelDrop {
             Self::ReplaceWithSampler { instrument } => {
                 format!("Replaced {instrument} with a Sampler holding '{sample}'")
             }
+            Self::LoadIntoSampler => String::new(),
         }
     }
 }
@@ -79,6 +82,17 @@ mod tests {
             Some(DevicePanelDrop::ReplaceWithSampler {
                 instrument: "FM Synth".into()
             })
+        );
+    }
+
+    #[test]
+    fn a_sampler_loads_the_drop_and_keeps_its_settings() {
+        let mut track = midi_track();
+        track.has_instrument = true;
+        track.instrument_kind = Some(InstrumentKind::Sampler);
+        assert_eq!(
+            DevicePanelDrop::for_channel(&track),
+            Some(DevicePanelDrop::LoadIntoSampler)
         );
     }
 
@@ -117,6 +131,10 @@ mod tests {
             }
             .loaded_status("kick.wav"),
             "Replaced Surge XT with a Sampler holding 'kick.wav'"
+        );
+        assert_eq!(
+            DevicePanelDrop::LoadIntoSampler.loaded_status("kick.wav"),
+            "Imported 'kick.wav' to Sampler"
         );
     }
 }

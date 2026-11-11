@@ -328,6 +328,9 @@ impl App {
             Message::DropSampleOnSampler { track_id } => {
                 return self.on_drop_sample_on_sampler(track_id)
             }
+            Message::DropSampleOnDrumRack { track_id } => {
+                return self.on_drop_sample_on_drum_rack(track_id)
+            }
             Message::DropSampleOnDevicePanel { track_id } => {
                 return self.on_drop_sample_on_device_panel(track_id)
             }

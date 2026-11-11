@@ -57,7 +57,10 @@ async fn a_drop_on_an_empty_midi_tracks_panel_adds_a_loaded_sampler_in_one_undo_
     drop_on_panel(&mut app, track_id, kick(directory.path())).await;
 
     assert_holds_kick(&app, track_id);
-    assert_eq!(app.state.status_text, "Added a Sampler holding 'kick.wav'");
+    assert_eq!(
+        app.state.status_text,
+        "Added a Sampler holding 'kick.wav' (RAW)"
+    );
     assert!(app.state.browser.drag_source.is_none());
     let _ = app.update(Message::Project(ProjectMsg::Undo));
     let track = app.state.find_track(track_id).unwrap();
@@ -90,7 +93,7 @@ async fn a_drop_on_the_panel_replaces_a_built_in_instrument_and_one_undo_restore
     assert_holds_kick(&app, track_id);
     assert_eq!(
         app.state.status_text,
-        "Replaced FM Synth with a Sampler holding 'kick.wav'"
+        "Replaced FM Synth with a Sampler holding 'kick.wav' (RAW)"
     );
     let _ = app.update(Message::Project(ProjectMsg::Undo));
     let track = app.state.find_track(track_id).unwrap();
@@ -113,6 +116,78 @@ async fn a_drop_on_an_audio_tracks_panel_changes_nothing() {
     drop_on_panel(&mut app, track_id, kick(directory.path())).await;
 
     assert!(!app.state.find_track(track_id).unwrap().has_instrument);
+    assert!(app.state.project.history.undo.is_empty());
+    assert!(app.state.browser.drag_source.is_none());
+    assert_eq!(app.state.status_text, "Drag cancelled");
+}
+
+#[tokio::test]
+async fn a_drop_on_the_panel_of_a_sampler_loads_into_it_and_keeps_its_settings() {
+    let directory = tempfile::tempdir().unwrap();
+    let (mut app, track_id) = app_with_midi_track();
+    let _ = app.update(Message::Devices(DevicesMsg::SetTrackInstrument(
+        track_id,
+        InstrumentKind::Sampler,
+    )));
+    let _ = app.update(Message::Devices(DevicesMsg::SetInstrumentParam(
+        track_id, 0, 0.25,
+    )));
+    let params = app
+        .state
+        .find_track(track_id)
+        .unwrap()
+        .instrument_params
+        .clone();
+    app.state.project.history = Default::default();
+
+    drop_on_panel(&mut app, track_id, kick(directory.path())).await;
+
+    assert_holds_kick(&app, track_id);
+    assert_eq!(
+        app.state.find_track(track_id).unwrap().instrument_params,
+        params
+    );
+    assert_eq!(
+        app.state.status_text,
+        "Imported 'kick.wav' to Sampler (RAW)"
+    );
+    let _ = app.update(Message::Project(ProjectMsg::Undo));
+    let track = app.state.find_track(track_id).unwrap();
+    assert!(crate::domains::sampler::is_native_sampler(track));
+    assert!(track.sample_audio.is_none());
+    assert_eq!(track.instrument_params, params);
+    assert!(app.state.project.history.undo.is_empty());
+}
+
+#[tokio::test]
+async fn a_drop_on_a_drum_rack_card_off_its_pads_loads_the_selected_pad() {
+    let directory = tempfile::tempdir().unwrap();
+    let (mut app, track_id) = app_with_midi_track();
+    let _ = app.update(Message::Devices(DevicesMsg::SetTrackInstrument(
+        track_id,
+        InstrumentKind::DrumRack,
+    )));
+    Arc::make_mut(&mut app.state.project_tracks)
+        .find_mut(track_id)
+        .unwrap()
+        .selected_drum_pad = 3;
+    app.state.project.history = Default::default();
+
+    app.state.browser.drag_source = Some(MediaSourceRef::LocalFile {
+        path: kick(directory.path()),
+    });
+    app.state.browser.drag_label = Some("kick.wav".into());
+    run_until_idle(&mut app, Message::DropSampleOnDrumRack { track_id }).await;
+
+    let track = app.state.find_track(track_id).unwrap();
+    assert!(crate::domains::sampler::is_native_drum_rack(track));
+    assert_eq!(track.drum_rack_pads[3].name.as_deref(), Some("kick.wav"));
+    assert!(track.drum_rack_pads[3].audio.is_some());
+    assert!(app.state.browser.drag_source.is_none());
+    let _ = app.update(Message::Project(ProjectMsg::Undo));
+    let track = app.state.find_track(track_id).unwrap();
+    assert!(crate::domains::sampler::is_native_drum_rack(track));
+    assert!(track.drum_rack_pads[3].audio.is_none());
     assert!(app.state.project.history.undo.is_empty());
 }
 

@@ -349,6 +349,10 @@ pub enum Message {
     DropSampleOnSampler {
         track_id: TrackId,
     },
+    /// Released on a Drum Rack card away from its pads.
+    DropSampleOnDrumRack {
+        track_id: TrackId,
+    },
     /// Released on a channel's device panel outside any instrument card.
     DropSampleOnDevicePanel {
         track_id: TrackId,
