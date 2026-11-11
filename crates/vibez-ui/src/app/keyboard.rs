@@ -209,7 +209,7 @@ impl super::App {
                     let movement = clip_window_movement(
                         key,
                         modifiers,
-                        self.state.browser.open && self.state.browser.keyboard_focus,
+                        self.state.browser.has_keyboard_focus(),
                     );
                     if let Some((tracks, rows)) = movement {
                         return self.update(Message::Perform(PerformMsg::Clips(
