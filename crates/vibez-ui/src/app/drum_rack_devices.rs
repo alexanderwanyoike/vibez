@@ -42,13 +42,7 @@ impl App {
         });
         let banks_firing: [bool; DRUM_RACK_BANK_COUNT] =
             std::array::from_fn(|bank| view.drum_pad_bank_is_flashing(track_id, bank, now));
-        let drop_target = match self.state.browser.drag_target {
-            Some(BrowserDropTarget::DrumRackPad {
-                track_id: target,
-                pad_index,
-            }) if target == track_id => Some(pad_index),
-            _ => None,
-        };
+        let drop_target = self.state.browser.drum_pad_drop_target(track_id);
         let body = iced::widget::responsive(move |size| {
             crate::widgets::drum_rack_device::DrumRackView {
                 track_id,

@@ -150,6 +150,17 @@ impl BrowserState {
         }
     }
 
+    /// The pad of `track_id`'s Drum Rack a release would load, to highlight it.
+    pub fn drum_pad_drop_target(&self, track_id: TrackId) -> Option<usize> {
+        match self.drag_target {
+            Some(crate::state::BrowserDropTarget::DrumRackPad {
+                track_id: rack,
+                pad_index,
+            }) if rack == track_id => Some(pad_index),
+            _ => None,
+        }
+    }
+
     /// Makes `target` the drop target and returns its status.
     fn hover(&mut self, target: crate::state::BrowserDropTarget) -> String {
         let status = target.status();
