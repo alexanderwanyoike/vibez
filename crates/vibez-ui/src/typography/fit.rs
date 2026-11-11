@@ -25,6 +25,10 @@ thread_local! {
     /// Shaping text is far too slow to repeat for every clip on every
     /// frame, and a song repeats a few names many times.
     static WIDTHS: RefCell<HashMap<WidthsKey, Rc<Widths>>> = RefCell::new(HashMap::new());
+
+    /// Browser rows fit their names again on every frame.
+    static MIDDLE_FITS: RefCell<HashMap<(String, u32, Font, u32), String>> =
+        RefCell::new(HashMap::new());
 }
 
 fn widths(text: &str, size: f32, font: Font) -> Rc<Widths> {
@@ -75,7 +79,43 @@ pub fn fit_text(text: &str, width: f32, size: f32, font: Font, min_kept: usize) 
 /// start and its end around an ellipsis, so names that share a long prefix
 /// stay told apart.
 pub fn fit_text_middle(text: &str, width: f32, size: f32, font: Font) -> String {
-    fit_text(text, width, size, font, 0).unwrap_or_default()
+    let key = (text.to_owned(), size.to_bits(), font, width.to_bits());
+    if let Some(fitted) = MIDDLE_FITS.with(|cache| cache.borrow().get(&key).cloned()) {
+        return fitted;
+    }
+    let fitted = if text_width(text, size, font) <= width {
+        text.to_owned()
+    } else {
+        let chars: Vec<char> = text.chars().collect();
+        let fits = |kept: usize| text_width(&middle_shortened(&chars, kept), size, font) <= width;
+        let (mut low, mut high) = (0, chars.len().saturating_sub(1));
+        while low < high {
+            let kept = (low + high).div_ceil(2);
+            if fits(kept) {
+                low = kept;
+            } else {
+                high = kept - 1;
+            }
+        }
+        middle_shortened(&chars, low)
+    };
+    MIDDLE_FITS.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if cache.len() >= 1024 {
+            cache.clear();
+        }
+        cache.insert(key, fitted.clone());
+    });
+    fitted
+}
+
+/// `kept` chars of `chars`, half from its start and half from its end,
+/// around an ellipsis.
+fn middle_shortened(chars: &[char], kept: usize) -> String {
+    let tail = kept / 2;
+    let head: String = chars[..kept - tail].iter().collect();
+    let end: String = chars[chars.len() - tail..].iter().collect();
+    format!("{}{ELLIPSIS}{}", head.trim_end(), end.trim_start())
 }
 
 fn shortened(text: &str, end: usize) -> String {
