@@ -109,11 +109,13 @@ pub fn fit_text_middle(text: &str, width: f32, size: f32, font: Font) -> String 
     fitted
 }
 
-/// `kept` chars of `chars`, half from its start and half from its end,
-/// around an ellipsis.
+/// `kept` chars of `chars`, a third from its start and the rest from its
+/// end, around an ellipsis. Names in one pack or folder tend to share their
+/// start and differ at their end.
 fn middle_shortened(chars: &[char], kept: usize) -> String {
-    let tail = kept / 2;
-    let head: String = chars[..kept - tail].iter().collect();
+    let head_len = kept / 3;
+    let tail = kept - head_len;
+    let head: String = chars[..head_len].iter().collect();
     let end: String = chars[chars.len() - tail..].iter().collect();
     format!("{}{ELLIPSIS}{}", head.trim_end(), end.trim_start())
 }
