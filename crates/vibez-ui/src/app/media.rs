@@ -533,7 +533,7 @@ impl App {
                 });
                 Task::none()
             }
-            BrowserImportTarget::NewSampler(track_id) => {
+            BrowserImportTarget::ImpliedSampler(track_id) => {
                 let Some(outcome) = self
                     .state
                     .find_track(track_id)

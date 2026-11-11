@@ -550,7 +550,7 @@ impl App {
             return Task::none();
         };
         self.state.browser.cancel_media_drag();
-        self.dispatch_drop_for_target(source, BrowserImportTarget::NewSampler(track_id))
+        self.dispatch_drop_for_target(source, BrowserImportTarget::ImpliedSampler(track_id))
     }
 
     pub(super) fn on_local_sample_preview_ready(

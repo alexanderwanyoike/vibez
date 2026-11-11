@@ -305,7 +305,7 @@ pub enum BrowserImportTarget {
     Sampler(TrackId),
     /// The Sampler a device panel drop implies, which is the track's own or a
     /// new one in place of any other instrument.
-    NewSampler(TrackId),
+    ImpliedSampler(TrackId),
     DrumRackPad {
         track_id: TrackId,
         pad_index: usize,
