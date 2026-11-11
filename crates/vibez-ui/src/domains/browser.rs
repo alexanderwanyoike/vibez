@@ -109,6 +109,17 @@ impl BrowserState {
         )
     }
 
+    fn hovers_instrument_card(&self, track_id: TrackId) -> bool {
+        self.hovers_drum_rack_pad(track_id)
+            || matches!(
+                self.drag_target,
+                Some(
+                    crate::state::BrowserDropTarget::Sampler { track_id: card }
+                    | crate::state::BrowserDropTarget::DrumRack { track_id: card }
+                ) if card == track_id
+            )
+    }
+
     pub fn update(&mut self, msg: BrowserMsg) -> BrowserAction {
         let mut action = BrowserAction::default();
         match msg {
@@ -244,15 +255,7 @@ impl BrowserState {
             BrowserMsg::DragHoverDevicePanel { track_id, drop } => {
                 // The panel's hover arrives after that of any card inside it,
                 // so the card under the cursor keeps the target.
-                let on_card = self.hovers_drum_rack_pad(track_id)
-                    || matches!(
-                        self.drag_target,
-                        Some(
-                            crate::state::BrowserDropTarget::Sampler { track_id: card }
-                            | crate::state::BrowserDropTarget::DrumRack { track_id: card }
-                        ) if card == track_id
-                    );
-                if self.drag_source.is_none() || on_card {
+                if self.drag_source.is_none() || self.hovers_instrument_card(track_id) {
                     return action;
                 }
                 self.drag_target = Some(crate::state::BrowserDropTarget::DevicePanel { track_id });
