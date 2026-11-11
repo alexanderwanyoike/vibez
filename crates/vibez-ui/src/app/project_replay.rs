@@ -30,21 +30,17 @@ impl App {
         self.state.project.history.push_edit(snapshot, gesture);
     }
 
-    /// The undo step before `message`, holding the live state of any plugin
-    /// instrument the message takes away.
-    pub(super) fn push_undo_snapshot_before(
+    /// The undo step before `message`, holding every live plugin's state when
+    /// the message may take an instrument away.
+    pub(super) fn push_undo_step_before(
         &mut self,
         message: &crate::message::Message,
         gesture: Option<crate::state::UndoGestureId>,
     ) {
-        let mut snapshot = self.take_snapshot();
-        if let Some(track_id) = super::update_policy::departing_instrument(message) {
-            crate::domains::project::record_plugin_instrument_state(
-                &mut snapshot,
-                track_id,
-                |key| self.capture_device_state(key),
-            );
+        if !super::update_policy::may_remove_an_instrument(message) {
+            return self.push_undo_snapshot(gesture);
         }
+        let snapshot = self.snapshot_with_live_plugin_states();
         self.state.project.history.push_edit(snapshot, gesture);
     }
 

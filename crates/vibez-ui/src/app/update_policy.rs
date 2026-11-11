@@ -1,10 +1,7 @@
 //! Router-level message policies kept separate from the exhaustive update
 //! dispatch so policy growth cannot turn `update.rs` back into a megafile.
 
-use vibez_core::id::TrackId;
-
 use crate::domains::arrangement::ArrangementMsg;
-use crate::domains::devices::DevicesMsg;
 use crate::message::{BrowserImportTarget, Message};
 
 pub(super) fn apply_project_track_deletion_policy(message: Message, confirm: bool) -> Message {
@@ -16,76 +13,67 @@ pub(super) fn apply_project_track_deletion_policy(message: Message, confirm: boo
     }
 }
 
-/// The track whose instrument `message` may take away, so the undo step
-/// taken before it can keep that instrument's live plugin state.
-pub(super) fn departing_instrument(message: &Message) -> Option<TrackId> {
+/// Whether `message` may take an instrument away, so the undo step before it
+/// records the live plugin state.
+pub(super) fn may_remove_an_instrument(message: &Message) -> bool {
     match message {
-        Message::Devices(
-            DevicesMsg::SetTrackInstrument(track_id, _)
-            | DevicesMsg::RemoveTrackInstrument(track_id),
-        )
-        | Message::BrowserImportPrepared {
-            target: BrowserImportTarget::ImpliedSampler(track_id),
-            ..
-        } => Some(*track_id),
-        _ => None,
+        Message::Devices(msg) => msg.instrument_change_track().is_some(),
+        Message::BrowserImportPrepared { target, .. } => {
+            matches!(target, BrowserImportTarget::ImpliedSampler(_))
+        }
+        _ => false,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domains::devices::DevicesMsg;
+    use crate::message::PreparedBrowserImport;
+    use crate::state::{AuditionImportInput, AuditionMode};
+    use std::sync::Arc;
+    use vibez_core::audio_buffer::DecodedAudio;
+    use vibez_core::id::TrackId;
     use vibez_core::midi::InstrumentKind;
+    use vibez_core::track::MediaSourceRef;
 
-    #[test]
-    fn replacing_or_removing_an_instrument_names_the_departing_one() {
-        let track_id = TrackId::new();
-        for message in [
-            Message::Devices(DevicesMsg::SetTrackInstrument(
-                track_id,
-                InstrumentKind::Sampler,
-            )),
-            Message::Devices(DevicesMsg::RemoveTrackInstrument(track_id)),
-        ] {
-            assert_eq!(departing_instrument(&message), Some(track_id));
-        }
-        let prepared = |target| Message::BrowserImportPrepared {
+    fn prepared(target: BrowserImportTarget) -> Message {
+        Message::BrowserImportPrepared {
             target,
             generation: 0,
-            payload: crate::message::PreparedBrowserImport {
-                treatment: crate::state::AuditionImportInput {
-                    mode: crate::state::AuditionMode::Raw,
+            payload: PreparedBrowserImport {
+                treatment: AuditionImportInput {
+                    mode: AuditionMode::Raw,
                     source_bpm: None,
                 },
-                audio: std::sync::Arc::new(vibez_core::audio_buffer::DecodedAudio {
-                    channels: vec![vec![0.0]],
+                audio: Arc::new(DecodedAudio {
+                    channels: Vec::new(),
                     sample_rate: 44_100,
                 }),
                 original_audio: None,
-                name: "kick.wav".into(),
-                source: vibez_core::track::MediaSourceRef::LocalFile {
-                    path: "/kick.wav".into(),
+                name: String::new(),
+                source: MediaSourceRef::LocalFile {
+                    path: Default::default(),
                 },
             },
-        };
-        assert_eq!(
-            departing_instrument(&prepared(
-                crate::message::BrowserImportTarget::ImpliedSampler(track_id)
-            )),
-            Some(track_id)
-        );
-        assert_eq!(
-            departing_instrument(&prepared(crate::message::BrowserImportTarget::Sampler(
-                track_id
-            ))),
-            None
-        );
-        assert_eq!(
-            departing_instrument(&Message::Devices(DevicesMsg::SetInstrumentParam(
-                track_id, 0, 0.5
-            ))),
-            None
-        );
+        }
+    }
+
+    #[test]
+    fn instrument_changes_and_panel_sampler_imports_may_remove_an_instrument() {
+        let track_id = TrackId::new();
+        let set = DevicesMsg::SetTrackInstrument(track_id, InstrumentKind::Sampler);
+        assert!(may_remove_an_instrument(&Message::Devices(set)));
+        let remove = DevicesMsg::RemoveTrackInstrument(track_id);
+        assert!(may_remove_an_instrument(&Message::Devices(remove)));
+        assert!(may_remove_an_instrument(&prepared(
+            BrowserImportTarget::ImpliedSampler(track_id)
+        )));
+        assert!(!may_remove_an_instrument(&prepared(
+            BrowserImportTarget::Sampler(track_id)
+        )));
+        let param = DevicesMsg::SetInstrumentParam(track_id, 0, 0.5);
+        assert!(!may_remove_an_instrument(&Message::Devices(param)));
     }
 
     #[test]

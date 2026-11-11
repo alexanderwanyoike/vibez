@@ -43,12 +43,13 @@ impl App {
             .map(|effect| {
                 let plugin = effect.plugin_ref.as_ref().map(|dev| {
                     let mut dev = dev.clone();
-                    dev.state_b64 = self
-                        .capture_device_state(PluginGuiKey::Effect {
+                    crate::domains::project::keep_live_state(
+                        &mut dev,
+                        self.capture_device_state(PluginGuiKey::Effect {
                             track_id: track.id,
                             effect_id: effect.id,
-                        })
-                        .or(dev.state_b64);
+                        }),
+                    );
                     dev
                 });
                 vibez_core::effect::EffectInfo {
@@ -69,9 +70,10 @@ impl App {
             .then(|| {
                 track.plugin_instrument_ref.as_ref().map(|dev| {
                     let mut dev = dev.clone();
-                    dev.state_b64 = self
-                        .capture_device_state(PluginGuiKey::Instrument { track_id: track.id })
-                        .or(dev.state_b64);
+                    crate::domains::project::keep_live_state(
+                        &mut dev,
+                        self.capture_device_state(PluginGuiKey::Instrument { track_id: track.id }),
+                    );
                     dev
                 })
             })

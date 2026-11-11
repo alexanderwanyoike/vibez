@@ -104,9 +104,8 @@ pub struct PluginReloadRequests {
 /// Strip plugin devices out of a snapshot's tracks and return reload
 /// requests for them.
 ///
-/// `capture_state` is called for devices that still have a live
-/// instance so undo restores their exact current state instead of the
-/// (possibly stale, possibly absent) blob recorded at project load.
+/// `capture_state` gives the live state of devices that still have an
+/// instance (see [`record_live_plugin_states`]).
 // A reload may outlive slot deletion, replacement or project reset. Its saved
 // identity must still belong to the current project before phase-two init.
 pub fn accepts_effect_load(
@@ -177,33 +176,6 @@ pub fn keep_live_state(device: &mut PluginDeviceInfo, live: Option<String>) {
     }
 }
 
-/// Records the live state of `track_id`'s plugin instrument in `snapshot`,
-/// the undo step taken just before an edit that removes the instance, so
-/// undoing that edit restores the sound the plugin had rather than the one
-/// it loaded with.
-pub fn record_plugin_instrument_state(
-    snapshot: &mut ProjectSnapshot,
-    track_id: TrackId,
-    capture_state: impl FnOnce(PluginGuiKey) -> Option<String>,
-) {
-    let has_plugin = snapshot
-        .project_tracks
-        .find(track_id)
-        .is_some_and(|track| track.plugin_instrument_ref.is_some());
-    if !has_plugin {
-        return;
-    }
-    let Some(state) = capture_state(PluginGuiKey::Instrument { track_id }) else {
-        return;
-    };
-    if let Some(device) = std::sync::Arc::make_mut(&mut snapshot.project_tracks)
-        .find_mut(track_id)
-        .and_then(|track| track.plugin_instrument_ref.as_mut())
-    {
-        device.state_b64 = Some(state);
-    }
-}
-
 /// Retaining unavailable slots preserves sidechain assignments and chain identity
 /// while plugin reloads complete asynchronously.
 pub fn collect_plugin_reload_requests(
@@ -226,12 +198,13 @@ pub fn collect_plugin_reload_requests(
         for (chain_pos, effect) in track.effects.iter_mut().enumerate() {
             if let Some(dev) = &effect.plugin_ref {
                 let mut dev = dev.clone();
-                if let Some(state) = capture_state(PluginGuiKey::Effect {
-                    track_id,
-                    effect_id: effect.id,
-                }) {
-                    dev.state_b64 = Some(state);
-                }
+                keep_live_state(
+                    &mut dev,
+                    capture_state(PluginGuiKey::Effect {
+                        track_id,
+                        effect_id: effect.id,
+                    }),
+                );
                 effect.plugin_ref = Some(dev.clone());
                 effect.external_inputs.clear();
                 effect.latency_samples = None;
@@ -244,9 +217,10 @@ pub fn collect_plugin_reload_requests(
         if let Some(dev) = &track.plugin_instrument_ref {
             track.instrument_latency_samples = None;
             let mut dev = dev.clone();
-            if let Some(state) = capture_state(PluginGuiKey::Instrument { track_id }) {
-                dev.state_b64 = Some(state);
-            }
+            keep_live_state(
+                &mut dev,
+                capture_state(PluginGuiKey::Instrument { track_id }),
+            );
             requests.instruments.push((track_id, dev));
         }
     }
@@ -392,15 +366,6 @@ mod tests {
     }
 
     #[test]
-    fn a_departing_plugin_instrument_leaves_its_live_state_in_the_undo_step() {
-        let (mut snap, track_id) = snapshot_with_plugin_instrument();
-        record_plugin_instrument_state(&mut snap, track_id, |key| {
-            (key == PluginGuiKey::Instrument { track_id }).then(|| "live".to_string())
-        });
-        assert_eq!(recorded_instrument_state(&snap), Some("live"));
-    }
-
-    #[test]
     fn the_snapshot_undo_and_redo_push_holds_every_live_plugins_state() {
         let (mut snap, _) = snapshot_with_plugin_instrument();
         std::sync::Arc::make_mut(&mut snap.project_tracks).tracks[0]
@@ -423,9 +388,9 @@ mod tests {
     }
 
     #[test]
-    fn a_departing_plugin_without_a_live_instance_keeps_its_recorded_state() {
-        let (mut snap, track_id) = snapshot_with_plugin_instrument();
-        record_plugin_instrument_state(&mut snap, track_id, |_| None);
+    fn a_plugin_without_a_live_instance_keeps_its_recorded_state() {
+        let (mut snap, _) = snapshot_with_plugin_instrument();
+        record_live_plugin_states(&mut snap, |_| None);
         assert_eq!(recorded_instrument_state(&snap), Some("stale"));
     }
 
