@@ -528,9 +528,11 @@ impl App {
                 self.add_audio_clip_to_track_at(track_id, position_samples, payload)
             }
             BrowserImportTarget::Sampler(track_id) => {
-                self.load_sampler_import(track_id, payload, |name| {
-                    DevicePanelDrop::LoadIntoExisting.loaded_status(name)
-                });
+                self.load_sampler_import(
+                    track_id,
+                    payload,
+                    crate::domains::sampler::imported_headline,
+                );
                 Task::none()
             }
             BrowserImportTarget::ImpliedSampler(track_id) => {

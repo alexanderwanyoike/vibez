@@ -118,6 +118,11 @@ pub fn pitch_controls(pad: bool) -> &'static [usize] {
     }
 }
 
+/// How the status names a sample loaded into a Sampler.
+pub fn imported_headline(sample: &str) -> String {
+    format!("Imported '{sample}' to Sampler")
+}
+
 pub fn is_native_sampler(track: &crate::state::UiTrack) -> bool {
     is_native(track, vibez_core::midi::InstrumentKind::Sampler)
 }

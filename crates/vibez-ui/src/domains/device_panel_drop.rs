@@ -52,7 +52,7 @@ impl DevicePanelDrop {
             Self::ReplaceWithSampler { instrument } => {
                 format!("Replaced {instrument} with a Sampler holding '{sample}'")
             }
-            Self::LoadIntoExisting => format!("Imported '{sample}' to Sampler"),
+            Self::LoadIntoExisting => super::sampler::imported_headline(sample),
         }
     }
 }
