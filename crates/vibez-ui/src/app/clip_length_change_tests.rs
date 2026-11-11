@@ -83,3 +83,26 @@ fn an_edit_acknowledged_after_its_request_retired_still_lengthens_the_playhead()
     let editor = &app.state.perform.clip_editor;
     assert_eq!(editor.playhead_samples(longer.id, 36, SPB), Some(20));
 }
+
+#[test]
+fn a_recorded_take_that_grows_keeps_the_playhead_where_the_engine_plays() {
+    let Playing {
+        mut app,
+        mut events,
+        longer,
+        ..
+    } = playing_clip();
+
+    app.publish_recorded_clip(longer.clone(), true);
+    events
+        .push(EngineEvent::ClipCaptureSource {
+            track_id: longer.track_id,
+            position: 4,
+            effective_at_samples: 20,
+        })
+        .unwrap();
+    app.poll_engine_events();
+
+    let editor = &app.state.perform.clip_editor;
+    assert_eq!(editor.playhead_samples(longer.id, 20, SPB), Some(4));
+}
