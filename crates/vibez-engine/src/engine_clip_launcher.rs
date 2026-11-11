@@ -409,6 +409,11 @@ impl ClipEventContext<'_> {
                 track_id,
                 effective_at_samples,
                 ..
+            }
+            | EngineEvent::ClipCaptureSource {
+                track_id,
+                effective_at_samples,
+                ..
             } => {
                 let path = super::presentation::live_path_latency_fields(self.routing, *track_id);
                 *effective_at_samples = effective_at_samples.saturating_sub(
