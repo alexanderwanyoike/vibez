@@ -1,6 +1,8 @@
 //! What audio dropped from the Browser on a channel's device panel, outside
 //! any instrument card, does to that channel.
 
+use vibez_core::midi::InstrumentKind;
+
 use crate::state::ProjectTrack;
 
 /// The outcome of a drop on the device panel outside any instrument card.
@@ -15,13 +17,37 @@ pub enum DevicePanelDrop {
 impl DevicePanelDrop {
     /// What a drop on `channel`'s panel does, or `None` for a channel that
     /// takes no instrument.
-    pub fn for_channel(_channel: &ProjectTrack) -> Option<Self> {
-        None
+    pub fn for_channel(channel: &ProjectTrack) -> Option<Self> {
+        if super::devices::instrument_refusal(Some(channel), InstrumentKind::Sampler.name())
+            .is_some()
+        {
+            return None;
+        }
+        if !channel.has_instrument {
+            return Some(Self::AddSampler);
+        }
+        let instrument = channel
+            .plugin_instrument_name
+            .clone()
+            .or_else(|| {
+                channel
+                    .plugin_instrument_ref
+                    .as_ref()
+                    .map(|plugin| plugin.name.clone())
+            })
+            .or_else(|| channel.instrument_kind.map(|kind| kind.name().to_string()))
+            .unwrap_or_else(|| "the instrument".to_string());
+        Some(Self::ReplaceWithSampler { instrument })
     }
 
     /// The status once the Sampler holds `sample`.
-    pub fn loaded_status(&self, _sample: &str) -> String {
-        String::new()
+    pub fn loaded_status(&self, sample: &str) -> String {
+        match self {
+            Self::AddSampler => format!("Added a Sampler holding '{sample}'"),
+            Self::ReplaceWithSampler { instrument } => {
+                format!("Replaced {instrument} with a Sampler holding '{sample}'")
+            }
+        }
     }
 }
 
@@ -29,7 +55,7 @@ impl DevicePanelDrop {
 mod tests {
     use super::*;
     use vibez_core::id::TrackId;
-    use vibez_core::midi::{InstrumentKind, TrackKind};
+    use vibez_core::midi::TrackKind;
 
     fn midi_track() -> ProjectTrack {
         ProjectTrack::new_instrument(TrackId::new(), "MIDI 1".into(), TrackKind::Midi, 0)

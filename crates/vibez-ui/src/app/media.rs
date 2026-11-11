@@ -11,6 +11,7 @@ use vibez_core::midi::{InstrumentKind, TrackKind};
 use vibez_core::track::MediaSourceRef;
 use vibez_engine::commands::{AuditionStart, EngineCommand};
 
+use crate::domains::device_panel_drop::DevicePanelDrop;
 use crate::message::{BrowserImportTarget, Message, PreparedBrowserImport};
 use crate::state::{AuditionMode, SampleBrowserEntry, UiClip, UiDrumPad};
 
@@ -545,6 +546,27 @@ impl App {
                         .unwrap_or_default()
                 );
                 Task::none()
+            }
+            BrowserImportTarget::NewSampler(track_id) => {
+                let Some(outcome) = self
+                    .state
+                    .find_track(track_id)
+                    .and_then(DevicePanelDrop::for_channel)
+                else {
+                    return Task::none();
+                };
+                self.route_devices(
+                    crate::domains::devices::DevicesMsg::SetTrackInstrument(
+                        track_id,
+                        InstrumentKind::Sampler,
+                    ),
+                    None,
+                );
+                let name = payload.name.clone();
+                let task = self
+                    .apply_browser_import_prepared(BrowserImportTarget::Sampler(track_id), payload);
+                self.state.status_text = outcome.loaded_status(&name);
+                task
             }
             BrowserImportTarget::DrumRackPad {
                 track_id,

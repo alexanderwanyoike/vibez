@@ -8,6 +8,7 @@ use iced::Task;
 
 use crate::domains::arrangement::ArrangementMsg;
 use crate::domains::browser::BrowserMsg;
+use crate::domains::device_panel_drop::DevicePanelDrop;
 use crate::domains::piano_roll::PianoRollMsg;
 use crate::domains::view::ViewMsg;
 use vibez_core::id::{ClipId, TrackId};
@@ -523,8 +524,20 @@ impl App {
         self.dispatch_drop_for_target(source, BrowserImportTarget::Sampler(track_id))
     }
 
-    pub(super) fn on_drop_sample_on_device_panel(&mut self, _track_id: TrackId) -> Task<Message> {
-        Task::none()
+    pub(super) fn on_drop_sample_on_device_panel(&mut self, track_id: TrackId) -> Task<Message> {
+        let takes_drop = self
+            .state
+            .find_track(track_id)
+            .and_then(DevicePanelDrop::for_channel)
+            .is_some();
+        if !takes_drop {
+            return self.update(Message::Browser(BrowserMsg::EndDragSample));
+        }
+        let Some(source) = self.state.browser.drag_source.take() else {
+            return Task::none();
+        };
+        self.state.browser.cancel_media_drag();
+        self.dispatch_drop_for_target(source, BrowserImportTarget::NewSampler(track_id))
     }
 
     pub(super) fn on_local_sample_preview_ready(
