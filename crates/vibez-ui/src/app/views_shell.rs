@@ -77,6 +77,46 @@ pub(super) fn vertical_pane_splitter(active: bool, on_press: Message) -> Element
 }
 
 impl App {
+    /// What the drag ghost says a release would do, and whether that drop is
+    /// valid (`None` while there is no target).
+    fn browser_drag_target_label(&self) -> (String, Option<bool>) {
+        match self.state.browser.drag_target {
+            Some(crate::state::BrowserDropTarget::ArrangementLane {
+                beat, compatible, ..
+            }) => (
+                if compatible {
+                    format!("AUDIO LANE · BEAT {beat:.2}")
+                } else {
+                    "INVALID · MIDI/INSTRUMENT LANE".into()
+                },
+                Some(compatible),
+            ),
+            Some(crate::state::BrowserDropTarget::EmptyArrangement { beat }) => {
+                (format!("NEW AUDIO TRACK · BEAT {beat:.2}"), Some(true))
+            }
+            Some(crate::state::BrowserDropTarget::Sampler { .. }) => {
+                ("LOAD INTO SAMPLER".into(), Some(true))
+            }
+            Some(crate::state::BrowserDropTarget::DrumRackPad { pad_index, .. }) => {
+                (format!("ASSIGN DRUM PAD {}", pad_index + 1), Some(true))
+            }
+            Some(crate::state::BrowserDropTarget::DrumRack { .. }) => {
+                ("CHOOSE A DRUM PAD".into(), None)
+            }
+            Some(crate::state::BrowserDropTarget::DevicePanel { track_id }) => {
+                match self
+                    .state
+                    .find_track(track_id)
+                    .and_then(crate::domains::device_panel_drop::DevicePanelDrop::for_channel)
+                {
+                    Some(drop) => (drop.hover_status().to_uppercase(), Some(true)),
+                    None => ("CHOOSE A DROP TARGET".into(), None),
+                }
+            }
+            None => ("CHOOSE A DROP TARGET".into(), None),
+        }
+    }
+
     /// Where the Arrange or Perform workspace sits beside the Browser.
     pub(super) fn workspace_span(&self) -> crate::shell_layout::Span {
         let browser_width = self.state.browser.open.then(|| {
@@ -163,41 +203,7 @@ impl App {
                     .drag_preview_beats(self.state.transport.bpm)
                     .map(|beats| format!(" · {beats:.2} beats"))
                     .unwrap_or_default();
-                let (target, valid) = match self.state.browser.drag_target {
-                    Some(crate::state::BrowserDropTarget::ArrangementLane {
-                        beat,
-                        compatible,
-                        ..
-                    }) => (
-                        if compatible {
-                            format!("AUDIO LANE · BEAT {beat:.2}")
-                        } else {
-                            "INVALID · MIDI/INSTRUMENT LANE".into()
-                        },
-                        Some(compatible),
-                    ),
-                    Some(crate::state::BrowserDropTarget::EmptyArrangement { beat }) => {
-                        (format!("NEW AUDIO TRACK · BEAT {beat:.2}"), Some(true))
-                    }
-                    Some(crate::state::BrowserDropTarget::Sampler { .. }) => {
-                        ("LOAD INTO SAMPLER".into(), Some(true))
-                    }
-                    Some(crate::state::BrowserDropTarget::DrumRackPad { pad_index, .. }) => {
-                        (format!("ASSIGN DRUM PAD {}", pad_index + 1), Some(true))
-                    }
-                    Some(crate::state::BrowserDropTarget::DrumRack { .. }) => {
-                        ("CHOOSE A DRUM PAD".into(), None)
-                    }
-                    Some(crate::state::BrowserDropTarget::DevicePanel { track_id }) => {
-                        match self.state.find_track(track_id).and_then(
-                            crate::domains::device_panel_drop::DevicePanelDrop::for_channel,
-                        ) {
-                            Some(drop) => (drop.hover_status().to_uppercase(), Some(true)),
-                            None => ("CHOOSE A DROP TARGET".into(), None),
-                        }
-                    }
-                    None => ("CHOOSE A DROP TARGET".into(), None),
-                };
+                let (target, valid) = self.browser_drag_target_label();
                 let ghost = canvas(crate::widgets::browser_drag_ghost::BrowserDragGhost {
                     cursor: iced::Point::new(self.state.view.cursor_x, self.state.view.cursor_y),
                     title: format!("{label} · {mode}{length}"),
