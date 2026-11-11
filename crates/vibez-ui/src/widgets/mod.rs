@@ -35,6 +35,7 @@ pub mod eq_display;
 pub mod fader;
 pub mod filter_device;
 pub mod filter_display;
+pub(crate) mod fitted_label;
 pub mod flat_stack;
 pub mod fm_device;
 pub mod fm_display;

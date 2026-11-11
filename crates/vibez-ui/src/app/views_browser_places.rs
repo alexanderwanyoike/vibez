@@ -9,6 +9,7 @@ use crate::icons;
 use crate::message::Message;
 use crate::state::SampleBrowserMode;
 use crate::theme as th;
+use crate::widgets::fitted_label::FittedLabel;
 
 use super::views_browser_style::*;
 use super::*;
@@ -85,8 +86,7 @@ impl<'a> PlaceRow<'a> {
             icons::icon(self.icon)
                 .size(PLACE_ICON_SIZE)
                 .color(icon_color),
-            text(self.label)
-                .size(PLACE_LABEL_SIZE)
+            FittedLabel::name(self.label, PLACE_LABEL_SIZE, th::text())
                 .font(iced::Font {
                     weight: if selected {
                         iced::font::Weight::Semibold
@@ -95,9 +95,7 @@ impl<'a> PlaceRow<'a> {
                     },
                     ..iced::Font::DEFAULT
                 })
-                .color(th::text())
-                .width(Length::Fill)
-                .wrapping(iced::widget::text::Wrapping::None),
+                .view(PLACE_LABEL_SIZE * 1.4),
         ]
         .spacing(7)
         .align_y(iced::Alignment::Center);

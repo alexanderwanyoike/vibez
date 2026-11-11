@@ -9,6 +9,7 @@ use crate::icons;
 use crate::message::Message;
 use crate::state::SampleBrowserMode;
 use crate::theme as th;
+use crate::widgets::fitted_label::FittedLabel;
 
 use super::views_browser_style::*;
 use super::*;
@@ -560,18 +561,8 @@ pub(super) fn result_name_cell<'a>(
     detail_color: iced::Color,
 ) -> Element<'a, Message> {
     column![
-        text(name)
-            .size(12)
-            .color(th::text())
-            .width(Length::Fill)
-            .height(Length::Fixed(14.0))
-            .wrapping(iced::widget::text::Wrapping::None),
-        text(detail)
-            .size(9)
-            .color(detail_color)
-            .width(Length::Fill)
-            .height(Length::Fixed(11.0))
-            .wrapping(iced::widget::text::Wrapping::None)
+        FittedLabel::name(name, 12.0, th::text()).view(14.0),
+        FittedLabel::detail(detail, 9.0, detail_color).view(11.0)
     ]
     .spacing(2)
     .width(Length::Fill)
