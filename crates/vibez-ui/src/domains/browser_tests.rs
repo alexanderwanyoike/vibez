@@ -1423,6 +1423,10 @@ fn the_status_and_the_ghost_read_each_target_from_one_place() {
         assert!(!target.status().is_empty());
         assert_eq!(action.status, Some(target.status()));
         assert!(target.accepts_drop());
+        assert_eq!(
+            b.drag_ghost_label(),
+            (target.status().to_uppercase(), Some(true))
+        );
     }
     let mut b = dragging();
     b.update(BrowserMsg::DragHoverTrack {
@@ -1430,7 +1434,48 @@ fn the_status_and_the_ghost_read_each_target_from_one_place() {
         beat: 4.0,
         compatible: false,
     });
-    assert!(!b.drag_target.unwrap().accepts_drop());
+    assert_eq!(b.drag_ghost_label().1, Some(false));
+    b.update(BrowserMsg::ClearDragTarget);
+    assert_eq!(
+        b.drag_ghost_label(),
+        ("CHOOSE A DROP TARGET".to_string(), None)
+    );
+}
+
+#[test]
+fn a_drum_rack_card_drop_highlights_the_pad_it_loads() {
+    let mut b = dragging();
+    let track_id = TrackId::new();
+    b.update(BrowserMsg::DragHoverDrumRack {
+        track_id,
+        pad_index: 3,
+    });
+    assert_eq!(b.drum_pad_drop_target(track_id), Some(3));
+    assert_eq!(b.drum_pad_drop_target(TrackId::new()), None);
+    b.update(BrowserMsg::DragHoverDrumRackPad {
+        track_id,
+        pad_index: 2,
+    });
+    assert_eq!(b.drum_pad_drop_target(track_id), Some(2));
+}
+
+#[test]
+fn leaving_the_panel_clears_it_even_when_its_outcome_changed() {
+    let mut b = dragging();
+    let track_id = TrackId::new();
+    b.update(BrowserMsg::DragHoverDevicePanel {
+        track_id,
+        drop: DevicePanelDrop::AddSampler,
+    });
+    b.update(BrowserMsg::LeaveDragTarget(
+        crate::state::BrowserDropTarget::DevicePanel {
+            track_id,
+            drop: DevicePanelDrop::ReplaceWithSampler {
+                instrument: "Surge XT".into(),
+            },
+        },
+    ));
+    assert!(b.drag_target.is_none());
 }
 
 #[test]
@@ -1438,7 +1483,9 @@ fn leaving_a_card_hands_the_hover_back_to_the_panel() {
     let mut b = dragging();
     let track_id = TrackId::new();
     b.update(BrowserMsg::DragHoverSampler { track_id });
-    b.update(BrowserMsg::ClearDragTarget);
+    b.update(BrowserMsg::LeaveDragTarget(
+        crate::state::BrowserDropTarget::Sampler { track_id },
+    ));
     b.update(BrowserMsg::DragHoverDevicePanel {
         track_id,
         drop: DevicePanelDrop::AddSampler,
