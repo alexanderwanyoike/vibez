@@ -1,4 +1,4 @@
-//! Shared styling and formatting helpers for the sample browser views.
+//! Shared styling, formatting and result cells for the sample browser views.
 //! Split from views_browser.rs.
 
 use std::path::Path;

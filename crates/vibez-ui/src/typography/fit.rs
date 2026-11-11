@@ -33,7 +33,7 @@ thread_local! {
     /// frame, and a song repeats a few names many times.
     static WIDTHS: RefCell<HashMap<WidthsKey, Rc<Widths>>> = RefCell::new(HashMap::new());
 
-    /// Browser rows fit their names again on every frame.
+    /// Responsive labels fit their text again on every layout.
     static MIDDLE_FITS: RefCell<HashMap<MiddleFitKey, String>> =
         RefCell::new(HashMap::new());
 }
