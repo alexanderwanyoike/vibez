@@ -127,11 +127,54 @@ pub fn accepts_effect_load(
     })
 }
 
-/// Records the live state of every plugin device in `snapshot`.
+/// Records the live state of every plugin device in `snapshot`. A plugin
+/// instance cannot live in a snapshot, so restoring one reloads it from the
+/// state its device reference carries; recording the live state there keeps
+/// the sound the plugin has now rather than the one it loaded with, even
+/// after the instance is gone.
 pub fn record_live_plugin_states(
-    _snapshot: &mut ProjectSnapshot,
-    _capture_state: impl FnMut(PluginGuiKey) -> Option<String>,
+    snapshot: &mut ProjectSnapshot,
+    mut capture_state: impl FnMut(PluginGuiKey) -> Option<String>,
 ) {
+    let has_plugins = snapshot.project_tracks.channels().any(|track| {
+        track.plugin_instrument_ref.is_some()
+            || track
+                .effects
+                .iter()
+                .any(|effect| effect.plugin_ref.is_some())
+    });
+    if !has_plugins {
+        return;
+    }
+    let project_tracks = std::sync::Arc::make_mut(&mut snapshot.project_tracks);
+    for track in project_tracks
+        .tracks
+        .iter_mut()
+        .chain(std::iter::once(&mut project_tracks.master))
+        .chain(project_tracks.buses.iter_mut())
+    {
+        let track_id = track.id;
+        for effect in &mut track.effects {
+            let key = PluginGuiKey::Effect {
+                track_id,
+                effect_id: effect.id,
+            };
+            if let Some(device) = effect.plugin_ref.as_mut() {
+                keep_live_state(device, capture_state(key));
+            }
+        }
+        if let Some(device) = track.plugin_instrument_ref.as_mut() {
+            keep_live_state(device, capture_state(PluginGuiKey::Instrument { track_id }));
+        }
+    }
+}
+
+/// `live` replaces the state `device` was recorded with; without a live
+/// instance the recorded state stays.
+pub fn keep_live_state(device: &mut PluginDeviceInfo, live: Option<String>) {
+    if let Some(state) = live {
+        device.state_b64 = Some(state);
+    }
 }
 
 /// Records the live state of `track_id`'s plugin instrument in `snapshot`,
