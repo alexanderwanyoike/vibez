@@ -4,7 +4,8 @@
 use vibez_core::id::TrackId;
 
 use crate::domains::arrangement::ArrangementMsg;
-use crate::message::Message;
+use crate::domains::devices::DevicesMsg;
+use crate::message::{BrowserImportTarget, Message};
 
 pub(super) fn apply_project_track_deletion_policy(message: Message, confirm: bool) -> Message {
     match message {
@@ -17,14 +18,23 @@ pub(super) fn apply_project_track_deletion_policy(message: Message, confirm: boo
 
 /// The track whose instrument `message` may take away, so the undo step
 /// taken before it can keep that instrument's live plugin state.
-pub(super) fn departing_instrument(_message: &Message) -> Option<TrackId> {
-    None
+pub(super) fn departing_instrument(message: &Message) -> Option<TrackId> {
+    match message {
+        Message::Devices(
+            DevicesMsg::SetTrackInstrument(track_id, _)
+            | DevicesMsg::RemoveTrackInstrument(track_id),
+        )
+        | Message::BrowserImportPrepared {
+            target: BrowserImportTarget::ImpliedSampler(track_id),
+            ..
+        } => Some(*track_id),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domains::devices::DevicesMsg;
     use vibez_core::midi::InstrumentKind;
 
     #[test]

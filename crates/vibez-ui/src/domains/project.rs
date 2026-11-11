@@ -132,10 +132,26 @@ pub fn accepts_effect_load(
 /// undoing that edit restores the sound the plugin had rather than the one
 /// it loaded with.
 pub fn record_plugin_instrument_state(
-    _snapshot: &mut ProjectSnapshot,
-    _track_id: TrackId,
-    _capture_state: impl FnOnce(PluginGuiKey) -> Option<String>,
+    snapshot: &mut ProjectSnapshot,
+    track_id: TrackId,
+    capture_state: impl FnOnce(PluginGuiKey) -> Option<String>,
 ) {
+    let has_plugin = snapshot
+        .project_tracks
+        .find(track_id)
+        .is_some_and(|track| track.plugin_instrument_ref.is_some());
+    if !has_plugin {
+        return;
+    }
+    let Some(state) = capture_state(PluginGuiKey::Instrument { track_id }) else {
+        return;
+    };
+    if let Some(device) = std::sync::Arc::make_mut(&mut snapshot.project_tracks)
+        .find_mut(track_id)
+        .and_then(|track| track.plugin_instrument_ref.as_mut())
+    {
+        device.state_b64 = Some(state);
+    }
 }
 
 /// Retaining unavailable slots preserves sidechain assignments and chain identity
