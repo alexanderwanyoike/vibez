@@ -77,15 +77,6 @@ pub(super) fn vertical_pane_splitter(active: bool, on_press: Message) -> Element
 }
 
 impl App {
-    /// What the drag ghost says a release would do, and whether it would take
-    /// the audio; with no target under the cursor there is nothing to judge.
-    fn browser_drag_target_label(&self) -> (String, Option<bool>) {
-        match &self.state.browser.drag_target {
-            Some(target) => (target.status().to_uppercase(), Some(target.accepts_drop())),
-            None => ("CHOOSE A DROP TARGET".into(), None),
-        }
-    }
-
     /// Where the Arrange or Perform workspace sits beside the Browser.
     pub(super) fn workspace_span(&self) -> crate::shell_layout::Span {
         let browser_width = self.state.browser.open.then(|| {
@@ -172,7 +163,7 @@ impl App {
                     .drag_preview_beats(self.state.transport.bpm)
                     .map(|beats| format!(" · {beats:.2} beats"))
                     .unwrap_or_default();
-                let (target, valid) = self.browser_drag_target_label();
+                let (target, valid) = self.state.browser.drag_ghost_label();
                 let ghost = canvas(crate::widgets::browser_drag_ghost::BrowserDragGhost {
                     cursor: iced::Point::new(self.state.view.cursor_x, self.state.view.cursor_y),
                     title: format!("{label} · {mode}{length}"),
