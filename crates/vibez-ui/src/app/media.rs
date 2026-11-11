@@ -529,22 +529,9 @@ impl App {
                 self.add_audio_clip_to_track_at(track_id, position_samples, payload)
             }
             BrowserImportTarget::Sampler(track_id) => {
-                let PreparedBrowserImport {
-                    treatment,
-                    audio,
-                    name,
-                    source,
-                    ..
-                } = payload;
-                let provenance = source.provenance().map(|value| value.display_label());
-                self.apply_sampler_sample_loaded(track_id, audio, name.clone(), source);
-                self.state.status_text = format!(
-                    "Imported '{name}' to Sampler ({}){}",
-                    treatment.mode.label(),
-                    provenance
-                        .map(|value| format!(" · source {value}"))
-                        .unwrap_or_default()
-                );
+                self.load_sampler_import(track_id, payload, |name| {
+                    format!("Imported '{name}' to Sampler")
+                });
                 Task::none()
             }
             BrowserImportTarget::NewSampler(track_id) => {
@@ -562,11 +549,8 @@ impl App {
                     ),
                     None,
                 );
-                let name = payload.name.clone();
-                let task = self
-                    .apply_browser_import_prepared(BrowserImportTarget::Sampler(track_id), payload);
-                self.state.status_text = outcome.loaded_status(&name);
-                task
+                self.load_sampler_import(track_id, payload, |name| outcome.loaded_status(name));
+                Task::none()
             }
             BrowserImportTarget::DrumRackPad {
                 track_id,
@@ -592,6 +576,34 @@ impl App {
                 Task::none()
             }
         }
+    }
+
+    /// Loads a prepared import into `track_id`'s Sampler; the status leads
+    /// with `headline` for the sample's name and adds the import mode and
+    /// source.
+    fn load_sampler_import(
+        &mut self,
+        track_id: TrackId,
+        payload: PreparedBrowserImport,
+        headline: impl FnOnce(&str) -> String,
+    ) {
+        let PreparedBrowserImport {
+            treatment,
+            audio,
+            name,
+            source,
+            ..
+        } = payload;
+        let provenance = source.provenance().map(|value| value.display_label());
+        self.apply_sampler_sample_loaded(track_id, audio, name.clone(), source);
+        self.state.status_text = format!(
+            "{} ({}){}",
+            headline(&name),
+            treatment.mode.label(),
+            provenance
+                .map(|value| format!(" · source {value}"))
+                .unwrap_or_default()
+        );
     }
 
     pub(super) fn add_audio_clip_to_track_at(
