@@ -9,6 +9,7 @@ use crate::icons;
 use crate::message::Message;
 use crate::state::SampleBrowserMode;
 use crate::theme as th;
+use crate::widgets::fitted_label::FittedLabel;
 
 use super::views_browser_style::*;
 use super::*;
@@ -17,6 +18,7 @@ const TREE_ICON_SIZE: f32 = 12.0;
 const PLACE_ICON_SIZE: f32 = 13.0;
 const PLACE_ROW_H: f32 = 26.0;
 const PLACE_LABEL_SIZE: f32 = 11.5;
+const PLACE_LABEL_H: f32 = 16.0;
 /// A disclosure chevron's width, kept by leaves too so icons line up.
 const TOGGLE_W: f32 = 14.0;
 
@@ -85,8 +87,7 @@ impl<'a> PlaceRow<'a> {
             icons::icon(self.icon)
                 .size(PLACE_ICON_SIZE)
                 .color(icon_color),
-            text(self.label)
-                .size(PLACE_LABEL_SIZE)
+            FittedLabel::name(self.label, PLACE_LABEL_SIZE, th::text())
                 .font(iced::Font {
                     weight: if selected {
                         iced::font::Weight::Semibold
@@ -95,9 +96,7 @@ impl<'a> PlaceRow<'a> {
                     },
                     ..iced::Font::DEFAULT
                 })
-                .color(th::text())
-                .width(Length::Fill)
-                .wrapping(iced::widget::text::Wrapping::None),
+                .view(PLACE_LABEL_H),
         ]
         .spacing(7)
         .align_y(iced::Alignment::Center);
