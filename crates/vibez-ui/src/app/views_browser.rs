@@ -355,26 +355,15 @@ impl App {
             // mouse_area returns early if its child captures the event, so
             // iced Button underneath would swallow press events. Use a
             // plain container as the click target instead.
-            let name_cell = column![
-                text(entry.name.as_str())
-                    .size(12)
-                    .color(th::text())
-                    .width(Length::Fill)
-                    .height(Length::Fixed(14.0))
-                    .wrapping(iced::widget::text::Wrapping::None),
-                text(if wide_columns {
+            let name_cell = result_name_cell(
+                entry.name.clone(),
+                if wide_columns {
                     source_detail
                 } else {
                     compact_detail
-                })
-                .size(9)
-                .color(cell_color)
-                .width(Length::Fill)
-                .height(Length::Fixed(11.0))
-                .wrapping(iced::widget::text::Wrapping::None)
-            ]
-            .spacing(2)
-            .width(Length::Fill);
+                },
+                cell_color,
+            );
             let table_cells: Element<'_, Message> = if wide_columns {
                 row![
                     name_cell,
@@ -513,22 +502,7 @@ impl App {
         destination: std::path::PathBuf,
         wide_columns: bool,
     ) -> Element<'_, Message> {
-        let name_cell = column![
-            text(name)
-                .size(12)
-                .color(th::text())
-                .width(Length::Fill)
-                .height(Length::Fixed(14.0))
-                .wrapping(iced::widget::text::Wrapping::None),
-            text(context)
-                .size(9)
-                .color(th::text_dim())
-                .width(Length::Fill)
-                .height(Length::Fixed(11.0))
-                .wrapping(iced::widget::text::Wrapping::None)
-        ]
-        .spacing(2)
-        .width(Length::Fill);
+        let name_cell = result_name_cell(name, context, th::text_dim());
         let cells: Element<'_, Message> = if wide_columns {
             row![
                 name_cell,
@@ -577,4 +551,29 @@ impl App {
         .style(|_theme: &iced::Theme, status| browser_place_button_style(false, status))
         .into()
     }
+}
+
+/// A Browser result's name over its detail line, such as its folder.
+pub(super) fn result_name_cell<'a>(
+    name: String,
+    detail: String,
+    detail_color: iced::Color,
+) -> Element<'a, Message> {
+    column![
+        text(name)
+            .size(12)
+            .color(th::text())
+            .width(Length::Fill)
+            .height(Length::Fixed(14.0))
+            .wrapping(iced::widget::text::Wrapping::None),
+        text(detail)
+            .size(9)
+            .color(detail_color)
+            .width(Length::Fill)
+            .height(Length::Fixed(11.0))
+            .wrapping(iced::widget::text::Wrapping::None)
+    ]
+    .spacing(2)
+    .width(Length::Fill)
+    .into()
 }

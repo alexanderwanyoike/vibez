@@ -10,6 +10,7 @@ use crate::state::{SampleBrowserEntry, SampleBrowserMode};
 use crate::theme as th;
 use vibez_core::track::MediaSourceRef;
 
+use super::views_browser::result_name_cell;
 use super::views_browser_style::*;
 use super::*;
 
@@ -210,26 +211,15 @@ impl App {
             if !wide_columns && !entry.is_folder {
                 context = format!("BPM {bpm} · {length} · {context}");
             }
-            let name_cell = column![
-                text(if entry.is_folder {
+            let name_cell = result_name_cell(
+                if entry.is_folder {
                     format!("› {}", entry.name)
                 } else {
                     entry.name.clone()
-                })
-                .size(12)
-                .color(th::text())
-                .width(Length::Fill)
-                .height(Length::Fixed(14.0))
-                .wrapping(iced::widget::text::Wrapping::None),
-                text(context)
-                    .size(9)
-                    .color(cell_color)
-                    .width(Length::Fill)
-                    .height(Length::Fixed(11.0))
-                    .wrapping(iced::widget::text::Wrapping::None)
-            ]
-            .spacing(2)
-            .width(Length::Fill);
+                },
+                context,
+                cell_color,
+            );
             let cells: Element<'_, Message> = if wide_columns {
                 row![
                     name_cell,
@@ -297,26 +287,15 @@ impl App {
         for entry in local_everywhere {
             let selected = browser.selected_source.as_ref() == Some(&entry.source);
             let cell_color = if selected { th::text() } else { th::text_dim() };
-            let name_cell = column![
-                text(entry.name.as_str())
-                    .size(12)
-                    .color(th::text())
-                    .width(Length::Fill)
-                    .height(Length::Fixed(14.0))
-                    .wrapping(iced::widget::text::Wrapping::None),
-                text(format!(
+            let name_cell = result_name_cell(
+                entry.name.clone(),
+                format!(
                     "Local · {}/{}",
                     browser_root_name(&entry.root_path),
                     entry.relative_path.display()
-                ))
-                .size(9)
-                .color(cell_color)
-                .width(Length::Fill)
-                .height(Length::Fixed(11.0))
-                .wrapping(iced::widget::text::Wrapping::None)
-            ]
-            .spacing(2)
-            .width(Length::Fill);
+                ),
+                cell_color,
+            );
             let cells: Element<'_, Message> = if wide_columns {
                 row![
                     name_cell,
