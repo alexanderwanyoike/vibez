@@ -173,4 +173,13 @@ mod tests {
         let (start, end) = fitted.split_once('\u{2026}').expect("cut");
         assert!(end.chars().count() > start.chars().count(), "{fitted}");
     }
+
+    #[test]
+    fn a_cut_too_short_to_split_keeps_only_the_start() {
+        let width = text_width("UNDR\u{2026}", SIZE, Font::DEFAULT);
+
+        let fitted = fit_text_middle("UNDRGRND", width, SIZE, Font::DEFAULT);
+
+        assert_eq!(fitted, "UNDR\u{2026}");
+    }
 }
