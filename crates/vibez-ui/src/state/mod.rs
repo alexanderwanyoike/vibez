@@ -85,7 +85,7 @@ pub struct PendingMediaDrag {
     pub origin_y: f32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum BrowserDropTarget {
     ArrangementLane {
         track_id: TrackId,
@@ -106,9 +106,10 @@ pub enum BrowserDropTarget {
     DrumRack {
         track_id: TrackId,
     },
-    /// A device panel outside any instrument card.
+    /// A device panel outside any instrument card, and what a drop there does.
     DevicePanel {
         track_id: TrackId,
+        drop: crate::domains::device_panel_drop::DevicePanelDrop,
     },
 }
 /// View-domain state; none of it is part of the project itself.

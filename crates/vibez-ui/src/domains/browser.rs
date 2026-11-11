@@ -258,8 +258,9 @@ impl BrowserState {
                 if self.drag_source.is_none() || self.hovers_instrument_card(track_id) {
                     return action;
                 }
-                self.drag_target = Some(crate::state::BrowserDropTarget::DevicePanel { track_id });
                 action.status = Some(drop.hover_status());
+                self.drag_target =
+                    Some(crate::state::BrowserDropTarget::DevicePanel { track_id, drop });
             }
             BrowserMsg::ClearDragTarget => {
                 self.drag_target = None;

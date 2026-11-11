@@ -116,8 +116,11 @@ impl App {
             self.device_chain_row(track_id, track, track_color, size.width)
         });
 
-        let highlighted = self.state.browser.drag_target
-            == Some(crate::state::BrowserDropTarget::DevicePanel { track_id });
+        let highlighted = matches!(
+            &self.state.browser.drag_target,
+            Some(crate::state::BrowserDropTarget::DevicePanel { track_id: target, .. })
+                if *target == track_id
+        );
         let content = crate::widgets::drop_highlight::drop_highlight(content.into(), highlighted);
         // Wrap in mouse_area for right-click context menu
         let panel = mouse_area(content).on_right_press(Message::Devices(

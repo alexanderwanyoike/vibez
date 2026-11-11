@@ -1255,7 +1255,12 @@ fn a_device_panel_hover_names_the_outcome_before_release() {
     });
     assert_eq!(
         b.drag_target,
-        Some(crate::state::BrowserDropTarget::DevicePanel { track_id })
+        Some(crate::state::BrowserDropTarget::DevicePanel {
+            track_id,
+            drop: DevicePanelDrop::ReplaceWithSampler {
+                instrument: "Surge XT".into(),
+            },
+        })
     );
     assert_eq!(
         action.status.as_deref(),
@@ -1301,7 +1306,7 @@ fn an_instrument_card_under_the_cursor_outranks_the_panel_behind_it() {
     ] {
         let mut b = dragging();
         b.update(card);
-        let under_cursor = b.drag_target;
+        let under_cursor = b.drag_target.clone();
         let action = b.update(panel());
         assert_eq!(b.drag_target, under_cursor);
         assert_eq!(action.status, None);
@@ -1333,6 +1338,9 @@ fn leaving_a_card_hands_the_hover_back_to_the_panel() {
     });
     assert_eq!(
         b.drag_target,
-        Some(crate::state::BrowserDropTarget::DevicePanel { track_id })
+        Some(crate::state::BrowserDropTarget::DevicePanel {
+            track_id,
+            drop: DevicePanelDrop::AddSampler,
+        })
     );
 }

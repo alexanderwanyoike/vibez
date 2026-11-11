@@ -80,16 +80,16 @@ impl App {
     /// What the drag ghost says a release would do, and whether that drop is
     /// valid (`None` while there is no target).
     fn browser_drag_target_label(&self) -> (String, Option<bool>) {
-        match self.state.browser.drag_target {
+        match &self.state.browser.drag_target {
             Some(crate::state::BrowserDropTarget::ArrangementLane {
                 beat, compatible, ..
             }) => (
-                if compatible {
+                if *compatible {
                     format!("AUDIO LANE · BEAT {beat:.2}")
                 } else {
                     "INVALID · MIDI/INSTRUMENT LANE".into()
                 },
-                Some(compatible),
+                Some(*compatible),
             ),
             Some(crate::state::BrowserDropTarget::EmptyArrangement { beat }) => {
                 (format!("NEW AUDIO TRACK · BEAT {beat:.2}"), Some(true))
@@ -103,15 +103,8 @@ impl App {
             Some(crate::state::BrowserDropTarget::DrumRack { .. }) => {
                 ("CHOOSE A DRUM PAD".into(), None)
             }
-            Some(crate::state::BrowserDropTarget::DevicePanel { track_id }) => {
-                match self
-                    .state
-                    .find_track(track_id)
-                    .and_then(crate::domains::device_panel_drop::DevicePanelDrop::for_channel)
-                {
-                    Some(drop) => (drop.hover_status().to_uppercase(), Some(true)),
-                    None => ("CHOOSE A DROP TARGET".into(), None),
-                }
+            Some(crate::state::BrowserDropTarget::DevicePanel { drop, .. }) => {
+                (drop.hover_status().to_uppercase(), Some(true))
             }
             None => ("CHOOSE A DROP TARGET".into(), None),
         }
