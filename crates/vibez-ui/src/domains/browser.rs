@@ -106,16 +106,60 @@ pub struct BrowserAction {
 impl crate::state::BrowserDropTarget {
     /// What a release here does, as the status bar says it.
     pub fn status(&self) -> String {
-        String::new()
+        use crate::state::BrowserDropTarget as Target;
+        match self {
+            Target::ArrangementLane {
+                beat,
+                compatible: true,
+                ..
+            } => format!("Audio lane at beat {beat:.2}"),
+            Target::ArrangementLane { .. } => {
+                "Invalid target: audio cannot be imported to a MIDI/instrument lane".into()
+            }
+            Target::EmptyArrangement { beat } => format!("New audio track at beat {beat:.2}"),
+            Target::Sampler { .. } => DevicePanelDrop::LoadIntoExisting.hover_status(),
+            Target::DrumRackPad { pad_index, .. } => {
+                format!("Load into Drum Rack pad {}", pad_index + 1)
+            }
+            Target::DrumRack { pad_index, .. } => {
+                format!("Load into selected Drum Rack pad {}", pad_index + 1)
+            }
+            Target::DevicePanel { drop, .. } => drop.hover_status(),
+        }
     }
 
     /// Whether a release here takes the audio.
     pub fn accepts_drop(&self) -> bool {
-        true
+        !matches!(
+            self,
+            crate::state::BrowserDropTarget::ArrangementLane {
+                compatible: false,
+                ..
+            }
+        )
     }
 }
 
 impl BrowserState {
+    /// Makes `target` the drop target and returns its status.
+    fn hover(&mut self, target: crate::state::BrowserDropTarget) -> String {
+        let status = target.status();
+        self.drag_target = Some(target);
+        status
+    }
+
+    /// Clears the drop target; while dragging, the status goes back to the
+    /// drag itself so a left target's outcome does not linger.
+    fn clear_drag_target(&mut self) -> Option<String> {
+        self.drag_target = None;
+        self.drag_source.is_some().then(|| self.moving_status())
+    }
+
+    fn moving_status(&self) -> String {
+        let label = self.drag_label.as_deref().unwrap_or("media");
+        format!("Moving {label} - choose an audio lane, empty Arrange, or a MIDI track's devices")
+    }
+
     fn hovers_drum_rack_pad(&self, track_id: TrackId) -> bool {
         matches!(
             self.drag_target,
@@ -208,10 +252,7 @@ impl BrowserState {
             }
             BrowserMsg::PendingDragMoved { x, y } => {
                 if self.move_pending_drag(x, y) {
-                    let label = self.drag_label.as_deref().unwrap_or("media");
-                    action.status = Some(format!(
-                        "Moving {label} - choose an audio lane, empty Arrange, Sampler, or Drum Rack pad"
-                    ));
+                    action.status = Some(self.moving_status());
                 }
             }
             BrowserMsg::DragHoverTrack {
@@ -222,30 +263,27 @@ impl BrowserState {
                 if self.drag_source.is_none() {
                     return action;
                 }
-                self.drag_target = Some(crate::state::BrowserDropTarget::ArrangementLane {
-                    track_id,
-                    beat,
-                    compatible,
-                });
-                action.status = Some(if compatible {
-                    format!("Audio lane at beat {beat:.2}")
-                } else {
-                    "Invalid target: audio cannot be imported to a MIDI/instrument lane".into()
-                });
+                action.status = Some(self.hover(
+                    crate::state::BrowserDropTarget::ArrangementLane {
+                        track_id,
+                        beat,
+                        compatible,
+                    },
+                ));
             }
             BrowserMsg::DragHoverEmptyArrangement { beat } => {
                 if self.drag_source.is_none() {
                     return action;
                 }
-                self.drag_target = Some(crate::state::BrowserDropTarget::EmptyArrangement { beat });
-                action.status = Some(format!("New audio track at beat {beat:.2}"));
+                action.status =
+                    Some(self.hover(crate::state::BrowserDropTarget::EmptyArrangement { beat }));
             }
             BrowserMsg::DragHoverSampler { track_id } => {
                 if self.drag_source.is_none() {
                     return action;
                 }
-                self.drag_target = Some(crate::state::BrowserDropTarget::Sampler { track_id });
-                action.status = Some("Load into Sampler".into());
+                action.status =
+                    Some(self.hover(crate::state::BrowserDropTarget::Sampler { track_id }));
             }
             BrowserMsg::DragHoverDrumRackPad {
                 track_id,
@@ -254,11 +292,10 @@ impl BrowserState {
                 if self.drag_source.is_none() {
                     return action;
                 }
-                self.drag_target = Some(crate::state::BrowserDropTarget::DrumRackPad {
+                action.status = Some(self.hover(crate::state::BrowserDropTarget::DrumRackPad {
                     track_id,
                     pad_index,
-                });
-                action.status = Some(format!("Assign Drum Rack pad {}", pad_index + 1));
+                }));
             }
             BrowserMsg::DragHoverDrumRack {
                 track_id,
@@ -267,11 +304,10 @@ impl BrowserState {
                 if self.drag_source.is_none() || self.hovers_drum_rack_pad(track_id) {
                     return action;
                 }
-                self.drag_target = Some(crate::state::BrowserDropTarget::DrumRack {
+                action.status = Some(self.hover(crate::state::BrowserDropTarget::DrumRack {
                     track_id,
                     pad_index,
-                });
-                action.status = Some("Drop on a Drum Rack pad".into());
+                }));
             }
             BrowserMsg::DragHoverDevicePanel { track_id, drop } => {
                 // The panel's hover arrives after that of any card inside it,
@@ -279,13 +315,17 @@ impl BrowserState {
                 if self.drag_source.is_none() || self.hovers_instrument_card(track_id) {
                     return action;
                 }
-                action.status = Some(drop.hover_status());
-                self.drag_target =
-                    Some(crate::state::BrowserDropTarget::DevicePanel { track_id, drop });
+                action.status = Some(
+                    self.hover(crate::state::BrowserDropTarget::DevicePanel { track_id, drop }),
+                );
             }
-            BrowserMsg::LeaveDragTarget(_) => {}
+            BrowserMsg::LeaveDragTarget(target) => {
+                if self.drag_target.as_ref() == Some(&target) {
+                    action.status = self.clear_drag_target();
+                }
+            }
             BrowserMsg::ClearDragTarget => {
-                self.drag_target = None;
+                action.status = self.clear_drag_target();
             }
             BrowserMsg::CancelDrag(reason) => {
                 self.cancel_media_drag();
