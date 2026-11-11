@@ -301,7 +301,9 @@ impl canvas::Program<Message> for PadView<'_> {
     ) -> Vec<canvas::Geometry> {
         let size = bounds.size();
         let mut frame = canvas::Frame::new(renderer, size);
-        if state.hovered_since.is_some() && !self.firing {
+        // The pad a drop will load looks hovered even when the cursor is on
+        // the card around it.
+        if (state.hovered_since.is_some() || self.drop_target) && !self.firing {
             let face = canvas::Path::rounded_rectangle(Point::ORIGIN, size, FACE_RADIUS.into());
             frame.fill(&face, th::with_alpha(th::text(), 0.05));
         }
