@@ -380,6 +380,11 @@ impl App {
                         position,
                         effective_at_samples,
                     } => {
+                        self.state.perform.clip_editor.anchor(
+                            track_id,
+                            position,
+                            effective_at_samples,
+                        );
                         let spb = self.state.transport.samples_per_beat();
                         let source = self
                             .state

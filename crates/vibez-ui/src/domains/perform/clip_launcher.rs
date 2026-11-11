@@ -182,10 +182,18 @@ impl ClipEditor {
             let id = self.playing.get(&track)?.id;
             clips.by_id(id).cloned()
         })?;
-        self.started_at
-            .insert(track, effective_at.saturating_sub(position));
         self.playing.insert(track, clip);
+        self.anchor(track, position, effective_at);
         self.playing.get(&track)
+    }
+
+    /// The engine plays `track`'s clip from `position` at `effective_at`;
+    /// after a length change it wraps there, not where the UI last counted.
+    pub fn anchor(&mut self, track: TrackId, position: u64, effective_at: u64) {
+        if self.playing.contains_key(&track) {
+            self.started_at
+                .insert(track, effective_at.saturating_sub(position));
+        }
     }
 
     pub fn playhead_samples(&self, id: ClipId, position: u64, spb: f64) -> Option<u64> {
