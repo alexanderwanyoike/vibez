@@ -1,10 +1,11 @@
 //! Native Drum Rack cards on the visible device chain.
 
-use iced::widget::Space;
+use iced::widget::{mouse_area, Space};
 use iced::{Color, Element};
 use vibez_core::id::TrackId;
 use vibez_core::track::{drum_rack_pad_pitch, DRUM_RACK_BANK_COUNT, DRUM_RACK_BANK_SIZE};
 
+use crate::domains::browser::BrowserMsg;
 use crate::domains::device_params::{DeviceParams, DeviceSlot};
 use crate::message::Message;
 use crate::state::{BrowserDropTarget, UiTrack};
@@ -63,6 +64,15 @@ impl App {
             }
             .view(size)
         });
-        self.native_instrument_frame("Drum Rack", track, accent, width, device, body.into())
+        let card =
+            self.native_instrument_frame("Drum Rack", track, accent, width, device, body.into());
+        let card = mouse_area(card);
+        if self.state.browser.drag_source.is_none() {
+            return card.into();
+        }
+        // A near miss of a pad cancels the drag as it always has, so the
+        // device panel behind the card can never replace the rack.
+        card.on_release(Message::Browser(BrowserMsg::EndDragSample))
+            .into()
     }
 }
