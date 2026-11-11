@@ -790,6 +790,7 @@ impl App {
             | Message::DropSampleOnEmptyArrangement
             | Message::DropSampleOnDrumPad { .. }
             | Message::DropSampleOnSampler { .. }
+            | Message::DropSampleOnDevicePanel { .. }
             | Message::LocalSamplePreviewReady(..)
             | Message::BrowserWaveformReady(..)
             | Message::BrowserAuditionReady { .. }

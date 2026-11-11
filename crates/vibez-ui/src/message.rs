@@ -349,6 +349,10 @@ pub enum Message {
     DropSampleOnSampler {
         track_id: TrackId,
     },
+    /// Released on a channel's device panel outside any instrument card.
+    DropSampleOnDevicePanel {
+        track_id: TrackId,
+    },
     ImportSelectedBrowserSampleToArrangement,
     SelectAdjacentBrowserResult(i8),
     LoadSelectedBrowserSampleToDevice,

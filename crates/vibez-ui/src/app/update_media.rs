@@ -523,6 +523,10 @@ impl App {
         self.dispatch_drop_for_target(source, BrowserImportTarget::Sampler(track_id))
     }
 
+    pub(super) fn on_drop_sample_on_device_panel(&mut self, _track_id: TrackId) -> Task<Message> {
+        Task::none()
+    }
+
     pub(super) fn on_local_sample_preview_ready(
         &mut self,
         source: MediaSourceRef,
