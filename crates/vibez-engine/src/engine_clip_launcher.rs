@@ -446,3 +446,76 @@ mod segment_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod clip_event_timing_tests {
+    use super::ClipEventContext;
+    use crate::events::EngineEvent;
+    use crate::routing::PreparedRouting;
+    use vibez_core::id::TrackId;
+    use vibez_core::routing::RoutingChannel;
+
+    fn channel(id: TrackId) -> RoutingChannel {
+        RoutingChannel {
+            id,
+            is_bus: id == TrackId::MASTER,
+            effects: vec![],
+            sends: vec![],
+        }
+    }
+
+    #[test]
+    fn a_recording_refresh_is_heard_on_its_track_like_an_edit_refresh() {
+        let track = TrackId::new();
+        let mut routing = PreparedRouting::prepare(&[channel(TrackId::MASTER), channel(track)], 64)
+            .expect("routing");
+        routing.compensation.output_latency = 100;
+        routing
+            .channels
+            .iter_mut()
+            .find(|channel| channel.id == track)
+            .expect("track channel")
+            .direct_latency = 20;
+        let (mut through, mut drops, mut resync) = (0, 0, None);
+        let mut context = ClipEventContext {
+            routing: &routing,
+            physical: 1_000,
+            through_request: &mut through,
+            drops: &mut drops,
+            resync_track: &mut resync,
+        };
+
+        let edit = context.prepare(
+            EngineEvent::ClipSourceRefreshed {
+                track_id: track,
+                request_id: 5,
+                position: 4,
+                effective_at_samples: 500,
+            },
+            false,
+        );
+        let recording = context.prepare(
+            EngineEvent::ClipCaptureSource {
+                track_id: track,
+                position: 4,
+                effective_at_samples: 500,
+            },
+            false,
+        );
+
+        let effective_at = |event: &EngineEvent| match event {
+            EngineEvent::ClipSourceRefreshed {
+                effective_at_samples,
+                ..
+            }
+            | EngineEvent::ClipCaptureSource {
+                effective_at_samples,
+                ..
+            } => *effective_at_samples,
+            _ => unreachable!(),
+        };
+        assert_eq!(effective_at(&edit.event), 420);
+        assert_eq!(effective_at(&recording.event), effective_at(&edit.event));
+        assert_eq!(recording.due, edit.due);
+    }
+}
