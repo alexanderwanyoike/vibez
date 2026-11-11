@@ -71,6 +71,13 @@ pub fn fit_text(text: &str, width: f32, size: f32, font: Font, min_kept: usize) 
     })
 }
 
+/// What of `text`, set at `size` in `font`, fits `width`: all of it, or its
+/// start and its end around an ellipsis, so names that share a long prefix
+/// stay told apart.
+pub fn fit_text_middle(text: &str, width: f32, size: f32, font: Font) -> String {
+    fit_text(text, width, size, font, 0).unwrap_or_default()
+}
+
 fn shortened(text: &str, end: usize) -> String {
     format!("{}{ELLIPSIS}", text[..end].trim_end())
 }
@@ -88,5 +95,29 @@ mod tests {
         let fitted = fit_text("Open Hat Long Tail", width, SIZE, Font::DEFAULT, 0);
 
         assert_eq!(fitted.as_deref(), Some("Open\u{2026}"));
+    }
+
+    #[test]
+    fn a_long_name_keeps_its_start_and_its_end_around_the_ellipsis() {
+        let name = "UNDRGRND Sounds - Deep Tech";
+        let width = text_width("UNDRGRND So\u{2026}Deep Tech", SIZE, Font::DEFAULT);
+
+        let fitted = fit_text_middle(name, width, SIZE, Font::DEFAULT);
+
+        assert!(fitted.starts_with("UNDRG"), "{fitted}");
+        assert!(fitted.ends_with("Tech"), "{fitted}");
+        assert!(fitted.contains('\u{2026}'), "{fitted}");
+        assert!(
+            text_width(&fitted, SIZE, Font::DEFAULT) <= width,
+            "{fitted}"
+        );
+    }
+
+    #[test]
+    fn a_name_that_fits_stays_whole() {
+        let name = "Deep Tech";
+        let width = text_width(name, SIZE, Font::DEFAULT);
+
+        assert_eq!(fit_text_middle(name, width, SIZE, Font::DEFAULT), name);
     }
 }
