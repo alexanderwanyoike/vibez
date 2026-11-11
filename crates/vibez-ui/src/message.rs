@@ -351,6 +351,8 @@ pub enum Message {
     },
     ImportSelectedBrowserSampleToArrangement,
     SelectAdjacentBrowserResult(i8),
+    /// Audition the selected Browser sample again from its start.
+    ReplaySelectedBrowserSample,
     LoadSelectedBrowserSampleToDevice,
     BrowserSampleDecoded(
         BrowserImportTarget,

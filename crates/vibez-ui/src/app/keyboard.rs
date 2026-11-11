@@ -832,6 +832,20 @@ mod tests {
     }
 
     #[test]
+    fn plain_right_replays_the_selected_sample_and_alt_right_still_widens_the_browser() {
+        use iced::keyboard::{key::Named, Key, Modifiers};
+
+        assert!(matches!(
+            global_key_handler(Key::Named(Named::ArrowRight), Modifiers::empty()),
+            Some(Message::ReplaySelectedBrowserSample)
+        ));
+        assert!(matches!(
+            global_key_handler(Key::Named(Named::ArrowRight), Modifiers::ALT),
+            Some(Message::Browser(BrowserMsg::NudgeDockWidth(width))) if width > 0.0
+        ));
+    }
+
+    #[test]
     fn space_is_transport_and_escape_routes_through_audition_priority() {
         use iced::keyboard::{key::Named, Key, Modifiers};
 

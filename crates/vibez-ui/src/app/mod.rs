@@ -832,6 +832,9 @@ mod sidechain_sync;
 mod sidechain_sync_tests;
 
 #[cfg(test)]
+mod browser_replay_tests;
+
+#[cfg(test)]
 mod compensation_bridge_tests;
 
 #[cfg(test)]

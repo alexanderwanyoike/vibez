@@ -834,6 +834,7 @@ impl App {
             | Message::BrowserAuditionReady { .. }
             | Message::ImportSelectedBrowserSampleToArrangement
             | Message::SelectAdjacentBrowserResult(..)
+            | Message::ReplaySelectedBrowserSample
             | Message::LoadSelectedBrowserSampleToDevice
             | Message::BrowserSampleDecoded(..)
             | Message::RemoteImportReady { .. }
