@@ -126,15 +126,23 @@ impl App {
         ));
         // Only while dragging, so an ordinary click's release still reaches
         // whatever the shell does with it.
-        let takes_drop = self.state.browser.drag_source.is_some()
-            && crate::domains::device_panel_drop::DevicePanelDrop::for_channel(track).is_some();
-        if takes_drop {
-            panel
-                .on_release(Message::DropSampleOnDevicePanel { track_id })
-                .into()
-        } else {
-            panel.into()
-        }
+        let drop =
+            self.state.browser.drag_source.as_ref().and_then(|_| {
+                crate::domains::device_panel_drop::DevicePanelDrop::for_channel(track)
+            });
+        let Some(drop) = drop else {
+            return panel.into();
+        };
+        panel
+            .on_move(move |_| {
+                Message::Browser(BrowserMsg::DragHoverDevicePanel {
+                    track_id,
+                    drop: drop.clone(),
+                })
+            })
+            .on_exit(Message::Browser(BrowserMsg::ClearDragTarget))
+            .on_release(Message::DropSampleOnDevicePanel { track_id })
+            .into()
     }
 
     /// The cards of one channel, laid out for the section's measured width.

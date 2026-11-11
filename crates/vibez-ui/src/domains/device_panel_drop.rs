@@ -47,7 +47,13 @@ impl DevicePanelDrop {
 
     /// The status while the drag hovers the panel, before release.
     pub fn hover_status(&self) -> String {
-        String::new()
+        match self {
+            Self::AddSampler => "Add a Sampler with this sample".to_string(),
+            Self::ReplaceWithSampler { instrument } => {
+                format!("Replace {instrument} with Sampler")
+            }
+            Self::LoadIntoExisting => "Load into Sampler".to_string(),
+        }
     }
 
     /// The status once the Sampler holds `sample`.
