@@ -127,6 +127,13 @@ pub fn accepts_effect_load(
     })
 }
 
+/// Records the live state of every plugin device in `snapshot`.
+pub fn record_live_plugin_states(
+    _snapshot: &mut ProjectSnapshot,
+    _capture_state: impl FnMut(PluginGuiKey) -> Option<String>,
+) {
+}
+
 /// Records the live state of `track_id`'s plugin instrument in `snapshot`,
 /// the undo step taken just before an edit that removes the instance, so
 /// undoing that edit restores the sound the plugin had rather than the one
@@ -348,6 +355,28 @@ mod tests {
             (key == PluginGuiKey::Instrument { track_id }).then(|| "live".to_string())
         });
         assert_eq!(recorded_instrument_state(&snap), Some("live"));
+    }
+
+    #[test]
+    fn the_snapshot_undo_and_redo_push_holds_every_live_plugins_state() {
+        let (mut snap, _) = snapshot_with_plugin_instrument();
+        std::sync::Arc::make_mut(&mut snap.project_tracks).tracks[0]
+            .effects
+            .push(effect(Some(plugin_device("eq"))));
+        record_live_plugin_states(&mut snap, |key| {
+            Some(match key {
+                PluginGuiKey::Instrument { .. } => "live-synth".to_string(),
+                PluginGuiKey::Effect { .. } => "live-eq".to_string(),
+            })
+        });
+        assert_eq!(recorded_instrument_state(&snap), Some("live-synth"));
+        assert_eq!(
+            snap.project_tracks.tracks[0].effects[0]
+                .plugin_ref
+                .as_ref()
+                .and_then(|device| device.state_b64.as_deref()),
+            Some("live-eq")
+        );
     }
 
     #[test]
