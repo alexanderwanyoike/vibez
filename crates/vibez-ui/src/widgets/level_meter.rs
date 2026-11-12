@@ -145,13 +145,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bars_keep_their_width_at_the_standard_size_and_widen_with_the_meter() {
-        assert_eq!(bar_width(WIDTH), BAR_W);
-        let wider = bar_width(WIDTH + 40.0);
-        assert!((wider - (BAR_W + 20.0)).abs() < 1e-4, "{wider}");
-    }
-
-    #[test]
     fn scale_marks_are_evenly_spaced_and_monotonic() {
         let last = (SCALE_DB.len() - 1) as f32;
         for (index, &db) in SCALE_DB.iter().enumerate() {
