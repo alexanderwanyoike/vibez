@@ -692,6 +692,14 @@ mod tests {
     }
 
     #[test]
+    fn the_band_row_shows_only_where_every_band_fits_beside_the_output_column() {
+        let bands = BAND_GROUP_W * 4.0 + 3.0;
+        let short_of_room = PAD * 2.0 + bands + 17.0 + OUTPUT_W - 1.0;
+        assert!(!arrange(Size::new(short_of_room, 360.0), false).strip);
+        assert!(arrange(Size::new(short_of_room + 1.0, 360.0), false).strip);
+    }
+
+    #[test]
     fn wide_tall_cards_show_every_band_below_and_narrower_ones_band_tabs() {
         let layout = arrange(Size::new(FULL_W, 360.0), false);
         assert!(layout.kind == Upper::Side && layout.strip);
