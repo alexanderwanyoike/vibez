@@ -157,8 +157,8 @@ impl BrowserState {
     /// the audio; with no target under the cursor there is nothing to judge.
     pub fn drag_ghost_label(&self) -> (String, Option<bool>) {
         match &self.drag_target {
-            Some(target) => (target.status().to_uppercase(), Some(target.accepts_drop())),
-            None => ("CHOOSE A DROP TARGET".into(), None),
+            Some(target) => (target.status(), Some(target.accepts_drop())),
+            None => ("Choose a drop target".into(), None),
         }
     }
 
