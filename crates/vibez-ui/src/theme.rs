@@ -744,6 +744,18 @@ pub fn selected_place() -> Color {
     blend(bg_surface(), accent(), if is_light() { 0.13 } else { 0.16 })
 }
 
+/// The faint accent wash over where a Browser drop will land. It has to be
+/// translucent to show the target through it, so its alpha is set per
+/// lightness to read as the same soft tint on dark and light themes.
+pub fn drop_target_wash() -> Color {
+    with_alpha(accent(), if is_light() { 0.1 } else { 0.025 })
+}
+
+/// The hairline around where a Browser drop will land.
+pub fn drop_target_outline() -> Color {
+    blend(bg_elevated(), accent(), 0.5)
+}
+
 /// A group of controls sunk slightly into a raised card.
 pub fn card_inset() -> Color {
     blend(bg_elevated(), display_bg(), 0.35)

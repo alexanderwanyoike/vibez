@@ -301,9 +301,7 @@ impl canvas::Program<Message> for PadView<'_> {
     ) -> Vec<canvas::Geometry> {
         let size = bounds.size();
         let mut frame = canvas::Frame::new(renderer, size);
-        // The pad a drop will load looks hovered even when the cursor is on
-        // the card around it.
-        if (state.hovered_since.is_some() || self.drop_target) && !self.firing {
+        if state.hovered_since.is_some() && !self.drop_target && !self.firing {
             let face = canvas::Path::rounded_rectangle(Point::ORIGIN, size, FACE_RADIUS.into());
             frame.fill(&face, th::with_alpha(th::text(), 0.05));
         }
@@ -697,18 +695,26 @@ impl<'a> DrumRackView<'a> {
                         .into()
                 }),
                 border: iced::Border {
-                    color: if drop_target || selected || firing {
+                    color: if selected || firing {
                         accent
                     } else if filled {
                         th::border_light()
                     } else {
                         th::border()
                     },
-                    width: if drop_target { 2.0 } else { 1.0 },
+                    width: 1.0,
                     radius: FACE_RADIUS.into(),
                 },
                 ..Default::default()
             },
+        );
+        // The pad a drop will load is tinted even when the cursor is on the
+        // card around it.
+        let face = crate::widgets::drop_highlight::drop_highlight(
+            face.into(),
+            drop_target,
+            FACE_RADIUS,
+            0.0,
         );
         let bezel = container(face)
             .padding(if tiny {

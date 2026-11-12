@@ -47,6 +47,8 @@ impl App {
             card,
             self.state.browser.drag_target
                 == Some(crate::state::BrowserDropTarget::Sampler { track_id }),
+            crate::widgets::device_chrome::CARD_RADIUS,
+            0.0,
         );
         // A sample dragged in from the browser loads onto the card.
         mouse_area(card)
