@@ -140,7 +140,7 @@ pub fn arrange(size: Size, advanced: bool) -> Arrangement {
             (true, false) => Some(ADVANCED_H),
         },
         advanced_only,
-        advanced_output: true,
+        advanced_output: advanced_only,
         advanced_spectrum: size.width >= ADVANCED_SPECTRUM_W,
     }
 }
@@ -185,11 +185,7 @@ impl<'a> EqView<'a> {
         let layout = arrange(size, self.panel.advanced);
         let mut body = column![];
         if layout.advanced_only {
-            body = body.push(self.advanced(
-                layout.advanced.unwrap_or(0.0),
-                layout.advanced_spectrum,
-                size.width,
-            ));
+            body = body.push(self.advanced(layout.advanced.unwrap_or(0.0), layout, size.width));
             return body.width(Length::Fill).height(Length::Fill).into();
         }
         body = body.push(self.upper(layout));
@@ -197,9 +193,9 @@ impl<'a> EqView<'a> {
             body = body.push(rule()).push(self.strip());
         }
         if let Some(height) = layout.advanced {
-            body =
-                body.push(rule())
-                    .push(self.advanced(height, layout.advanced_spectrum, size.width));
+            body = body
+                .push(rule())
+                .push(self.advanced(height, layout, size.width));
         }
         body.width(Length::Fill).height(Length::Fill).into()
     }
@@ -541,7 +537,7 @@ impl<'a> EqView<'a> {
         .into()
     }
 
-    fn advanced(&self, height: f32, with_spectrum: bool, width: f32) -> Element<'a, Message> {
+    fn advanced(&self, height: f32, layout: Arrangement, width: f32) -> Element<'a, Message> {
         if height < ADVANCED_H {
             return container(self.advanced_line(width))
                 .padding([0.0, PAD])
@@ -552,13 +548,16 @@ impl<'a> EqView<'a> {
         let mut content = row![
             self.cut(param::HP_ENABLED, param::HP_FREQUENCY, "Low cut"),
             self.cut(param::LP_ENABLED, param::LP_FREQUENCY, "High cut"),
-            vertical_rule(),
-            container(self.param(param::OUTPUT).label("Output").row(ROW_KNOB)).width(150.0),
         ]
         .spacing(12)
         .align_y(Alignment::Center);
-        if with_spectrum {
-            content = content.push(vertical_rule()).push(self.spectrum_controls());
+        if layout.advanced_output {
+            content = content.push(vertical_rule()).push(
+                container(self.param(param::OUTPUT).label("Output").row(ROW_KNOB)).width(150.0),
+            );
+            if layout.advanced_spectrum {
+                content = content.push(vertical_rule()).push(self.spectrum_controls());
+            }
         }
         container(content)
             .padding([4.0, PAD])
