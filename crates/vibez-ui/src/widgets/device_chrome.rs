@@ -411,7 +411,7 @@ fn editor_button<'a>(gui_key: Option<PluginGuiKey>) -> Element<'a, Message> {
 }
 
 /// The room a chain that fits leaves under its cards.
-pub const CHAIN_PAD_BELOW: f32 = 8.0;
+pub const CHAIN_PAD_BELOW: f32 = 12.0;
 
 /// The device chain's scrollbar, and the gap it keeps from the cards: the
 /// two fill the room a chain that fits leaves under its cards.
