@@ -581,14 +581,12 @@ mod tests {
 
     #[test]
     fn even_segments_share_one_whole_width_that_fits_the_widest_label() {
-        let labels = ["A", "B", "C", "D"];
-        let width = even_segment_width(&labels);
+        let mixed = even_segment_width(&["I", "W"]);
 
-        assert_eq!(width, width.round());
-        for label in labels {
-            let fitted = text_width(label, LABEL_SIZE, iced::Font::DEFAULT) + SEGMENT_PAD_X * 2.0;
-            assert!(width >= fitted, "{label}: {width} < {fitted}");
-        }
+        assert_eq!(mixed, mixed.round());
+        assert_eq!(mixed, even_segment_width(&["W"]));
+        assert!(mixed > even_segment_width(&["I"]));
+        assert!(mixed > text_width("W", LABEL_SIZE, iced::Font::DEFAULT));
     }
 
     #[test]
