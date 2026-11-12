@@ -21,10 +21,15 @@ pub const WIDTH: f32 = 44.0;
 const BAR_W: f32 = 9.0;
 const BAR_GAP: f32 = 3.0;
 
-/// Each bar's width when the meter is `width` wide.
-fn bar_width(_width: f32) -> f32 {
-    BAR_W
+/// Room right of the bars for the scale numbers.
+const SCALE_W: f32 = WIDTH - BAR_W * 2.0 - BAR_GAP;
+
+/// Each bar's width when the meter is `width` wide. The bars share whatever
+/// the scale leaves, so a wider meter gets wider bars.
+fn bar_width(width: f32) -> f32 {
+    ((width - SCALE_W - BAR_GAP) / 2.0).max(1.0)
 }
+
 const YELLOW_FROM_DB: f32 = -12.0;
 const RED_FROM_DB: f32 = -3.0;
 
