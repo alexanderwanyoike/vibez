@@ -55,6 +55,9 @@ const OUTPUT_COLUMN_H: f32 = 12.0 + 15.0 + METER_MIN_H + UNDER_GAP + TABS_H;
 const GRAPH_TABS_H: f32 = 12.0 + GRAPH_MIN_H + UNDER_GAP + TABS_H;
 /// The output column beside the graph over the band tabs.
 const SIDE_H: f32 = OUTPUT_COLUMN_H.max(GRAPH_TABS_H);
+/// The graph and meters over the band row, as tall as the graph was there
+/// before the output column.
+const STRIP_UPPER_H: f32 = 112.0;
 
 /// The band tabs, or the card's header where that is wider.
 pub const COMPACT_W: f32 = (TABS_W + PAD * 2.0).max(crate::widgets::device_chrome::header_min_w(
@@ -133,7 +136,7 @@ pub fn arrange(size: Size, advanced: bool) -> Arrangement {
     let strip = !advanced_only
         && kind == Upper::Side
         && size.width >= FULL_W
-        && below - stacked >= OUTPUT_COLUMN_H + 1.0 + STRIP_H;
+        && below - stacked >= STRIP_UPPER_H + 1.0 + STRIP_H;
     let upper = if advanced_only {
         0.0
     } else {
@@ -668,7 +671,7 @@ mod tests {
                         continue;
                     }
                     let minimum = match layout.kind {
-                        Upper::Side if layout.strip => OUTPUT_COLUMN_H,
+                        Upper::Side if layout.strip => STRIP_UPPER_H,
                         Upper::Side => SIDE_H,
                         Upper::TabsBelow => GRAPH_MIN_H + TABS_H,
                         Upper::TabsBeside | Upper::TabsOnly => TABS_H,
@@ -685,9 +688,16 @@ mod tests {
         for width in [MEDIUM_W, FULL_W, MAX_W] {
             for height in (MIN_BODY_H..=420).step_by(2).map(|height| height as f32) {
                 let layout = arrange(Size::new(width, height), false);
+                // Over the band row the trim and analyser lines sit beside
+                // the bands, so only the meters share the graph's height.
+                let needed = if layout.strip {
+                    12.0 + 15.0 + METER_MIN_H
+                } else {
+                    OUTPUT_COLUMN_H
+                };
                 if layout.kind == Upper::Side {
                     assert!(
-                        layout.upper >= OUTPUT_COLUMN_H - 0.01,
+                        layout.upper >= needed - 0.01,
                         "{width}x{height}: {layout:?}"
                     );
                 }
