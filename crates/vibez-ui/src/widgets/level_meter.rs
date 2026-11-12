@@ -20,11 +20,6 @@ pub const WIDTH: f32 = 44.0;
 
 const BAR_W: f32 = 9.0;
 const BAR_GAP: f32 = 3.0;
-
-/// Each bar's width when the meter is `width` wide.
-fn bar_width(_width: f32) -> f32 {
-    BAR_W
-}
 const YELLOW_FROM_DB: f32 = -12.0;
 const RED_FROM_DB: f32 = -3.0;
 
@@ -98,11 +93,10 @@ impl canvas::Program<Message> for LevelMeter {
         .into_iter()
         .enumerate()
         {
-            let bar_w = bar_width(bounds.width);
-            let x = channel as f32 * (bar_w + BAR_GAP);
+            let x = channel as f32 * (BAR_W + BAR_GAP);
             frame.fill_rectangle(
                 Point::new(x, 1.0),
-                Size::new(bar_w, height),
+                Size::new(BAR_W, height),
                 th::fader_track(),
             );
             let level_db = amplitude_to_db(rms);
@@ -117,14 +111,14 @@ impl canvas::Program<Message> for LevelMeter {
                 let top = y_of(level_db.min(to));
                 let bottom = y_of(from);
                 if bottom > top {
-                    frame.fill_rectangle(Point::new(x, top), Size::new(bar_w, bottom - top), color);
+                    frame.fill_rectangle(Point::new(x, top), Size::new(BAR_W, bottom - top), color);
                 }
             }
             let peak_db = amplitude_to_db(peak);
             if peak_db > FLOOR_DB {
                 frame.fill_rectangle(
                     Point::new(x, y_of(peak_db).min(height - 1.0)),
-                    Size::new(bar_w, 2.0),
+                    Size::new(BAR_W, 2.0),
                     if peak_db >= 0.0 {
                         th::meter_red()
                     } else {
