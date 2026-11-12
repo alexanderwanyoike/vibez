@@ -14,23 +14,25 @@ use crate::spectrum::SpectrumState;
 use crate::state::UiEffect;
 use crate::theme as th;
 use crate::widgets::device_controls::{
-    heading, level_column, rule, segmented, toggle, vertical_rule, Param, LABEL_SIZE,
+    heading, level_column, rule, segmented, toggle, vertical_rule, Param, LABEL_SIZE, METER_W,
 };
 use crate::widgets::eq_display::EqDisplayWidget;
 use crate::widgets::hint::with_hint;
+use crate::widgets::level_meter;
 
 const PAD: f32 = 10.0;
 const GRAPH_SHORT_MIN_W: f32 = 180.0;
 const GRAPH_MIN_H: f32 = 56.0;
-/// Band tabs over the selected band's three controls.
-const TABS_H: f32 = 56.0;
+/// Band tabs over the selected band's three controls, a line each.
+const TABS_H: f32 = ROW_KNOB * 2.0 + 4.0;
 const TABS_W: f32 = 320.0;
 const STRIP_H: f32 = 86.0;
 const ADVANCED_H: f32 = 56.0;
 const BAND_GROUP_RADIUS: f32 = 5.0;
 /// Room for one band group's controls; a wider band row shares out the rest.
 const BAND_GROUP_W: f32 = 172.0;
-const OUTPUT_W: f32 = 240.0;
+/// Input and output meters side by side.
+const OUTPUT_W: f32 = METER_W * 2.0;
 const STRIP_KNOB: f32 = 28.0;
 const ROW_KNOB: f32 = 24.0;
 /// A single line of controls for the shortest cards.
@@ -40,11 +42,14 @@ const LINE_KNOB: f32 = 18.0;
 const LINE_OUTPUT_W: f32 = 480.0;
 /// The shortest level meter that still reads as one.
 const METER_MIN_H: f32 = 40.0;
-/// Input and output meters under their headings, over a line each for the
-/// trim and the analyser, inside the graph's vertical padding.
-const OUTPUT_COLUMN_H: f32 = 12.0 + 15.0 + METER_MIN_H + (4.0 + ROW_KNOB) * 2.0;
-/// The graph over the band tabs, inside the graph's vertical padding.
-const GRAPH_TABS_H: f32 = 12.0 + GRAPH_MIN_H + 4.0 + TABS_H;
+/// Gap between the graph or meters and the controls under them.
+const UNDER_GAP: f32 = 6.0;
+/// Input and output meters under their headings, over the trim and analyser
+/// lines, inside the upper area's vertical padding. The lines take the band
+/// tabs' height so the two sit level.
+const OUTPUT_COLUMN_H: f32 = 12.0 + 15.0 + METER_MIN_H + UNDER_GAP + TABS_H;
+/// The graph over the band tabs, inside the upper area's vertical padding.
+const GRAPH_TABS_H: f32 = 12.0 + GRAPH_MIN_H + UNDER_GAP + TABS_H;
 /// The output column beside the graph over the band tabs.
 const SIDE_H: f32 = OUTPUT_COLUMN_H.max(GRAPH_TABS_H);
 
@@ -226,24 +231,17 @@ impl<'a> EqView<'a> {
         let graph = || container(self.graph()).padding([6.0, 0.0]);
         let content: Element<'a, Message> = match layout.kind {
             Upper::Side => {
-                let main: Element<'a, Message> = if layout.strip {
-                    graph().height(Length::Fill).into()
-                } else {
-                    column![
-                        graph().height(Length::Fill),
-                        container(self.band_tabs()).width(TABS_W)
-                    ]
-                    .spacing(4)
-                    .into()
-                };
+                let mut main = column![self.graph()].spacing(UNDER_GAP);
+                if !layout.strip {
+                    main = main.push(self.band_tabs());
+                }
                 row![
-                    container(main).width(Length::Fill),
+                    main.width(Length::Fill),
                     vertical_rule(),
-                    container(self.output_column())
-                        .width(OUTPUT_W)
-                        .padding([6.0, 0.0]),
+                    self.output_column(),
                 ]
                 .spacing(8)
+                .padding([6.0, 0.0])
                 .into()
             }
             Upper::TabsBeside => row![
@@ -338,22 +336,24 @@ impl<'a> EqView<'a> {
             self.accent(),
         );
         let third: Element<'a, Message> = if has_q(band) {
-            self.param(param::SHAPE[band]).label("Q").row(ROW_KNOB)
+            self.param(param::SHAPE[band]).label("Q").line_item()
         } else {
             self.shape(band)
         };
         column![
             row![tabs, self.band_header(band, false)]
                 .spacing(6)
+                .height(ROW_KNOB)
                 .align_y(Alignment::Center),
             row![
-                self.param(param::FREQUENCY[band])
-                    .label("Freq")
-                    .row(ROW_KNOB),
-                self.param(param::GAIN[band]).label("Gain").row(ROW_KNOB),
+                self.param(param::FREQUENCY[band]).label("Freq").line_item(),
+                Space::with_width(Length::Fill),
+                self.param(param::GAIN[band]).label("Gain").line_item(),
+                Space::with_width(Length::Fill),
                 third,
             ]
             .spacing(12)
+            .height(ROW_KNOB)
             .align_y(Alignment::Center),
         ]
         .spacing(4)
@@ -460,33 +460,41 @@ impl<'a> EqView<'a> {
         column![
             row![
                 level_column("Input", self.panel.input),
-                level_column("Output", self.panel.output),
+                Space::with_width(Length::Fill),
+                // The output scale ends at the column's edge, level with the
+                // trim knob and the freeze switch, rather than inside the
+                // gap a level column leaves after its scale.
+                container(level_column("Output", self.panel.output)).width(level_meter::WIDTH),
             ]
             .height(Length::Fill),
-            self.param(param::OUTPUT).label("Trim").row(ROW_KNOB),
-            row![
-                heading("Spectrum"),
-                Space::with_width(Length::Fill),
-                self.spectrum_switches(),
+            column![
+                container(self.param(param::OUTPUT).label("Trim").row(LINE_KNOB))
+                    .center_y(ROW_KNOB),
+                row![
+                    self.spectrum_side(),
+                    Space::with_width(Length::Fill),
+                    self.freeze()
+                ]
+                .height(ROW_KNOB)
+                .align_y(Alignment::Center),
             ]
-            .height(ROW_KNOB)
-            .align_y(Alignment::Center),
+            .spacing(4)
+            .height(TABS_H),
         ]
-        .spacing(4)
+        .spacing(UNDER_GAP)
+        .width(OUTPUT_W)
         .into()
     }
 
     fn spectrum_controls(&self) -> Element<'a, Message> {
-        column![heading("Spectrum"), self.spectrum_switches()]
-            .spacing(4)
-            .into()
-    }
-
-    fn spectrum_switches(&self) -> Element<'a, Message> {
-        row![self.spectrum_side(), self.freeze()]
-            .spacing(6)
-            .align_y(Alignment::Center)
-            .into()
+        column![
+            heading("Spectrum"),
+            row![self.spectrum_side(), self.freeze()]
+                .spacing(6)
+                .align_y(Alignment::Center),
+        ]
+        .spacing(4)
+        .into()
     }
 
     fn spectrum_side(&self) -> Element<'a, Message> {
