@@ -27,6 +27,7 @@ const TABS_W: f32 = 320.0;
 const STRIP_H: f32 = 86.0;
 const ADVANCED_H: f32 = 56.0;
 const BAND_GROUP_RADIUS: f32 = 5.0;
+/// The narrowest a band group gets; wider band rows share the width.
 const BAND_GROUP_W: f32 = 172.0;
 const OUTPUT_W: f32 = 240.0;
 const STRIP_KNOB: f32 = 28.0;
@@ -425,10 +426,11 @@ impl<'a> EqView<'a> {
                     .spacing(8)
                     .align_y(Alignment::Center),
                 ]
-                .spacing(2),
+                .spacing(2)
+                .align_x(Alignment::Center),
             )
             .padding([4.0, 6.0])
-            .width(BAND_GROUP_W)
+            .width(Length::Fill)
             .style(move |_| container::Style {
                 background: Some(
                     if selected {
