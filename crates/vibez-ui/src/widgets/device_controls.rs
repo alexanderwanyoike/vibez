@@ -399,7 +399,7 @@ pub fn segmented<'a, T: Copy + PartialEq + 'a>(
     on_select: impl Fn(T) -> Message,
     accent: Color,
 ) -> Element<'a, Message> {
-    segments(options, selected, on_select, accent, None)
+    segment_row(options, selected, on_select, accent, None)
 }
 
 const SEGMENT_PAD_X: f32 = 10.0;
@@ -425,10 +425,10 @@ pub fn even_segmented<'a, T: Copy + PartialEq + 'a>(
 ) -> Element<'a, Message> {
     let labels: Vec<&str> = options.iter().map(|(_, label)| *label).collect();
     let width = even_segment_width(&labels);
-    segments(options, selected, on_select, accent, Some(width))
+    segment_row(options, selected, on_select, accent, Some(width))
 }
 
-fn segments<'a, T: Copy + PartialEq + 'a>(
+fn segment_row<'a, T: Copy + PartialEq + 'a>(
     options: &[(T, &'a str)],
     selected: T,
     on_select: impl Fn(T) -> Message,
