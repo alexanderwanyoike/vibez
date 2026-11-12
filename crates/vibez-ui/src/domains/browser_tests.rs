@@ -1423,10 +1423,7 @@ fn the_status_and_the_ghost_read_each_target_from_one_place() {
         assert!(!target.status().is_empty());
         assert_eq!(action.status, Some(target.status()));
         assert!(target.accepts_drop());
-        assert_eq!(
-            b.drag_ghost_label(),
-            (target.status().to_uppercase(), Some(true))
-        );
+        assert_eq!(b.drag_ghost_label(), (target.status(), Some(true)));
     }
     let mut b = dragging();
     b.update(BrowserMsg::DragHoverTrack {
@@ -1438,7 +1435,7 @@ fn the_status_and_the_ghost_read_each_target_from_one_place() {
     b.update(BrowserMsg::ClearDragTarget);
     assert_eq!(
         b.drag_ghost_label(),
-        ("CHOOSE A DROP TARGET".to_string(), None)
+        ("Choose a drop target".to_string(), None)
     );
 }
 
