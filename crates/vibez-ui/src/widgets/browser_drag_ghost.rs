@@ -52,7 +52,8 @@ impl canvas::Program<Message> for BrowserDragGhost {
         let fixed = PAD_X * 2.0 + DOT_R * 2.0 + DOT_GAP + detail_w + separator_w;
         let room = (bounds.width - EDGE * 2.0 - fixed).max(TITLE_MIN_W);
         let title = crate::typography::fit_text_middle(&self.title, room, TITLE_SIZE, font);
-        let width = fixed + text_width(&title, TITLE_SIZE, font);
+        let title_w = text_width(&title, TITLE_SIZE, font);
+        let width = fixed + title_w;
 
         let x = (self.cursor.x + CURSOR_OFFSET).min((bounds.width - width - EDGE).max(EDGE));
         let y = (self.cursor.y + CURSOR_OFFSET).min((bounds.height - HEIGHT - EDGE).max(EDGE));
@@ -75,7 +76,7 @@ impl canvas::Program<Message> for BrowserDragGhost {
             dot_color,
         );
         let mut pen = x + PAD_X + DOT_R * 2.0 + DOT_GAP;
-        let mut put = |content: String, size: f32, font: Font, color, advance: f32| {
+        let mut put = |content: String, size: f32, color, advance: f32| {
             frame.fill_text(canvas::Text {
                 content,
                 position: Point::new(pen, mid),
@@ -88,21 +89,14 @@ impl canvas::Program<Message> for BrowserDragGhost {
             });
             pen += advance;
         };
-        put(
-            self.detail.clone(),
-            DETAIL_SIZE,
-            font,
-            theme::text(),
-            detail_w,
-        );
+        put(self.detail.clone(), DETAIL_SIZE, theme::text(), detail_w);
         put(
             SEPARATOR.into(),
             TITLE_SIZE,
-            font,
             theme::text_muted(),
             separator_w,
         );
-        put(title, TITLE_SIZE, font, theme::text_dim(), 0.0);
+        put(title, TITLE_SIZE, theme::text_dim(), title_w);
         vec![frame.into_geometry()]
     }
 }
