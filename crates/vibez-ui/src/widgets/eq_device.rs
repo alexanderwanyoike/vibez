@@ -95,6 +95,9 @@ pub struct Arrangement {
     pub strip: bool,
     pub advanced: Option<f32>,
     pub advanced_only: bool,
+    /// Advanced carries the output trim and analyser controls, which the
+    /// output column holds whenever it shows.
+    pub advanced_output: bool,
     /// Advanced is wide enough to carry the analyser controls too.
     pub advanced_spectrum: bool,
 }
@@ -137,6 +140,7 @@ pub fn arrange(size: Size, advanced: bool) -> Arrangement {
             (true, false) => Some(ADVANCED_H),
         },
         advanced_only,
+        advanced_output: true,
         advanced_spectrum: size.width >= ADVANCED_SPECTRUM_W,
     }
 }
@@ -700,6 +704,14 @@ mod tests {
         assert!(!tall.advanced_only && tall.advanced == Some(ADVANCED_H));
         assert!(arrange(Size::new(FULL_W, 150.0), true).advanced_only);
         assert!(arrange(Size::new(COMPACT_W, 400.0), true).advanced_only);
+    }
+
+    #[test]
+    fn advanced_leaves_the_output_controls_to_the_output_column() {
+        let stacked = arrange(Size::new(FULL_W, 400.0), true);
+        assert!(stacked.kind == Upper::Side && !stacked.advanced_only);
+        assert!(!stacked.advanced_output);
+        assert!(arrange(Size::new(COMPACT_W, 400.0), true).advanced_output);
     }
 
     #[test]
