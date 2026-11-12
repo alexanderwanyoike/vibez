@@ -17,6 +17,7 @@ use crate::widgets::device_controls::{
     heading, level_column, rule, segmented, toggle, vertical_rule, Param, LABEL_SIZE,
 };
 use crate::widgets::eq_display::EqDisplayWidget;
+use crate::widgets::hint::with_hint;
 
 const PAD: f32 = 10.0;
 const GRAPH_SHORT_MIN_W: f32 = 180.0;
@@ -482,32 +483,35 @@ impl<'a> EqView<'a> {
     }
 
     fn spectrum_switches(&self) -> Element<'a, Message> {
+        row![self.spectrum_side(), self.freeze()]
+            .spacing(6)
+            .align_y(Alignment::Center)
+            .into()
+    }
+
+    fn spectrum_side(&self) -> Element<'a, Message> {
         let effect_id = self.effect.id;
-        row![
+        with_hint(
             segmented(
                 &[(SpectrumSide::Pre, "Pre"), (SpectrumSide::Post, "Post")],
                 self.panel.side,
                 move |side| Message::Eq(EqMsg::SetSpectrumSide(effect_id, side)),
                 self.accent(),
             ),
+            "Spectrum before or after the EQ",
+        )
+    }
+
+    fn freeze(&self) -> Element<'a, Message> {
+        with_hint(
             toggle(
-                row![
-                    icons::icon(icons::SNOWFLAKE).size(10),
-                    text("Freeze")
-                        .size(LABEL_SIZE)
-                        .wrapping(text::Wrapping::None)
-                ]
-                .spacing(4)
-                .align_y(Alignment::Center)
-                .into(),
+                icons::icon(icons::SNOWFLAKE).size(10).into(),
                 self.panel.frozen,
-                Message::Eq(EqMsg::ToggleFreeze(effect_id)),
+                Message::Eq(EqMsg::ToggleFreeze(self.effect.id)),
                 self.accent(),
             ),
-        ]
-        .spacing(6)
-        .align_y(Alignment::Center)
-        .into()
+            "Freeze the spectrum",
+        )
     }
 
     fn cut(&self, enabled: usize, frequency: usize, label: &'static str) -> Element<'a, Message> {
