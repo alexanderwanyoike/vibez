@@ -370,16 +370,6 @@ pub fn level_column<'a>(
     .into()
 }
 
-/// A [`level_column`] whose bars widen to fill the width it is given.
-pub fn filling_level_column<'a>(
-    name: &'a str,
-    levels: vibez_engine::metering::MeterValues,
-) -> Element<'a, Message> {
-    meter_under_heading(name, levels, Length::Fill)
-        .width(Length::Fill)
-        .into()
-}
-
 fn meter_under_heading<'a>(
     name: &'a str,
     levels: vibez_engine::metering::MeterValues,
