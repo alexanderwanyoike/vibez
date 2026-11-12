@@ -361,15 +361,27 @@ pub fn level_column<'a>(
     name: &'a str,
     levels: vibez_engine::metering::MeterValues,
 ) -> Element<'a, Message> {
+    meter_under_heading(
+        name,
+        levels,
+        Length::Fixed(crate::widgets::level_meter::WIDTH),
+    )
+    .width(METER_W)
+    .into()
+}
+
+fn meter_under_heading<'a>(
+    name: &'a str,
+    levels: vibez_engine::metering::MeterValues,
+    meter_width: Length,
+) -> iced::widget::Column<'a, Message> {
     column![
         heading(name),
         canvas(crate::widgets::level_meter::LevelMeter { levels })
-            .width(crate::widgets::level_meter::WIDTH)
+            .width(meter_width)
             .height(Length::Fill),
     ]
     .spacing(2)
-    .width(METER_W)
-    .into()
 }
 
 /// How wide a [`toggle`] around `label` sets.
