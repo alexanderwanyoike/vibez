@@ -352,7 +352,7 @@ impl<'a> EqView<'a> {
             self.accent(),
         );
         let third: Element<'a, Message> = if has_q(band) {
-            self.param(param::SHAPE[band]).label("Q").row(LINE_KNOB)
+            self.param(param::SHAPE[band]).label("Q").line_item()
         } else {
             self.shape(band)
         };
@@ -365,12 +365,8 @@ impl<'a> EqView<'a> {
                 .height(ROW_KNOB)
                 .align_y(Alignment::Center),
             row![
-                cell(
-                    self.param(param::FREQUENCY[band])
-                        .label("Freq")
-                        .row(LINE_KNOB)
-                ),
-                cell(self.param(param::GAIN[band]).label("Gain").row(LINE_KNOB)),
+                cell(self.param(param::FREQUENCY[band]).label("Freq").line_item()),
+                cell(self.param(param::GAIN[band]).label("Gain").line_item()),
                 cell(third),
             ]
             .spacing(TAB_CELL_GAP)
