@@ -755,4 +755,10 @@ mod tests {
         assert_eq!(WIDTHS.card_width(MEDIUM_W), MEDIUM_W);
         assert_eq!(WIDTHS.card_width(5000.0), MAX_W);
     }
+
+    #[test]
+    fn a_chain_with_room_for_the_output_column_never_scrolls_for_the_band_row() {
+        let share = FULL_W - 40.0;
+        assert_eq!(WIDTHS.chain_width(share, FULL_W + 100.0), share);
+    }
 }
