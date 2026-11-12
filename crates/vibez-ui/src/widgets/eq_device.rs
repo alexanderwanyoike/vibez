@@ -26,6 +26,9 @@ const GRAPH_MIN_H: f32 = 56.0;
 /// Band tabs over the selected band's three controls, a line each.
 const TABS_H: f32 = ROW_KNOB * 2.0 + 4.0;
 const TABS_W: f32 = 320.0;
+/// The selected band's three controls share the tabs' width in equal cells.
+const TAB_CELL_GAP: f32 = 10.0;
+const TAB_CELL_W: f32 = (TABS_W - TAB_CELL_GAP * 2.0) / 3.0;
 const STRIP_H: f32 = 86.0;
 const ADVANCED_H: f32 = 56.0;
 const BAND_GROUP_RADIUS: f32 = 5.0;
@@ -336,23 +339,28 @@ impl<'a> EqView<'a> {
             self.accent(),
         );
         let third: Element<'a, Message> = if has_q(band) {
-            self.param(param::SHAPE[band]).label("Q").line_item()
+            self.param(param::SHAPE[band]).label("Q").row(LINE_KNOB)
         } else {
             self.shape(band)
         };
+        // Equal cells keep each control in place while its value's width
+        // changes under a drag.
+        let cell = |item: Element<'a, Message>| container(item).width(TAB_CELL_W);
         column![
             row![tabs, self.band_header(band, false)]
                 .spacing(6)
                 .height(ROW_KNOB)
                 .align_y(Alignment::Center),
             row![
-                self.param(param::FREQUENCY[band]).label("Freq").line_item(),
-                Space::with_width(Length::Fill),
-                self.param(param::GAIN[band]).label("Gain").line_item(),
-                Space::with_width(Length::Fill),
-                third,
+                cell(
+                    self.param(param::FREQUENCY[band])
+                        .label("Freq")
+                        .row(LINE_KNOB)
+                ),
+                cell(self.param(param::GAIN[band]).label("Gain").row(LINE_KNOB)),
+                cell(third),
             ]
-            .spacing(12)
+            .spacing(TAB_CELL_GAP)
             .height(ROW_KNOB)
             .align_y(Alignment::Center),
         ]
