@@ -66,8 +66,8 @@ pub const MEDIUM_W: f32 = TABS_W + 17.0 + OUTPUT_W + PAD * 2.0;
 const TABS_BESIDE_W: f32 = GRAPH_SHORT_MIN_W + 9.0 + TABS_W + PAD * 2.0;
 /// Advanced has room for the analyser controls after the cuts and output.
 const ADVANCED_SPECTRUM_W: f32 = 640.0;
-/// Room for all four bands in a row under the graph and output column.
-pub const FULL_W: f32 = BAND_GROUP_W * 4.0 + 3.0 + PAD * 2.0;
+/// Room for all four bands in a row under the graph, beside the output column.
+pub const FULL_W: f32 = BAND_GROUP_W * 4.0 + 3.0 + 17.0 + OUTPUT_W + PAD * 2.0;
 pub const MAX_W: f32 = 1100.0;
 
 pub const WIDTHS: crate::widgets::device_chrome::CardWidths =
@@ -198,9 +198,6 @@ impl<'a> EqView<'a> {
             return body.width(Length::Fill).height(Length::Fill).into();
         }
         body = body.push(self.upper(layout));
-        if layout.strip {
-            body = body.push(rule()).push(self.strip());
-        }
         if let Some(height) = layout.advanced {
             body = body
                 .push(rule())
@@ -233,20 +230,33 @@ impl<'a> EqView<'a> {
     fn upper(&self, layout: Arrangement) -> Element<'a, Message> {
         let graph = || container(self.graph()).padding([6.0, 0.0]);
         let content: Element<'a, Message> = match layout.kind {
-            Upper::Side => {
-                let mut main = column![self.graph()].spacing(UNDER_GAP);
-                if !layout.strip {
-                    main = main.push(self.band_tabs());
-                }
-                row![
-                    main.width(Length::Fill),
-                    vertical_rule(),
-                    self.output_column(),
+            Upper::Side if layout.strip => row![
+                column![graph().height(Length::Fill), rule(), self.strip()].width(Length::Fill),
+                vertical_rule(),
+                column![
+                    container(self.meters())
+                        .padding([6.0, 0.0])
+                        .height(Length::Fill),
+                    // Level with the rule over the band row.
+                    Space::with_height(1.0),
+                    container(self.output_lines()).center_y(STRIP_H),
                 ]
-                .spacing(8)
-                .padding([6.0, 0.0])
-                .into()
-            }
+                .width(OUTPUT_W),
+            ]
+            .spacing(8)
+            .into(),
+            Upper::Side => row![
+                column![self.graph(), self.band_tabs()]
+                    .spacing(UNDER_GAP)
+                    .width(Length::Fill),
+                vertical_rule(),
+                column![self.meters(), self.output_lines()]
+                    .spacing(UNDER_GAP)
+                    .width(OUTPUT_W),
+            ]
+            .spacing(8)
+            .padding([6.0, 0.0])
+            .into(),
             Upper::TabsBeside => row![
                 graph().width(Length::Fill),
                 vertical_rule(),
@@ -262,9 +272,10 @@ impl<'a> EqView<'a> {
             Upper::TabsOnly => container(self.band_tabs()).center_y(Length::Fill).into(),
             Upper::Line => container(self.band_line()).center_y(Length::Fill).into(),
         };
+        let band_row = if layout.strip { 1.0 + STRIP_H } else { 0.0 };
         container(content)
             .padding([0.0, PAD])
-            .height(layout.upper)
+            .height(layout.upper + band_row)
             .width(Length::Fill)
             .into()
     }
@@ -458,39 +469,36 @@ impl<'a> EqView<'a> {
             bands = bands
                 .push(mouse_area(group).on_press(Message::Eq(EqMsg::SelectBand(effect_id, band))));
         }
-        container(bands)
-            .padding([0.0, PAD])
-            .width(Length::Fill)
-            .into()
+        bands.into()
     }
 
-    fn output_column(&self) -> Element<'a, Message> {
-        column![
-            row![
-                level_column("Input", self.panel.input),
-                Space::with_width(Length::Fill),
-                // The output scale ends at the column's edge, level with the
-                // trim knob and the freeze switch, rather than inside the
-                // gap a level column leaves after its scale.
-                container(level_column("Output", self.panel.output)).width(level_meter::WIDTH),
-            ]
-            .height(Length::Fill),
-            column![
-                container(self.param(param::OUTPUT).label("Trim").row(LINE_KNOB))
-                    .center_y(ROW_KNOB),
-                row![
-                    self.spectrum_side(),
-                    Space::with_width(Length::Fill),
-                    self.freeze()
-                ]
-                .height(ROW_KNOB)
-                .align_y(Alignment::Center),
-            ]
-            .spacing(4)
-            .height(TABS_H),
+    fn meters(&self) -> Element<'a, Message> {
+        row![
+            level_column("Input", self.panel.input),
+            Space::with_width(Length::Fill),
+            // The output scale ends at the column's edge, level with the
+            // trim knob and the freeze switch, rather than inside the gap a
+            // level column leaves after its scale.
+            container(level_column("Output", self.panel.output)).width(level_meter::WIDTH),
         ]
-        .spacing(UNDER_GAP)
-        .width(OUTPUT_W)
+        .height(Length::Fill)
+        .into()
+    }
+
+    /// The trim and analyser lines under the meters, as tall as the band tabs.
+    fn output_lines(&self) -> Element<'a, Message> {
+        column![
+            container(self.param(param::OUTPUT).label("Trim").row(LINE_KNOB)).center_y(ROW_KNOB),
+            row![
+                self.spectrum_side(),
+                Space::with_width(Length::Fill),
+                self.freeze()
+            ]
+            .height(ROW_KNOB)
+            .align_y(Alignment::Center),
+        ]
+        .spacing(4)
+        .height(TABS_H)
         .into()
     }
 
