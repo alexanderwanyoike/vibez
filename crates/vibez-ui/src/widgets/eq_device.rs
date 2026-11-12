@@ -704,6 +704,12 @@ mod tests {
     }
 
     #[test]
+    fn the_band_row_shows_from_the_height_it_needed_before_the_output_column() {
+        assert!(arrange(Size::new(FULL_W, 199.0), false).strip);
+        assert!(!arrange(Size::new(FULL_W, 197.0), false).strip);
+    }
+
+    #[test]
     fn wide_tall_cards_show_every_band_below_and_narrower_ones_band_tabs() {
         let layout = arrange(Size::new(FULL_W, 360.0), false);
         assert!(layout.kind == Upper::Side && layout.strip);
