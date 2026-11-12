@@ -399,6 +399,43 @@ pub fn segmented<'a, T: Copy + PartialEq + 'a>(
     on_select: impl Fn(T) -> Message,
     accent: Color,
 ) -> Element<'a, Message> {
+    segments(options, selected, on_select, accent, None)
+}
+
+/// Horizontal padding either side of a [`segmented`] label.
+const SEGMENT_PAD_X: f32 = 10.0;
+
+/// The width every cell of an [`even_segmented`] shares. Whole pixels keep
+/// each cell's edges sharp, since the cells sit side by side.
+fn even_segment_width(labels: &[&str]) -> f32 {
+    let widest = labels
+        .iter()
+        .map(|label| text_width(label, LABEL_SIZE, iced::Font::DEFAULT))
+        .fold(0.0, f32::max);
+    widest.ceil() + SEGMENT_PAD_X * 2.0
+}
+
+/// A [`segmented`] whose cells all share the widest label's width, for
+/// short labels such as operator letters, where each glyph's own width
+/// would set the cells unevenly.
+pub fn even_segmented<'a, T: Copy + PartialEq + 'a>(
+    options: &[(T, &'a str)],
+    selected: T,
+    on_select: impl Fn(T) -> Message,
+    accent: Color,
+) -> Element<'a, Message> {
+    let labels: Vec<&str> = options.iter().map(|(_, label)| *label).collect();
+    let width = even_segment_width(&labels);
+    segments(options, selected, on_select, accent, Some(width))
+}
+
+fn segments<'a, T: Copy + PartialEq + 'a>(
+    options: &[(T, &'a str)],
+    selected: T,
+    on_select: impl Fn(T) -> Message,
+    accent: Color,
+    cell_width: Option<f32>,
+) -> Element<'a, Message> {
     let count = options.len();
     let mut choices = row![].spacing(0);
     for (position, (value, label)) in options.iter().copied().enumerate() {
@@ -409,18 +446,22 @@ pub fn segmented<'a, T: Copy + PartialEq + 'a>(
             top_right: if position + 1 == count { 3.0 } else { 0.0 },
             bottom_right: if position + 1 == count { 3.0 } else { 0.0 },
         };
-        choices = choices.push(
-            button(text(label).size(LABEL_SIZE).wrapping(text::Wrapping::None))
-                .on_press(on_select(value))
-                .padding([3, 10])
-                .style(move |_theme: &Theme, status| button::Style {
-                    border: iced::Border {
-                        radius,
-                        ..Default::default()
-                    },
-                    ..control_style::styled(chosen.then_some(accent), status)
-                }),
-        );
+        let label = text(label).size(LABEL_SIZE).wrapping(text::Wrapping::None);
+        let cell = match cell_width {
+            Some(width) => {
+                button(label.width(Length::Fill).align_x(Alignment::Center)).width(width)
+            }
+            None => button(label),
+        }
+        .on_press(on_select(value))
+        .padding([3.0, SEGMENT_PAD_X]);
+        choices = choices.push(cell.style(move |_theme: &Theme, status| button::Style {
+            border: iced::Border {
+                radius,
+                ..Default::default()
+            },
+            ..control_style::styled(chosen.then_some(accent), status)
+        }));
     }
     choices.into()
 }
