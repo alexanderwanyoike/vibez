@@ -74,7 +74,9 @@ pub const WIDTHS: crate::widgets::device_chrome::CardWidths =
     crate::widgets::device_chrome::CardWidths {
         compact: COMPACT_W,
         medium: MEDIUM_W,
-        expanded: FULL_W,
+        // The band row is a bonus for wide sections. A chain with room for
+        // the output column keeps the card at its share rather than scrolling.
+        expanded: MEDIUM_W,
         max: MAX_W,
     };
 
