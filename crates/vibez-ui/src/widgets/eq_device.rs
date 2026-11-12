@@ -14,7 +14,7 @@ use crate::spectrum::SpectrumState;
 use crate::state::UiEffect;
 use crate::theme as th;
 use crate::widgets::device_controls::{
-    heading, level_column, rule, segmented, toggle, vertical_rule, Param, LABEL_SIZE,
+    filling_level_column, heading, rule, segmented, toggle, vertical_rule, Param, LABEL_SIZE,
 };
 use crate::widgets::eq_display::EqDisplayWidget;
 
@@ -458,9 +458,10 @@ impl<'a> EqView<'a> {
     fn output_column(&self) -> Element<'a, Message> {
         column![
             row![
-                level_column("Input", self.panel.input),
-                level_column("Output", self.panel.output),
+                filling_level_column("Input", self.panel.input),
+                filling_level_column("Output", self.panel.output),
             ]
+            .spacing(12)
             .height(Length::Fill),
             self.param(param::OUTPUT).label("Trim").row(ROW_KNOB),
             row![
