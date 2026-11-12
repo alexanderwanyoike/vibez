@@ -539,6 +539,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn even_segments_share_one_whole_width_that_fits_the_widest_label() {
+        let labels = ["A", "B", "C", "D"];
+        let width = even_segment_width(&labels);
+
+        assert_eq!(width, width.round());
+        for label in labels {
+            let fitted = text_width(label, LABEL_SIZE, iced::Font::DEFAULT) + SEGMENT_PAD_X * 2.0;
+            assert!(width >= fitted, "{label}: {width} < {fitted}");
+        }
+    }
+
+    #[test]
     fn a_stored_value_names_its_nearest_choice() {
         assert_eq!(chosen(2.0, 0, 5), 2);
         assert_eq!(chosen(0.4, 0, 5), 0);
