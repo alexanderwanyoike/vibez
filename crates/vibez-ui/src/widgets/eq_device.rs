@@ -15,7 +15,7 @@ use crate::spectrum::SpectrumState;
 use crate::state::UiEffect;
 use crate::theme as th;
 use crate::widgets::device_controls::{
-    heading, rule, segmented, toggle, vertical_rule, Param, LABEL_SIZE,
+    heading, rule, segmented, toggle, vertical_rule, Param, KNOB_TEXT_H, LABEL_SIZE,
 };
 use crate::widgets::eq_display::EqDisplayWidget;
 use crate::widgets::level_meter::{self, LevelMeter};
@@ -42,6 +42,11 @@ const LINE_H: f32 = 24.0;
 const LINE_KNOB: f32 = 18.0;
 /// A one-line Advanced has room for the output trim after both cuts.
 const LINE_OUTPUT_W: f32 = 480.0;
+/// The shortest level meter that still reads as one.
+const METER_MIN_H: f32 = 40.0;
+/// Input and output meters under their headings, over the trim knob and the
+/// analyser controls, inside the graph's vertical padding.
+const OUTPUT_COLUMN_H: f32 = 12.0 + 15.0 + METER_MIN_H + 6.0 + STRIP_KNOB + KNOB_TEXT_H;
 
 /// The band tabs, or the card's header where that is wider.
 pub const COMPACT_W: f32 = (TABS_W + PAD * 2.0).max(crate::widgets::device_chrome::header_min_w(
@@ -670,6 +675,21 @@ mod tests {
                         Upper::Line => LINE_H,
                     };
                     assert!(layout.upper >= minimum - 0.01, "{context}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_output_column_has_room_for_its_meters_whenever_it_shows() {
+        for width in [MEDIUM_W, STRIP_W, FULL_W, MAX_W] {
+            for height in (MIN_BODY_H..=420).step_by(2).map(|height| height as f32) {
+                let layout = arrange(Size::new(width, height), false);
+                if layout.kind == Upper::Side {
+                    assert!(
+                        layout.upper >= OUTPUT_COLUMN_H - 0.01,
+                        "{width}x{height}: {layout:?}"
+                    );
                 }
             }
         }
