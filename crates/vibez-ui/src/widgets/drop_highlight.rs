@@ -10,6 +10,7 @@ use crate::message::Message;
 use crate::theme as th;
 use crate::widgets::device_controls::text_width;
 use crate::widgets::flat_stack::flat_stack;
+use crate::widgets::top_layer::top_layer;
 
 /// How far a zone sits inside a device card, so it reads as a place within
 /// the card rather than the card's own edge.
@@ -44,7 +45,7 @@ pub fn drop_highlight<'a>(
     })
     .width(Length::Fill)
     .height(Length::Fill);
-    flat_stack([content, marks.into()])
+    flat_stack([content, top_layer(marks).into()])
         .width(size.width)
         .height(size.height)
         .into()
