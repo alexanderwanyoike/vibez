@@ -234,40 +234,48 @@ fn label_fits(zone: Size, label: Size) -> bool {
 }
 
 /// Where a `label` sized backing goes in `zone`: centred, or moved straight
-/// up or down until it keeps `LABEL_GAP` from the `badge` by the cursor,
-/// whichever stays nearer the centre. `None` where it fits nowhere, since a
-/// label under the badge would read as two competing messages.
+/// up, down, left or right until it keeps `LABEL_GAP` from the `badge` by
+/// the cursor, whichever stays nearest the centre. `None` where it fits
+/// nowhere, since a label under the badge would read as two competing
+/// messages.
 fn label_origin(zone: Rectangle, label: Size, badge: Option<Rectangle>) -> Option<Point> {
     if !label_fits(zone.size(), label) {
         return None;
     }
-    let x = zone.center_x() - label.width / 2.0;
-    let centred = zone.center_y() - label.height / 2.0;
+    let centred = Point::new(
+        zone.center_x() - label.width / 2.0,
+        zone.center_y() - label.height / 2.0,
+    );
     let Some(badge) = badge else {
-        return Some(Point::new(x, centred));
+        return Some(centred);
     };
-    let clear = |y: f32| {
+    let clear = |at: Point| {
         let grown = Rectangle {
-            x: x - LABEL_GAP,
-            y: y - LABEL_GAP,
+            x: at.x - LABEL_GAP,
+            y: at.y - LABEL_GAP,
             width: label.width + LABEL_GAP * 2.0,
             height: label.height + LABEL_GAP * 2.0,
         };
         grown.intersection(&badge).is_none()
     };
     if clear(centred) {
-        return Some(Point::new(x, centred));
+        return Some(centred);
     }
-    let lowest = zone.y + zone.height - LABEL_MARGIN - label.height;
-    let highest = zone.y + LABEL_MARGIN;
+    let inside = |at: &Point| {
+        (zone.x + LABEL_MARGIN..=zone.x + zone.width - LABEL_MARGIN - label.width).contains(&at.x)
+            && (zone.y + LABEL_MARGIN..=zone.y + zone.height - LABEL_MARGIN - label.height)
+                .contains(&at.y)
+    };
+    let distance = |at: &Point| (at.x - centred.x).abs() + (at.y - centred.y).abs();
     [
-        badge.y - LABEL_GAP - label.height,
-        badge.y + badge.height + LABEL_GAP,
+        Point::new(centred.x, badge.y - LABEL_GAP - label.height),
+        Point::new(centred.x, badge.y + badge.height + LABEL_GAP),
+        Point::new(badge.x - LABEL_GAP - label.width, centred.y),
+        Point::new(badge.x + badge.width + LABEL_GAP, centred.y),
     ]
     .into_iter()
-    .filter(|y| (highest..=lowest).contains(y) && clear(*y))
-    .min_by(|a, b| (a - centred).abs().total_cmp(&(b - centred).abs()))
-    .map(|y| Point::new(x, y))
+    .filter(|at| inside(at) && clear(*at))
+    .min_by(|a, b| distance(a).total_cmp(&distance(b)))
 }
 
 #[cfg(test)]
