@@ -1,3 +1,5 @@
+mod fixture_library;
+
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -11,22 +13,7 @@ pub struct Fixture {
 impl Fixture {
     pub fn new() -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(0);
-        let deps = std::env::current_exe()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .to_path_buf();
-        let name = format!(
-            "{}vibez_routing_fixture{}",
-            std::env::consts::DLL_PREFIX,
-            std::env::consts::DLL_SUFFIX
-        );
-        let binary = deps.join(name);
-        assert!(
-            binary.exists(),
-            "Fixture library missing: {}",
-            binary.display()
-        );
+        let binary = fixture_library::path();
         let root = std::env::temp_dir().join(format!(
             "vibez-route-fixture-{}-{}",
             std::process::id(),
