@@ -57,6 +57,7 @@ impl PlotKind for Plot {
 }
 
 const TABLE_ROW_MAX_H: f32 = 26.0;
+const TABLE_ROW_GAP: f32 = 1.0;
 /// The inset either side of the operator table's rows, its headings set to
 /// match so every column lines up with its rows. Centring the text's line
 /// box leaves the descender space below the figures and capitals the table
@@ -318,9 +319,11 @@ impl<'a> FmView<'a> {
         }
         // Rows grow with the plot only so far, so a tall card keeps the
         // table compact in the middle.
-        let table = container(table.spacing(1))
+        let table = container(table.spacing(TABLE_ROW_GAP))
             .width(Length::Fill)
-            .max_height(TABLE_ROW_MAX_H * (OPERATORS + 1) as f32);
+            .max_height(
+                TABLE_ROW_MAX_H * (OPERATORS + 1) as f32 + TABLE_ROW_GAP * OPERATORS as f32,
+            );
         container(table)
             .padding(4)
             .width(Length::Fill)
