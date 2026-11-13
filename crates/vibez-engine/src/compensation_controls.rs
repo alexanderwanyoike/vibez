@@ -165,9 +165,9 @@ impl PreparedAutomationControl {
         advancing: bool,
     ) {
         let lane = lanes.iter().find(|lane| lane.target == self.target);
-        for frame in 0..frames {
+        for (frame, value) in self.values[..frames].iter_mut().enumerate() {
             let musical = position.saturating_add(if advancing { frame as u64 } else { 0 });
-            self.values[frame] = lane
+            *value = lane
                 .and_then(|lane| lane.value_at(musical as f64 / samples_per_beat))
                 .unwrap_or(f32::NAN);
         }
