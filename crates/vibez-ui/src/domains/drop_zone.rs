@@ -9,6 +9,15 @@ pub enum DropAction {
     Add,
     Replace,
     Load,
+    /// The target will not take the audio.
+    Refuse,
+}
+
+impl DropAction {
+    /// Whether a release here is turned away.
+    pub fn refuses(self) -> bool {
+        self == Self::Refuse
+    }
 }
 
 /// The marked place a release lands on and what it says there.
@@ -21,11 +30,15 @@ pub struct DropZone {
 }
 
 impl BrowserDropTarget {
-    /// The zone to mark under the cursor, or `None` where the arrangement
-    /// marks the drop itself.
+    /// The zone to mark under the cursor, or `None` on a lane that takes the
+    /// audio, which previews the Clip it would place instead.
     pub fn drop_zone(&self) -> Option<DropZone> {
         let action = match self {
-            Self::ArrangementLane { .. } | Self::EmptyArrangement { .. } => return None,
+            Self::ArrangementLane {
+                compatible: true, ..
+            } => return None,
+            Self::ArrangementLane { .. } => DropAction::Refuse,
+            Self::EmptyArrangement { .. } => DropAction::Add,
             Self::DrumRackPad { .. } | Self::DrumRack { .. } => {
                 return Some(DropZone {
                     action: DropAction::Load,

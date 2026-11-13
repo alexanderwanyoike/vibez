@@ -58,6 +58,7 @@ pub const PALETTE: char = '\u{E1DD}';
 pub const ROTATE_CW: char = '\u{E149}';
 pub const ARROW_RIGHT_LEFT: char = '\u{E417}';
 pub const ARROW_DOWN_TO_LINE: char = '\u{E455}';
+pub const BAN: char = '\u{E051}';
 
 /// Create an icon text element with the Lucide font.
 pub fn icon(codepoint: char) -> iced::widget::Text<'static> {

@@ -142,6 +142,7 @@ fn draw_label(frame: &mut canvas::Frame, zone: Rectangle, action: DropAction, la
         DropAction::Add => crate::icons::PLUS,
         DropAction::Replace => crate::icons::ARROW_RIGHT_LEFT,
         DropAction::Load => crate::icons::ARROW_DOWN_TO_LINE,
+        DropAction::Refuse => crate::icons::BAN,
     };
     frame.fill_text(canvas::Text {
         content: glyph.to_string(),
