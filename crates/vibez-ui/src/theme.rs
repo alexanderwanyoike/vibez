@@ -748,7 +748,7 @@ pub fn selected_place() -> Color {
 /// translucent to show the target through it, so its alpha is set per
 /// lightness to read as the same soft tint on dark and light themes.
 pub fn drop_target_wash() -> Color {
-    with_alpha(accent(), if is_light() { 0.1 } else { 0.025 })
+    with_alpha(accent(), if is_light() { 0.07 } else { 0.018 })
 }
 
 /// A group of controls sunk slightly into a raised card.
