@@ -19,6 +19,7 @@ use vibez_instruments::sampler::param;
 use crate::domains::browser::BrowserMsg;
 use crate::domains::device_params::DeviceParams;
 use crate::domains::devices::DevicesMsg;
+use crate::domains::drop_zone::DropZone;
 use crate::domains::instrument_card::{InstrumentCardMsg, InstrumentPanel};
 use crate::domains::param_entry::ValueEntry;
 use crate::message::Message;
@@ -74,6 +75,9 @@ const MARQUEE_GAP: f32 = 24.0;
 /// A pad's face sits in a recessed bezel, as the Perform pads do.
 const BEZEL: f32 = 2.0;
 const FACE_RADIUS: f32 = 5.0;
+/// A pad's drop zone sits just inside its face, which is too small to give
+/// room to a card's inset.
+const PAD_ZONE_INSET: f32 = 1.0;
 const BEZEL_RADIUS: f32 = 7.0;
 /// Pads shorter than this would rather lay out in fewer, longer rows.
 const FULL_PAD_MIN_H: f32 = 16.0;
@@ -480,7 +484,8 @@ pub struct DrumRackView<'a> {
     /// Which pads of the shown bank are sounding, in pad order.
     pub firing: [bool; DRUM_RACK_BANK_SIZE],
     pub banks_firing: [bool; DRUM_RACK_BANK_COUNT],
-    pub drop_target: Option<usize>,
+    /// The pad a release would load and the zone marking it.
+    pub drop_zone: Option<(usize, DropZone)>,
     pub accent: Color,
     pub panel: InstrumentPanel,
     pub entry: Option<&'a ValueEntry>,
@@ -661,12 +666,14 @@ impl<'a> DrumRackView<'a> {
             region: (start, end),
             selected: index == self.selected,
             firing,
-            drop_target: self.drop_target == Some(index),
+            drop_target: self
+                .drop_zone
+                .as_ref()
+                .is_some_and(|(pad, _)| *pad == index),
             accent: self.accent,
         };
         let filled = view.filled;
         let selected = view.selected;
-        let drop_target = view.drop_target;
         let accent = self.accent;
         let face = container(canvas(view).width(Length::Fill).height(Length::Fill)).style(
             move |_theme: &Theme| container::Style {
@@ -708,13 +715,18 @@ impl<'a> DrumRackView<'a> {
                 ..Default::default()
             },
         );
-        // The pad a drop will load is tinted even when the cursor is on the
+        // The pad a drop will load is marked even when the cursor is on the
         // card around it.
+        let zone = self
+            .drop_zone
+            .as_ref()
+            .filter(|(pad, _)| *pad == index)
+            .map(|(_, zone)| zone.clone());
         let face = crate::widgets::drop_highlight::drop_highlight(
             face.into(),
-            drop_target,
-            FACE_RADIUS,
-            0.0,
+            zone,
+            FACE_RADIUS - PAD_ZONE_INSET,
+            PAD_ZONE_INSET,
         );
         let bezel = container(face)
             .padding(if tiny {

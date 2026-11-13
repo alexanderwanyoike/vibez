@@ -751,11 +751,6 @@ pub fn drop_target_wash() -> Color {
     with_alpha(accent(), if is_light() { 0.1 } else { 0.025 })
 }
 
-/// The hairline around where a Browser drop will land.
-pub fn drop_target_outline() -> Color {
-    blend(bg_elevated(), accent(), 0.5)
-}
-
 /// A group of controls sunk slightly into a raised card.
 pub fn card_inset() -> Color {
     blend(bg_elevated(), display_bg(), 0.35)

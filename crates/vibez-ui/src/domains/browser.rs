@@ -166,6 +166,11 @@ impl BrowserState {
         }
     }
 
+    /// The zone to mark where a release would land.
+    pub fn drop_zone(&self) -> Option<crate::domains::drop_zone::DropZone> {
+        self.drag_target.as_ref()?.drop_zone()
+    }
+
     /// The pad of `track_id`'s Drum Rack a release would load, to highlight it.
     pub fn drum_pad_drop_target(&self, track_id: TrackId) -> Option<usize> {
         match self.drag_target {
