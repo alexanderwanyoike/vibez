@@ -167,7 +167,6 @@ impl App {
                 let ghost = canvas(crate::widgets::browser_drag_ghost::BrowserDragGhost {
                     cursor: iced::Point::new(self.state.view.cursor_x, self.state.view.cursor_y),
                     title: format!("{label} · {mode}{length}"),
-                    detail: None,
                     valid,
                 })
                 .width(Length::Fill)

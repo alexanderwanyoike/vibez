@@ -3,7 +3,7 @@
 
 use iced::alignment::{Horizontal, Vertical};
 use iced::widget::canvas;
-use iced::{mouse, Element, Length, Padding, Point, Rectangle, Renderer, Size, Theme};
+use iced::{mouse, Color, Element, Length, Padding, Point, Rectangle, Renderer, Size, Theme};
 
 use crate::domains::drop_zone::{DropAction, DropZone};
 use crate::message::Message;
@@ -27,6 +27,9 @@ const ICON_GAP: f32 = 7.0;
 const TEXT_SIZE: f32 = 12.0;
 /// The least room the label keeps from the dashes on every side.
 const LABEL_MARGIN: f32 = 8.0;
+/// The least room the label keeps from the drag badge, so the two never
+/// read as one crowded message.
+const LABEL_GAP: f32 = 10.0;
 
 /// `content` with `zone` marked over it, held `inset` inside the content's
 /// edges so it never covers chrome such as a scrollbar, its corners rounded
@@ -68,63 +71,107 @@ impl canvas::Program<Message> for ZoneMarks {
         renderer: &Renderer,
         _theme: &Theme,
         bounds: Rectangle,
-        _cursor: mouse::Cursor,
+        cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
         let Some(zone) = &self.zone else {
             return Vec::new();
         };
         let mut frame = canvas::Frame::new(renderer, bounds.size());
-        // The outer edge of the dashes lands on whole pixels, so a straight
-        // run covers its pixels instead of smearing over a half one.
-        let left = (bounds.x + self.inset.left).round() - bounds.x;
-        let top = (bounds.y + self.inset.top).round() - bounds.y;
-        let right = (bounds.x + bounds.width - self.inset.right).round() - bounds.x;
-        let bottom = (bounds.y + bounds.height - self.inset.bottom).round() - bounds.y;
-        let half = STROKE_W / 2.0;
-        let line = Rectangle::new(
-            Point::new(left + half, top + half),
-            Size::new(right - left - STROKE_W, bottom - top - STROKE_W),
+        let area = Rectangle::new(
+            Point::new(self.inset.left, self.inset.top),
+            Size::new(
+                bounds.width - self.inset.left - self.inset.right,
+                bounds.height - self.inset.top - self.inset.bottom,
+            ),
         );
-        if line.width <= 0.0 || line.height <= 0.0 {
-            return Vec::new();
-        }
-        let radius = (self.radius - half).max(STROKE_W);
-        let outline = canvas::Path::rounded_rectangle(line.position(), line.size(), radius.into());
-        frame.fill(&outline, th::drop_target_wash());
-        let dashes = even_dash(rounded_perimeter(line.size(), radius), DASH, GAP);
-        frame.stroke(
-            &outline,
-            canvas::Stroke {
-                line_dash: canvas::LineDash {
-                    segments: &dashes,
-                    offset: 0,
-                },
-                ..canvas::Stroke::default()
-                    .with_color(th::accent())
-                    .with_width(STROKE_W)
-            },
+        let cursor = cursor
+            .position()
+            .map(|at| Point::new(at.x - bounds.x, at.y - bounds.y));
+        draw_zone(
+            &mut frame,
+            bounds.position(),
+            area,
+            self.radius,
+            zone,
+            cursor,
         );
-        if let Some(label) = &zone.label {
-            draw_label(&mut frame, line, zone.action, label);
-        }
         vec![frame.into_geometry()]
     }
 }
 
-/// The outcome centred in the zone on a backing of the card's surface, so
-/// it reads over whatever controls sit under it.
-fn draw_label(frame: &mut canvas::Frame, zone: Rectangle, action: DropAction, label: &str) {
+/// Marks `zone` over `area` of `frame`, whose top left sits at `origin` in
+/// the window, with corners of `radius` and the label kept clear of the
+/// drag badge at `cursor`, both in the frame's coordinates.
+pub fn draw_zone(
+    frame: &mut canvas::Frame,
+    origin: Point,
+    area: Rectangle,
+    radius: f32,
+    zone: &DropZone,
+    cursor: Option<Point>,
+) {
+    // The outer edge of the dashes lands on whole pixels, so a straight run
+    // covers its pixels instead of smearing over a half one.
+    let left = (origin.x + area.x).round() - origin.x;
+    let top = (origin.y + area.y).round() - origin.y;
+    let right = (origin.x + area.x + area.width).round() - origin.x;
+    let bottom = (origin.y + area.y + area.height).round() - origin.y;
+    let half = STROKE_W / 2.0;
+    let line = Rectangle::new(
+        Point::new(left + half, top + half),
+        Size::new(right - left - STROKE_W, bottom - top - STROKE_W),
+    );
+    if line.width <= 0.0 || line.height <= 0.0 {
+        return;
+    }
+    let tone = if zone.action.refuses() {
+        th::danger()
+    } else {
+        th::accent()
+    };
+    let radius = (radius - half).max(STROKE_W);
+    let outline = canvas::Path::rounded_rectangle(line.position(), line.size(), radius.into());
+    frame.fill(&outline, th::drop_zone_wash(tone));
+    let dashes = even_dash(rounded_perimeter(line.size(), radius), DASH, GAP);
+    frame.stroke(
+        &outline,
+        canvas::Stroke {
+            line_dash: canvas::LineDash {
+                segments: &dashes,
+                offset: 0,
+            },
+            ..canvas::Stroke::default()
+                .with_color(tone)
+                .with_width(STROKE_W)
+        },
+    );
+    if let Some(label) = &zone.label {
+        let badge = cursor.map(crate::widgets::browser_drag_ghost::reserved_around);
+        draw_label(frame, line, zone.action, tone, label, badge);
+    }
+}
+
+/// The outcome in the zone on a backing of the card's surface, so it reads
+/// over whatever controls sit under it, centred unless the drag badge needs
+/// the room.
+fn draw_label(
+    frame: &mut canvas::Frame,
+    zone: Rectangle,
+    action: DropAction,
+    tone: Color,
+    label: &str,
+    badge: Option<Rectangle>,
+) {
     let font = iced::Font::default();
     let text_w = text_width(label, TEXT_SIZE, font);
     let size = Size::new(
         (LABEL_PAD_X * 2.0 + ICON_SIZE + ICON_GAP + text_w).round(),
         LABEL_H,
     );
-    if !label_fits(zone.size(), size) {
+    let Some(origin) = label_origin(zone, size, badge) else {
         return;
-    }
-    let x = (zone.center_x() - size.width / 2.0).round();
-    let y = (zone.center_y() - size.height / 2.0).round();
+    };
+    let (x, y) = (origin.x.round(), origin.y.round());
     let backing = canvas::Path::rounded_rectangle(
         Point::new(x + 0.5, y + 0.5),
         Size::new(size.width - 1.0, size.height - 1.0),
@@ -147,7 +194,7 @@ fn draw_label(frame: &mut canvas::Frame, zone: Rectangle, action: DropAction, la
     frame.fill_text(canvas::Text {
         content: glyph.to_string(),
         position: Point::new(x + LABEL_PAD_X, mid),
-        color: th::accent(),
+        color: tone,
         size: ICON_SIZE.into(),
         font: crate::icons::ICON_FONT,
         horizontal_alignment: Horizontal::Left,
@@ -184,6 +231,43 @@ fn even_dash(perimeter: f32, dash: f32, gap: f32) -> [f32; 2] {
 fn label_fits(zone: Size, label: Size) -> bool {
     zone.width >= label.width + LABEL_MARGIN * 2.0
         && zone.height >= label.height + LABEL_MARGIN * 2.0
+}
+
+/// Where a `label` sized backing goes in `zone`: centred, or moved straight
+/// up or down until it keeps `LABEL_GAP` from the `badge` by the cursor,
+/// whichever stays nearer the centre. `None` where it fits nowhere, since a
+/// label under the badge would read as two competing messages.
+fn label_origin(zone: Rectangle, label: Size, badge: Option<Rectangle>) -> Option<Point> {
+    if !label_fits(zone.size(), label) {
+        return None;
+    }
+    let x = zone.center_x() - label.width / 2.0;
+    let centred = zone.center_y() - label.height / 2.0;
+    let Some(badge) = badge else {
+        return Some(Point::new(x, centred));
+    };
+    let clear = |y: f32| {
+        let grown = Rectangle {
+            x: x - LABEL_GAP,
+            y: y - LABEL_GAP,
+            width: label.width + LABEL_GAP * 2.0,
+            height: label.height + LABEL_GAP * 2.0,
+        };
+        grown.intersection(&badge).is_none()
+    };
+    if clear(centred) {
+        return Some(Point::new(x, centred));
+    }
+    let lowest = zone.y + zone.height - LABEL_MARGIN - label.height;
+    let highest = zone.y + LABEL_MARGIN;
+    [
+        badge.y - LABEL_GAP - label.height,
+        badge.y + badge.height + LABEL_GAP,
+    ]
+    .into_iter()
+    .filter(|y| (highest..=lowest).contains(y) && clear(*y))
+    .min_by(|a, b| (a - centred).abs().total_cmp(&(b - centred).abs()))
+    .map(|y| Point::new(x, y))
 }
 
 #[cfg(test)]

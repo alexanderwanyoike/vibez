@@ -744,11 +744,11 @@ pub fn selected_place() -> Color {
     blend(bg_surface(), accent(), if is_light() { 0.13 } else { 0.16 })
 }
 
-/// The faint accent wash over where a Browser drop will land. It has to be
+/// The faint wash of `tone` inside a Browser drop zone. It has to be
 /// translucent to show the target through it, so its alpha is set per
 /// lightness to read as the same soft tint on dark and light themes.
-pub fn drop_target_wash() -> Color {
-    with_alpha(accent(), if is_light() { 0.07 } else { 0.018 })
+pub fn drop_zone_wash(tone: Color) -> Color {
+    with_alpha(tone, if is_light() { 0.07 } else { 0.018 })
 }
 
 /// A group of controls sunk slightly into a raised card.
