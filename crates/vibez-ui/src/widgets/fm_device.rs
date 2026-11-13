@@ -14,7 +14,7 @@ use crate::domains::instrument_card::{InstrumentCardMsg, InstrumentPanel};
 use crate::domains::param_entry::ValueEntry;
 use crate::message::Message;
 use crate::theme as th;
-use crate::widgets::device_controls::{even_segmented, Param, LABEL_SIZE, VALUE_SIZE};
+use crate::widgets::device_controls::{segmented, Param, LABEL_SIZE, VALUE_SIZE};
 use crate::widgets::device_layout::KNOB_ROW_H;
 use crate::widgets::fm_display::{AlgorithmPlot, ScopePlot};
 use crate::widgets::instrument_bands::{
@@ -100,7 +100,7 @@ impl<'a> FmView<'a> {
     fn switch(&self) -> Element<'a, Message> {
         let track_id = self.track_id;
         let options: Vec<(usize, &str)> = OPERATOR_NAMES.iter().copied().enumerate().collect();
-        even_segmented(
+        segmented(
             &options,
             self.shown(),
             move |operator| {
