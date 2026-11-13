@@ -1497,3 +1497,17 @@ fn leaving_a_card_hands_the_hover_back_to_the_panel() {
         })
     );
 }
+
+#[test]
+fn only_the_hovered_lane_marks_a_refusal_zone() {
+    let hovered = TrackId::new();
+    let mut b = dragging();
+    b.update(BrowserMsg::DragHoverTrack {
+        track_id: hovered,
+        beat: 1.0,
+        compatible: false,
+    });
+    assert_eq!(b.lane_drop_zone(hovered), b.drop_zone());
+    assert!(b.lane_drop_zone(hovered).is_some());
+    assert_eq!(b.lane_drop_zone(TrackId::new()), None);
+}
