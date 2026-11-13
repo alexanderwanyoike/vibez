@@ -1,6 +1,5 @@
-//! Native EQ body: the response over the EQ's own spectrum, the selected
-//! band beside it, and every band below when the card is tall and wide
-//! enough. Narrow cards pick a band with tabs instead.
+//! Native EQ body, the response over the EQ's own spectrum beside the output
+//! column, with every band below on tall, wide cards and band tabs otherwise.
 
 use iced::widget::{canvas, column, container, mouse_area, row, text, Space};
 use iced::{Alignment, Color, Element, Length, Size};
@@ -15,26 +14,28 @@ use crate::spectrum::SpectrumState;
 use crate::state::UiEffect;
 use crate::theme as th;
 use crate::widgets::device_controls::{
-    heading, rule, segmented, toggle, vertical_rule, Param, LABEL_SIZE,
+    heading, level_column, rule, segmented, toggle, vertical_rule, Param, LABEL_SIZE, METER_W,
 };
 use crate::widgets::eq_display::EqDisplayWidget;
-use crate::widgets::level_meter::{self, LevelMeter};
+use crate::widgets::hint::with_hint;
+use crate::widgets::level_meter;
 
 const PAD: f32 = 10.0;
-const SIDE_W: f32 = 200.0;
-/// Band name and three parameter lines.
-const SIDE_H: f32 = 112.0;
-const GRAPH_MIN_W: f32 = 300.0;
 const GRAPH_SHORT_MIN_W: f32 = 180.0;
 const GRAPH_MIN_H: f32 = 56.0;
-/// Band tabs over the selected band's three controls.
-const TABS_H: f32 = 56.0;
+/// Band tabs over the selected band's three controls, a line each.
+const TABS_H: f32 = ROW_KNOB * 2.0 + 4.0;
 const TABS_W: f32 = 320.0;
+/// The selected band's three controls share the tabs' width in equal cells.
+const TAB_CELL_GAP: f32 = 10.0;
+const TAB_CELL_W: f32 = (TABS_W - TAB_CELL_GAP * 2.0) / 3.0;
 const STRIP_H: f32 = 86.0;
 const ADVANCED_H: f32 = 56.0;
 const BAND_GROUP_RADIUS: f32 = 5.0;
+/// Room for one band group's controls; a wider band row shares out the rest.
 const BAND_GROUP_W: f32 = 172.0;
-const OUTPUT_W: f32 = 340.0;
+/// Input and output meters side by side.
+const OUTPUT_W: f32 = METER_W * 2.0;
 const STRIP_KNOB: f32 = 28.0;
 const ROW_KNOB: f32 = 24.0;
 /// A single line of controls for the shortest cards.
@@ -42,21 +43,34 @@ const LINE_H: f32 = 24.0;
 const LINE_KNOB: f32 = 18.0;
 /// A one-line Advanced has room for the output trim after both cuts.
 const LINE_OUTPUT_W: f32 = 480.0;
+/// The shortest level meter that still reads as one.
+const METER_MIN_H: f32 = 40.0;
+/// Gap between the graph or meters and the controls under them.
+const UNDER_GAP: f32 = 6.0;
+/// Input and output meters under their headings, over the trim and analyser
+/// lines, inside the upper area's vertical padding. The lines take the band
+/// tabs' height so the two sit level.
+const OUTPUT_COLUMN_H: f32 = 12.0 + 15.0 + METER_MIN_H + UNDER_GAP + TABS_H;
+/// The graph over the band tabs, inside the upper area's vertical padding.
+const GRAPH_TABS_H: f32 = 12.0 + GRAPH_MIN_H + UNDER_GAP + TABS_H;
+/// The output column beside the graph over the band tabs.
+const SIDE_H: f32 = OUTPUT_COLUMN_H.max(GRAPH_TABS_H);
+/// The graph and meters over the band row, as tall as the graph was there
+/// before the output column.
+const STRIP_UPPER_H: f32 = 112.0;
 
 /// The band tabs, or the card's header where that is wider.
 pub const COMPACT_W: f32 = (TABS_W + PAD * 2.0).max(crate::widgets::device_chrome::header_min_w(
     crate::widgets::device_chrome::MOST_ACTIONS,
 ));
-/// The graph with the selected band beside it.
-pub const MEDIUM_W: f32 = GRAPH_MIN_W + 1.0 + SIDE_W + PAD * 2.0;
+/// The graph over the band tabs, with the output column beside them.
+pub const MEDIUM_W: f32 = TABS_W + 17.0 + OUTPUT_W + PAD * 2.0;
 /// A short card keeps its graph beside the band tabs.
 const TABS_BESIDE_W: f32 = GRAPH_SHORT_MIN_W + 9.0 + TABS_W + PAD * 2.0;
 /// Advanced has room for the analyser controls after the cuts and output.
 const ADVANCED_SPECTRUM_W: f32 = 640.0;
-/// Room for all four bands in a row.
-pub const STRIP_W: f32 = BAND_GROUP_W * 4.0 + 3.0 + PAD * 2.0;
-/// The band row plus output and analyser controls at its end.
-pub const FULL_W: f32 = STRIP_W + 1.0 + OUTPUT_W;
+/// Room for all four bands in a row under the graph, beside the output column.
+pub const FULL_W: f32 = BAND_GROUP_W * 4.0 + 3.0 + 17.0 + OUTPUT_W + PAD * 2.0;
 pub const MAX_W: f32 = 1100.0;
 
 pub const WIDTHS: crate::widgets::device_chrome::CardWidths =
@@ -70,7 +84,8 @@ pub const WIDTHS: crate::widgets::device_chrome::CardWidths =
 /// What fills the space between the preset row and anything below it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Upper {
-    /// The graph with the selected band's panel beside it.
+    /// The graph, over the band tabs unless every band sits below, with the
+    /// output column beside it.
     Side,
     /// A short card: the graph beside the band tabs.
     TabsBeside,
@@ -90,11 +105,11 @@ pub struct Arrangement {
     pub kind: Upper,
     pub upper: f32,
     pub strip: bool,
-    /// Output trim and analyser controls sit at the end of the band row
-    /// rather than in Advanced.
-    pub output_in_strip: bool,
     pub advanced: Option<f32>,
     pub advanced_only: bool,
+    /// Advanced carries the output trim and analyser controls, which the
+    /// output column holds whenever it shows.
+    pub advanced_output: bool,
     /// Advanced is wide enough to carry the analyser controls too.
     pub advanced_spectrum: bool,
 }
@@ -120,8 +135,8 @@ pub fn arrange(size: Size, advanced: bool) -> Arrangement {
     let advanced_only = advanced && (kind != Upper::Side || below - stacked < SIDE_H);
     let strip = !advanced_only
         && kind == Upper::Side
-        && size.width >= STRIP_W
-        && below - stacked >= SIDE_H + 1.0 + STRIP_H;
+        && size.width >= FULL_W
+        && below - stacked >= STRIP_UPPER_H + 1.0 + STRIP_H;
     let upper = if advanced_only {
         0.0
     } else {
@@ -131,13 +146,13 @@ pub fn arrange(size: Size, advanced: bool) -> Arrangement {
         kind,
         upper,
         strip,
-        output_in_strip: strip && size.width >= FULL_W,
         advanced: match (advanced, advanced_only) {
             (false, _) => None,
             (true, true) => Some(below),
             (true, false) => Some(ADVANCED_H),
         },
         advanced_only,
+        advanced_output: advanced_only,
         advanced_spectrum: size.width >= ADVANCED_SPECTRUM_W,
     }
 }
@@ -182,21 +197,14 @@ impl<'a> EqView<'a> {
         let layout = arrange(size, self.panel.advanced);
         let mut body = column![];
         if layout.advanced_only {
-            body = body.push(self.advanced(
-                layout.advanced.unwrap_or(0.0),
-                layout.advanced_spectrum,
-                size.width,
-            ));
+            body = body.push(self.advanced(layout.advanced.unwrap_or(0.0), layout, size.width));
             return body.width(Length::Fill).height(Length::Fill).into();
         }
         body = body.push(self.upper(layout));
-        if layout.strip {
-            body = body.push(rule()).push(self.strip(layout.output_in_strip));
-        }
         if let Some(height) = layout.advanced {
-            body =
-                body.push(rule())
-                    .push(self.advanced(height, layout.advanced_spectrum, size.width));
+            body = body
+                .push(rule())
+                .push(self.advanced(height, layout, size.width));
         }
         body.width(Length::Fill).height(Length::Fill).into()
     }
@@ -225,14 +233,32 @@ impl<'a> EqView<'a> {
     fn upper(&self, layout: Arrangement) -> Element<'a, Message> {
         let graph = || container(self.graph()).padding([6.0, 0.0]);
         let content: Element<'a, Message> = match layout.kind {
-            Upper::Side => row![
-                graph().width(Length::Fill),
+            Upper::Side if layout.strip => row![
+                column![graph().height(Length::Fill), rule(), self.strip()].width(Length::Fill),
                 vertical_rule(),
-                container(self.band_panel())
-                    .width(SIDE_W)
-                    .padding([6.0, 8.0]),
+                column![
+                    container(self.meters())
+                        .padding([6.0, 0.0])
+                        .height(Length::Fill),
+                    // Level with the rule over the band row.
+                    Space::with_height(1.0),
+                    container(self.output_lines()).center_y(STRIP_H),
+                ]
+                .width(OUTPUT_W),
             ]
             .spacing(8)
+            .into(),
+            Upper::Side => row![
+                column![self.graph(), self.band_tabs()]
+                    .spacing(UNDER_GAP)
+                    .width(Length::Fill),
+                vertical_rule(),
+                column![self.meters(), self.output_lines()]
+                    .spacing(UNDER_GAP)
+                    .width(OUTPUT_W),
+            ]
+            .spacing(8)
+            .padding([6.0, 0.0])
             .into(),
             Upper::TabsBeside => row![
                 graph().width(Length::Fill),
@@ -249,9 +275,10 @@ impl<'a> EqView<'a> {
             Upper::TabsOnly => container(self.band_tabs()).center_y(Length::Fill).into(),
             Upper::Line => container(self.band_line()).center_y(Length::Fill).into(),
         };
+        let band_row = if layout.strip { 1.0 + STRIP_H } else { 0.0 };
         container(content)
             .padding([0.0, PAD])
-            .height(layout.upper)
+            .height(layout.upper + band_row)
             .width(Length::Fill)
             .into()
     }
@@ -316,33 +343,6 @@ impl<'a> EqView<'a> {
         )
     }
 
-    fn band_panel(&self) -> Element<'a, Message> {
-        let band = self.panel.band;
-        let mut lines = column![
-            self.band_header(band, true),
-            self.param(param::FREQUENCY[band])
-                .label("Frequency")
-                .row(ROW_KNOB),
-            self.param(param::GAIN[band]).label("Gain").row(ROW_KNOB),
-        ]
-        .spacing(4);
-        lines = if has_q(band) {
-            lines.push(self.param(param::SHAPE[band]).label("Q").row(ROW_KNOB))
-        } else {
-            lines.push(
-                row![
-                    text("Shape")
-                        .size(LABEL_SIZE)
-                        .color(th::text_dim())
-                        .width(Length::Fill),
-                    self.shape(band)
-                ]
-                .align_y(Alignment::Center),
-            )
-        };
-        lines.into()
-    }
-
     fn band_tabs(&self) -> Element<'a, Message> {
         let band = self.panel.band;
         let effect_id = self.effect.id;
@@ -353,22 +353,25 @@ impl<'a> EqView<'a> {
             self.accent(),
         );
         let third: Element<'a, Message> = if has_q(band) {
-            self.param(param::SHAPE[band]).label("Q").row(ROW_KNOB)
+            self.param(param::SHAPE[band]).label("Q").line_item()
         } else {
             self.shape(band)
         };
+        // Equal cells keep each control in place while its value's width
+        // changes under a drag.
+        let cell = |item: Element<'a, Message>| container(item).width(TAB_CELL_W);
         column![
             row![tabs, self.band_header(band, false)]
                 .spacing(6)
+                .height(ROW_KNOB)
                 .align_y(Alignment::Center),
             row![
-                self.param(param::FREQUENCY[band])
-                    .label("Freq")
-                    .row(ROW_KNOB),
-                self.param(param::GAIN[band]).label("Gain").row(ROW_KNOB),
-                third,
+                cell(self.param(param::FREQUENCY[band]).label("Freq").line_item()),
+                cell(self.param(param::GAIN[band]).label("Gain").line_item()),
+                cell(third),
             ]
-            .spacing(12)
+            .spacing(TAB_CELL_GAP)
+            .height(ROW_KNOB)
             .align_y(Alignment::Center),
         ]
         .spacing(4)
@@ -414,7 +417,7 @@ impl<'a> EqView<'a> {
         .into()
     }
 
-    fn strip(&self, with_output: bool) -> Element<'a, Message> {
+    fn strip(&self) -> Element<'a, Message> {
         let mut bands = row![].spacing(1).height(STRIP_H);
         for band in 0..BAND_NAMES.len() {
             let third: Element<'a, Message> = if has_q(band) {
@@ -442,10 +445,11 @@ impl<'a> EqView<'a> {
                     .spacing(8)
                     .align_y(Alignment::Center),
                 ]
-                .spacing(2),
+                .spacing(2)
+                .align_x(Alignment::Center),
             )
             .padding([4.0, 6.0])
-            .width(BAND_GROUP_W)
+            .width(Length::Fill)
             .style(move |_| container::Style {
                 background: Some(
                     if selected {
@@ -464,73 +468,73 @@ impl<'a> EqView<'a> {
             bands = bands
                 .push(mouse_area(group).on_press(Message::Eq(EqMsg::SelectBand(effect_id, band))));
         }
-        let mut strip = row![bands].height(STRIP_H);
-        if with_output {
-            strip = strip.push(vertical_rule()).push(
-                container(self.output_controls())
-                    .width(OUTPUT_W)
-                    .padding([4.0, 8.0]),
-            );
-        }
-        container(strip)
-            .padding([0.0, PAD])
-            .width(Length::Fill)
-            .into()
+        bands.into()
     }
 
-    fn output_controls(&self) -> Element<'a, Message> {
-        let meter = |label: &'static str, levels| {
-            column![
-                heading(label),
-                canvas(LevelMeter { levels })
-                    .width(level_meter::WIDTH)
-                    .height(Length::Fill),
-            ]
-            .spacing(2)
-            .height(STRIP_H - 8.0)
-        };
+    fn meters(&self) -> Element<'a, Message> {
         row![
-            meter("Input", self.panel.input),
-            meter("Output", self.panel.output),
-            self.param(param::OUTPUT).label("Trim").column(STRIP_KNOB),
-            self.spectrum_controls(),
+            level_column("Input", self.panel.input),
+            Space::with_width(Length::Fill),
+            // The output scale ends at the column's edge, level with the
+            // trim knob and the freeze switch, rather than inside the gap a
+            // level column leaves after its scale.
+            container(level_column("Output", self.panel.output)).width(level_meter::WIDTH),
         ]
-        .spacing(10)
-        .align_y(Alignment::Center)
+        .height(Length::Fill)
+        .into()
+    }
+
+    /// The trim and analyser lines under the meters, as tall as the band tabs.
+    fn output_lines(&self) -> Element<'a, Message> {
+        column![
+            container(self.param(param::OUTPUT).label("Trim").row(LINE_KNOB)).center_y(ROW_KNOB),
+            row![
+                self.spectrum_side(),
+                Space::with_width(Length::Fill),
+                self.freeze()
+            ]
+            .height(ROW_KNOB)
+            .align_y(Alignment::Center),
+        ]
+        .spacing(4)
+        .height(TABS_H)
         .into()
     }
 
     fn spectrum_controls(&self) -> Element<'a, Message> {
-        let effect_id = self.effect.id;
         column![
             heading("Spectrum"),
-            row![
-                segmented(
-                    &[(SpectrumSide::Pre, "Pre"), (SpectrumSide::Post, "Post")],
-                    self.panel.side,
-                    move |side| Message::Eq(EqMsg::SetSpectrumSide(effect_id, side)),
-                    self.accent(),
-                ),
-                toggle(
-                    row![
-                        icons::icon(icons::SNOWFLAKE).size(10),
-                        text("Freeze")
-                            .size(LABEL_SIZE)
-                            .wrapping(text::Wrapping::None)
-                    ]
-                    .spacing(4)
-                    .align_y(Alignment::Center)
-                    .into(),
-                    self.panel.frozen,
-                    Message::Eq(EqMsg::ToggleFreeze(effect_id)),
-                    self.accent(),
-                ),
-            ]
-            .spacing(6)
-            .align_y(Alignment::Center),
+            row![self.spectrum_side(), self.freeze()]
+                .spacing(6)
+                .align_y(Alignment::Center),
         ]
         .spacing(4)
         .into()
+    }
+
+    fn spectrum_side(&self) -> Element<'a, Message> {
+        let effect_id = self.effect.id;
+        with_hint(
+            segmented(
+                &[(SpectrumSide::Pre, "Pre"), (SpectrumSide::Post, "Post")],
+                self.panel.side,
+                move |side| Message::Eq(EqMsg::SetSpectrumSide(effect_id, side)),
+                self.accent(),
+            ),
+            "Spectrum before or after the EQ",
+        )
+    }
+
+    fn freeze(&self) -> Element<'a, Message> {
+        with_hint(
+            toggle(
+                icons::icon(icons::SNOWFLAKE).size(10).into(),
+                self.panel.frozen,
+                Message::Eq(EqMsg::ToggleFreeze(self.effect.id)),
+                self.accent(),
+            ),
+            "Freeze the spectrum",
+        )
     }
 
     fn cut(&self, enabled: usize, frequency: usize, label: &'static str) -> Element<'a, Message> {
@@ -560,7 +564,7 @@ impl<'a> EqView<'a> {
         .into()
     }
 
-    fn advanced(&self, height: f32, with_spectrum: bool, width: f32) -> Element<'a, Message> {
+    fn advanced(&self, height: f32, layout: Arrangement, width: f32) -> Element<'a, Message> {
         if height < ADVANCED_H {
             return container(self.advanced_line(width))
                 .padding([0.0, PAD])
@@ -571,13 +575,16 @@ impl<'a> EqView<'a> {
         let mut content = row![
             self.cut(param::HP_ENABLED, param::HP_FREQUENCY, "Low cut"),
             self.cut(param::LP_ENABLED, param::LP_FREQUENCY, "High cut"),
-            vertical_rule(),
-            container(self.param(param::OUTPUT).label("Output").row(ROW_KNOB)).width(150.0),
         ]
         .spacing(12)
         .align_y(Alignment::Center);
-        if with_spectrum {
-            content = content.push(vertical_rule()).push(self.spectrum_controls());
+        if layout.advanced_output {
+            content = content.push(vertical_rule()).push(
+                container(self.param(param::OUTPUT).label("Output").row(ROW_KNOB)).width(150.0),
+            );
+            if layout.advanced_spectrum {
+                content = content.push(vertical_rule()).push(self.spectrum_controls());
+            }
         }
         container(content)
             .padding([4.0, PAD])
@@ -653,7 +660,7 @@ mod tests {
 
     #[test]
     fn every_supported_size_fits_without_scrolling() {
-        for width in [COMPACT_W, MEDIUM_W, TABS_BESIDE_W, STRIP_W, FULL_W, MAX_W] {
+        for width in [COMPACT_W, MEDIUM_W, TABS_BESIDE_W, FULL_W, MAX_W] {
             for height in (MIN_BODY_H..=420).step_by(2).map(|height| height as f32) {
                 for advanced in [false, true] {
                     let layout = arrange(Size::new(width, height), advanced);
@@ -664,6 +671,7 @@ mod tests {
                         continue;
                     }
                     let minimum = match layout.kind {
+                        Upper::Side if layout.strip => STRIP_UPPER_H,
                         Upper::Side => SIDE_H,
                         Upper::TabsBelow => GRAPH_MIN_H + TABS_H,
                         Upper::TabsBeside | Upper::TabsOnly => TABS_H,
@@ -676,11 +684,47 @@ mod tests {
     }
 
     #[test]
-    fn wide_tall_cards_show_every_band_and_the_output_controls() {
+    fn the_output_column_has_room_for_its_meters_whenever_it_shows() {
+        for width in [MEDIUM_W, FULL_W, MAX_W] {
+            for height in (MIN_BODY_H..=420).step_by(2).map(|height| height as f32) {
+                let layout = arrange(Size::new(width, height), false);
+                // Over the band row the trim and analyser lines sit beside
+                // the bands, so only the meters share the graph's height.
+                let needed = if layout.strip {
+                    12.0 + 15.0 + METER_MIN_H
+                } else {
+                    OUTPUT_COLUMN_H
+                };
+                if layout.kind == Upper::Side {
+                    assert!(
+                        layout.upper >= needed - 0.01,
+                        "{width}x{height}: {layout:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_band_row_shows_only_where_every_band_fits_beside_the_output_column() {
+        let bands = BAND_GROUP_W * 4.0 + 3.0;
+        let short_of_room = PAD * 2.0 + bands + 17.0 + OUTPUT_W - 1.0;
+        assert!(!arrange(Size::new(short_of_room, 360.0), false).strip);
+        assert!(arrange(Size::new(short_of_room + 1.0, 360.0), false).strip);
+    }
+
+    #[test]
+    fn the_band_row_shows_from_the_height_it_needed_before_the_output_column() {
+        assert!(arrange(Size::new(FULL_W, 199.0), false).strip);
+        assert!(!arrange(Size::new(FULL_W, 197.0), false).strip);
+    }
+
+    #[test]
+    fn wide_tall_cards_show_every_band_below_and_narrower_ones_band_tabs() {
         let layout = arrange(Size::new(FULL_W, 360.0), false);
-        assert!(layout.kind == Upper::Side && layout.strip && layout.output_in_strip);
-        let narrower = arrange(Size::new(STRIP_W, 360.0), false);
-        assert!(narrower.strip && !narrower.output_in_strip);
+        assert!(layout.kind == Upper::Side && layout.strip);
+        let narrower = arrange(Size::new(MEDIUM_W, 360.0), false);
+        assert!(narrower.kind == Upper::Side && !narrower.strip);
     }
 
     #[test]
@@ -702,7 +746,7 @@ mod tests {
     }
 
     #[test]
-    fn advanced_stacks_under_the_side_panel_and_otherwise_takes_the_body() {
+    fn advanced_stacks_under_the_side_layout_and_otherwise_takes_the_body() {
         let tall = arrange(Size::new(FULL_W, 400.0), true);
         assert!(!tall.advanced_only && tall.advanced == Some(ADVANCED_H));
         assert!(arrange(Size::new(FULL_W, 150.0), true).advanced_only);
@@ -710,7 +754,15 @@ mod tests {
     }
 
     #[test]
-    fn card_width_is_compact_until_the_side_panel_fits() {
+    fn advanced_leaves_the_output_controls_to_the_output_column() {
+        let stacked = arrange(Size::new(FULL_W, 400.0), true);
+        assert!(stacked.kind == Upper::Side && !stacked.advanced_only);
+        assert!(!stacked.advanced_output);
+        assert!(arrange(Size::new(COMPACT_W, 400.0), true).advanced_output);
+    }
+
+    #[test]
+    fn card_width_is_compact_until_the_output_column_fits() {
         assert_eq!(WIDTHS.card_width(200.0), COMPACT_W);
         assert_eq!(WIDTHS.card_width(MEDIUM_W), MEDIUM_W);
         assert_eq!(WIDTHS.card_width(5000.0), MAX_W);
