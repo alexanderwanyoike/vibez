@@ -75,9 +75,6 @@ const MARQUEE_GAP: f32 = 24.0;
 /// A pad's face sits in a recessed bezel, as the Perform pads do.
 const BEZEL: f32 = 2.0;
 const FACE_RADIUS: f32 = 5.0;
-/// A pad's drop zone sits just inside its face, which is too small to give
-/// room to a card's inset.
-const PAD_ZONE_INSET: f32 = 1.0;
 const BEZEL_RADIUS: f32 = 7.0;
 /// Pads shorter than this would rather lay out in fewer, longer rows.
 const FULL_PAD_MIN_H: f32 = 16.0;
@@ -674,6 +671,7 @@ impl<'a> DrumRackView<'a> {
         };
         let filled = view.filled;
         let selected = view.selected;
+        let drop_target = view.drop_target;
         let accent = self.accent;
         let face = container(canvas(view).width(Length::Fill).height(Length::Fill)).style(
             move |_theme: &Theme| container::Style {
@@ -709,25 +707,23 @@ impl<'a> DrumRackView<'a> {
                     } else {
                         th::border()
                     },
-                    width: 1.0,
+                    // A pad too small for an inset zone gives its edge
+                    // to the zone's dashes.
+                    width: if drop_target { 0.0 } else { 1.0 },
                     radius: FACE_RADIUS.into(),
                 },
                 ..Default::default()
             },
         );
         // The pad a drop will load is marked even when the cursor is on the
-        // card around it.
+        // card around it, its zone on its own edge.
         let zone = self
             .drop_zone
             .as_ref()
             .filter(|(pad, _)| *pad == index)
             .map(|(_, zone)| zone.clone());
-        let face = crate::widgets::drop_highlight::drop_highlight(
-            face.into(),
-            zone,
-            FACE_RADIUS - PAD_ZONE_INSET,
-            PAD_ZONE_INSET,
-        );
+        let face =
+            crate::widgets::drop_highlight::drop_highlight(face.into(), zone, FACE_RADIUS, 0.0);
         let bezel = container(face)
             .padding(if tiny {
                 0.0
