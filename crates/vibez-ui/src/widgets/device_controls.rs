@@ -402,10 +402,11 @@ pub fn segmented<'a, T: Copy + PartialEq + 'a>(
     segments(options, selected, on_select, accent, None)
 }
 
+/// Horizontal padding either side of a [`segmented`] label.
 const SEGMENT_PAD_X: f32 = 10.0;
 
-/// The width every cell of an [`even_segmented`] shares, in whole pixels so
-/// the cells keep an even pitch side by side.
+/// The width every cell of an [`even_segmented`] shares. Whole pixels keep
+/// each cell's edges sharp, since the cells sit side by side.
 fn even_segment_width(labels: &[&str]) -> f32 {
     let widest = labels
         .iter()
