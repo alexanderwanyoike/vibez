@@ -1,3 +1,5 @@
+//! Temporary CLAP and VST3 installs of the routing fixture plugin for integration tests.
+
 mod fixture_library;
 
 use std::path::PathBuf;
