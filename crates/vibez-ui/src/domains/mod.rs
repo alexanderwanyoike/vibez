@@ -27,6 +27,7 @@ pub mod device_params;
 pub mod device_presets;
 pub mod devices;
 pub mod drive;
+pub mod drop_zone;
 pub mod drum_kits;
 pub mod echo;
 pub mod eq;
