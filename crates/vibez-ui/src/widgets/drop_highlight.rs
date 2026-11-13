@@ -390,4 +390,18 @@ mod tests {
         let pad = Rectangle::new(Point::ORIGIN, Size::new(60.0, 24.0));
         assert_eq!(label_origin(pad, LABEL, None), None);
     }
+
+    #[test]
+    fn in_a_thin_zone_the_label_yields_sideways() {
+        let lane = Rectangle::new(Point::ORIGIN, Size::new(800.0, 54.0));
+        let avoid = badge_at(400.0, 10.0);
+        let origin = label_origin(lane, LABEL, Some(avoid)).unwrap();
+        assert_eq!(origin.y, (54.0 - LABEL.height) / 2.0);
+        let label = Rectangle::new(origin, LABEL);
+        assert!(
+            label.x + label.width + LABEL_GAP <= avoid.x
+                || label.x >= avoid.x + avoid.width + LABEL_GAP
+        );
+        assert!(label.x >= LABEL_MARGIN && label.x + label.width <= 800.0 - LABEL_MARGIN);
+    }
 }
