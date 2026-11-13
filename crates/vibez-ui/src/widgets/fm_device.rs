@@ -309,13 +309,8 @@ impl<'a> FmView<'a> {
                         ),
                         text_color: th::text(),
                         border: iced::Border {
-                            color: if shown {
-                                th::with_alpha(accent, 0.6)
-                            } else {
-                                Color::TRANSPARENT
-                            },
-                            width: 1.0,
-                            radius: 2.0.into(),
+                            radius: 3.0.into(),
+                            ..Default::default()
                         },
                         ..Default::default()
                     }),
