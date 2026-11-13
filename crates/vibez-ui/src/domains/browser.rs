@@ -164,6 +164,18 @@ impl BrowserState {
         self.drag_target.as_ref()?.drop_zone()
     }
 
+    /// The zone `track_id`'s lane marks while a drag hovers it.
+    pub fn lane_drop_zone(&self, track_id: TrackId) -> Option<crate::domains::drop_zone::DropZone> {
+        match self.drag_target {
+            Some(crate::state::BrowserDropTarget::ArrangementLane { track_id: lane, .. })
+                if lane == track_id =>
+            {
+                self.drop_zone()
+            }
+            _ => None,
+        }
+    }
+
     /// The pad of `track_id`'s Drum Rack a release would load, to highlight it.
     pub fn drum_pad_drop_target(&self, track_id: TrackId) -> Option<usize> {
         match self.drag_target {
