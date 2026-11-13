@@ -19,7 +19,7 @@ const SEPARATOR: &str = "  ·  ";
 const CURSOR_OFFSET: f32 = 14.0;
 const EDGE: f32 = 8.0;
 /// Keeps the pill compact however long the sample's name is.
-const MAX_W: f32 = 360.0;
+const TITLE_MAX_W: f32 = 240.0;
 /// The sample's name gives way first, so an outcome always reads in full.
 const TITLE_MIN_W: f32 = 60.0;
 
@@ -57,7 +57,9 @@ impl canvas::Program<Message> for BrowserDragGhost {
         });
         let detail_w = detail.map_or(0.0, |(_, separator_w, detail_w)| separator_w + detail_w);
         let fixed = PAD_X * 2.0 + DOT_R * 2.0 + DOT_GAP + detail_w;
-        let room = (MAX_W.min(bounds.width - EDGE * 2.0) - fixed).max(TITLE_MIN_W);
+        let room = TITLE_MAX_W
+            .min(bounds.width - EDGE * 2.0 - fixed)
+            .max(TITLE_MIN_W);
         let title = crate::typography::fit_text_middle(&self.title, room, TITLE_SIZE, font);
         let title_w = text_width(&title, TITLE_SIZE, font);
         let width = (fixed + title_w).round();
