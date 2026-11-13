@@ -1,5 +1,51 @@
 //! The drop zone a Browser drag shows over the device it would land on.
 
+use crate::domains::device_panel_drop::DevicePanelDrop;
+use crate::state::BrowserDropTarget;
+
+/// What a release in the zone does to the device, for its icon.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DropAction {
+    Add,
+    Replace,
+    Load,
+}
+
+/// The marked place a release lands on and what it says there.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DropZone {
+    pub action: DropAction,
+    /// The outcome in the status bar's words, or `None` where the zone is
+    /// a Drum Rack pad, too small to hold them.
+    pub label: Option<String>,
+}
+
+impl BrowserDropTarget {
+    /// The zone to mark under the cursor, or `None` where the arrangement
+    /// marks the drop itself.
+    pub fn drop_zone(&self) -> Option<DropZone> {
+        let action = match self {
+            Self::ArrangementLane { .. } | Self::EmptyArrangement { .. } => return None,
+            Self::DrumRackPad { .. } | Self::DrumRack { .. } => {
+                return Some(DropZone {
+                    action: DropAction::Load,
+                    label: None,
+                })
+            }
+            Self::Sampler { .. } => DropAction::Load,
+            Self::DevicePanel { drop, .. } => match drop {
+                DevicePanelDrop::AddSampler => DropAction::Add,
+                DevicePanelDrop::ReplaceWithSampler { .. } => DropAction::Replace,
+                DevicePanelDrop::LoadIntoExisting => DropAction::Load,
+            },
+        };
+        Some(DropZone {
+            action,
+            label: Some(self.status()),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

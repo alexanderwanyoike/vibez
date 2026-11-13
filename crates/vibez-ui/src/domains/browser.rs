@@ -153,12 +153,16 @@ impl crate::state::BrowserDropTarget {
 }
 
 impl BrowserState {
-    /// What the drag ghost says a release would do, and whether it would take
-    /// the audio; with no target under the cursor there is nothing to judge.
-    pub fn drag_ghost_label(&self) -> (String, Option<bool>) {
+    /// What the drag ghost says a release would do, where no drop zone says
+    /// it, and whether a release would take the audio; with no target under
+    /// the cursor there is nothing to judge.
+    pub fn drag_ghost_label(&self) -> (Option<String>, Option<bool>) {
         match &self.drag_target {
-            Some(target) => (target.status(), Some(target.accepts_drop())),
-            None => ("Choose a drop target".into(), None),
+            Some(target) => (
+                target.drop_zone().is_none().then(|| target.status()),
+                Some(target.accepts_drop()),
+            ),
+            None => (None, None),
         }
     }
 
