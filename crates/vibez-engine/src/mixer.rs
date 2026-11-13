@@ -521,8 +521,8 @@ mod tests {
         assert!(rendered);
 
         // Check that samples were written
-        for i in 0..16 {
-            assert!((track.mix_buffer[i] - 0.5).abs() < 1e-6);
+        for sample in &track.mix_buffer[..16] {
+            assert!((sample - 0.5).abs() < 1e-6);
         }
     }
 
@@ -649,11 +649,10 @@ mod tests {
         assert!(rendered);
 
         // Output should be source audio (0.5), not silence
-        for i in 0..16 {
+        for (i, sample) in track.mix_buffer[..16].iter().enumerate() {
             assert!(
-                (track.mix_buffer[i] - 0.5).abs() < 1e-6,
-                "sample {i}: expected 0.5, got {}",
-                track.mix_buffer[i]
+                (sample - 0.5).abs() < 1e-6,
+                "sample {i}: expected 0.5, got {sample}"
             );
         }
     }
@@ -843,11 +842,10 @@ mod tests {
         assert!(rendered); // clip is still "active" (duration=200)
 
         // Output should be silence since DecodedAudio returns 0.0 for out-of-bounds
-        for i in 0..16 {
+        for (i, sample) in track.mix_buffer[..16].iter().enumerate() {
             assert!(
-                track.mix_buffer[i].abs() < 1e-6,
-                "sample {i}: expected silence, got {}",
-                track.mix_buffer[i]
+                sample.abs() < 1e-6,
+                "sample {i}: expected silence, got {sample}"
             );
         }
     }
