@@ -46,3 +46,46 @@ pub fn drop_highlight<'a, Message: 'a>(
         .height(size.height)
         .into()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use iced::Size;
+
+    #[test]
+    fn a_rounded_outline_is_its_sides_plus_one_circle_of_corners() {
+        let perimeter = rounded_perimeter(Size::new(100.0, 40.0), 8.0);
+        let expected = 2.0 * (100.0 - 16.0 + 40.0 - 16.0) + std::f32::consts::TAU * 8.0;
+        assert!((perimeter - expected).abs() < 1e-3);
+    }
+
+    #[test]
+    fn a_corner_never_rounds_past_half_the_short_side() {
+        let pill = rounded_perimeter(Size::new(100.0, 10.0), 8.0);
+        let expected = 2.0 * (100.0 - 10.0) + std::f32::consts::TAU * 5.0;
+        assert!((pill - expected).abs() < 1e-3);
+    }
+
+    #[test]
+    fn dashes_stretch_to_close_the_outline_without_a_stub() {
+        let [dash, gap] = even_dash(103.0, 6.0, 4.0);
+        let periods: f32 = 103.0 / (dash + gap);
+        assert!((periods - periods.round()).abs() < 1e-4);
+        assert_eq!(periods.round(), 10.0);
+        assert!((dash / gap - 1.5).abs() < 1e-4);
+    }
+
+    #[test]
+    fn an_outline_shorter_than_one_dash_still_gets_one() {
+        let [dash, gap] = even_dash(4.0, 6.0, 4.0);
+        assert!((dash + gap - 4.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn the_label_shows_only_with_room_around_it() {
+        let label = Size::new(120.0, 24.0);
+        assert!(label_fits(Size::new(200.0, 60.0), label));
+        assert!(!label_fits(Size::new(124.0, 60.0), label));
+        assert!(!label_fits(Size::new(200.0, 26.0), label));
+    }
+}
