@@ -121,22 +121,48 @@ mod tests {
     }
 
     #[test]
-    fn the_arrangement_marks_its_own_drops_without_a_zone() {
-        let track_id = TrackId::new();
-        for target in [
-            BrowserDropTarget::ArrangementLane {
-                track_id,
-                beat: 1.0,
-                compatible: true,
-            },
-            BrowserDropTarget::ArrangementLane {
-                track_id,
-                beat: 1.0,
-                compatible: false,
-            },
-            BrowserDropTarget::EmptyArrangement { beat: 1.0 },
-        ] {
-            assert_eq!(target.drop_zone(), None);
+    fn a_lane_that_takes_the_audio_marks_the_drop_itself() {
+        let target = BrowserDropTarget::ArrangementLane {
+            track_id: TrackId::new(),
+            beat: 1.0,
+            compatible: true,
+        };
+        assert_eq!(target.drop_zone(), None);
+    }
+
+    #[test]
+    fn a_refused_lane_says_why_in_a_refusal_zone() {
+        let target = BrowserDropTarget::ArrangementLane {
+            track_id: TrackId::new(),
+            beat: 1.0,
+            compatible: false,
+        };
+        assert_eq!(
+            target.drop_zone(),
+            Some(DropZone {
+                action: DropAction::Refuse,
+                label: Some(target.status()),
+            })
+        );
+    }
+
+    #[test]
+    fn the_new_track_lane_adds_and_says_so() {
+        let target = BrowserDropTarget::EmptyArrangement { beat: 2.0 };
+        assert_eq!(
+            target.drop_zone(),
+            Some(DropZone {
+                action: DropAction::Add,
+                label: Some(target.status()),
+            })
+        );
+    }
+
+    #[test]
+    fn only_a_refusal_zone_refuses() {
+        assert!(DropAction::Refuse.refuses());
+        for action in [DropAction::Add, DropAction::Replace, DropAction::Load] {
+            assert!(!action.refuses());
         }
     }
 }

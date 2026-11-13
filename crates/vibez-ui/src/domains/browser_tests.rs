@@ -446,7 +446,10 @@ fn arrangement_hover_reports_compatible_and_invalid_targets() {
         beat: 8.5,
         compatible: false,
     });
-    assert!(action.status.unwrap().starts_with("Invalid target"));
+    assert_eq!(
+        action.status.as_deref(),
+        Some("Audio can't go on a MIDI lane")
+    );
 }
 
 #[test]
@@ -1423,10 +1426,9 @@ fn the_status_and_the_ghost_read_each_target_from_one_place() {
         assert!(!target.status().is_empty());
         assert_eq!(action.status, Some(target.status()));
         assert!(target.accepts_drop());
-        // A device's drop zone names the outcome, so the ghost names it only
-        // where no zone does.
-        let ghost_says = target.drop_zone().is_none().then(|| target.status());
-        assert_eq!(b.drag_ghost_label(), (ghost_says, Some(true)));
+        // The zone or lane names the outcome; the ghost only carries the
+        // sample and says whether the drop is taken.
+        assert_eq!(b.drag_accepted(), Some(true));
     }
     let mut b = dragging();
     b.update(BrowserMsg::DragHoverTrack {
@@ -1434,10 +1436,9 @@ fn the_status_and_the_ghost_read_each_target_from_one_place() {
         beat: 4.0,
         compatible: false,
     });
-    let refusal = b.drag_target.clone().unwrap().status();
-    assert_eq!(b.drag_ghost_label(), (Some(refusal), Some(false)));
+    assert_eq!(b.drag_accepted(), Some(false));
     b.update(BrowserMsg::ClearDragTarget);
-    assert_eq!(b.drag_ghost_label(), (None, None));
+    assert_eq!(b.drag_accepted(), None);
 }
 
 #[test]
