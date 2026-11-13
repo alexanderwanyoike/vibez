@@ -227,4 +227,83 @@ mod tests {
         assert!(!label_fits(Size::new(124.0, 60.0), label));
         assert!(!label_fits(Size::new(200.0, 26.0), label));
     }
+
+    use iced::{Point, Rectangle};
+
+    const ZONE: Rectangle = Rectangle {
+        x: 0.0,
+        y: 0.0,
+        width: 400.0,
+        height: 120.0,
+    };
+    const LABEL: Size = Size {
+        width: 200.0,
+        height: 26.0,
+    };
+
+    fn badge_at(x: f32, y: f32) -> Rectangle {
+        Rectangle::new(Point::new(x, y), Size::new(230.0, 40.0))
+    }
+
+    /// The label stays inside the zone and keeps its gap from the badge.
+    fn assert_clear(origin: Point, avoid: Rectangle) {
+        let label = Rectangle::new(origin, LABEL);
+        assert!(label.y >= ZONE.y + LABEL_MARGIN);
+        assert!(label.y + label.height <= ZONE.y + ZONE.height - LABEL_MARGIN);
+        let grown = Rectangle {
+            x: label.x - LABEL_GAP,
+            y: label.y - LABEL_GAP,
+            width: label.width + LABEL_GAP * 2.0,
+            height: label.height + LABEL_GAP * 2.0,
+        };
+        assert!(grown.intersection(&avoid).is_none());
+    }
+
+    #[test]
+    fn the_label_sits_centred_while_the_cursor_is_elsewhere() {
+        let avoid = badge_at(330.0, 100.0);
+        assert_eq!(
+            label_origin(ZONE, LABEL, Some(avoid)),
+            Some(Point::new(100.0, 47.0))
+        );
+        assert_eq!(
+            label_origin(ZONE, LABEL, None),
+            Some(Point::new(100.0, 47.0))
+        );
+    }
+
+    #[test]
+    fn the_label_yields_upward_from_a_cursor_at_the_centre() {
+        let avoid = badge_at(200.0, 60.0);
+        let origin = label_origin(ZONE, LABEL, Some(avoid)).unwrap();
+        assert_eq!(origin.x, 100.0);
+        assert!(origin.y < 47.0);
+        assert_clear(origin, avoid);
+    }
+
+    #[test]
+    fn the_label_yields_downward_when_there_is_no_room_above() {
+        let avoid = badge_at(200.0, 20.0);
+        let origin = label_origin(ZONE, LABEL, Some(avoid)).unwrap();
+        assert!(origin.y > 47.0);
+        assert_clear(origin, avoid);
+    }
+
+    #[test]
+    fn the_label_steps_aside_when_neither_side_has_room() {
+        let short = Rectangle {
+            height: 60.0,
+            ..ZONE
+        };
+        assert_eq!(
+            label_origin(short, LABEL, Some(badge_at(200.0, 20.0))),
+            None
+        );
+    }
+
+    #[test]
+    fn a_label_too_big_for_its_zone_is_not_shown() {
+        let pad = Rectangle::new(Point::ORIGIN, Size::new(60.0, 24.0));
+        assert_eq!(label_origin(pad, LABEL, None), None);
+    }
 }
