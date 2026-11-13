@@ -19,6 +19,7 @@ use vibez_instruments::sampler::param;
 use crate::domains::browser::BrowserMsg;
 use crate::domains::device_params::DeviceParams;
 use crate::domains::devices::DevicesMsg;
+use crate::domains::drop_zone::DropZone;
 use crate::domains::instrument_card::{InstrumentCardMsg, InstrumentPanel};
 use crate::domains::param_entry::ValueEntry;
 use crate::message::Message;
@@ -301,9 +302,7 @@ impl canvas::Program<Message> for PadView<'_> {
     ) -> Vec<canvas::Geometry> {
         let size = bounds.size();
         let mut frame = canvas::Frame::new(renderer, size);
-        // The pad a drop will load looks hovered even when the cursor is on
-        // the card around it.
-        if (state.hovered_since.is_some() || self.drop_target) && !self.firing {
+        if state.hovered_since.is_some() && !self.drop_target && !self.firing {
             let face = canvas::Path::rounded_rectangle(Point::ORIGIN, size, FACE_RADIUS.into());
             frame.fill(&face, th::with_alpha(th::text(), 0.05));
         }
@@ -482,7 +481,8 @@ pub struct DrumRackView<'a> {
     /// Which pads of the shown bank are sounding, in pad order.
     pub firing: [bool; DRUM_RACK_BANK_SIZE],
     pub banks_firing: [bool; DRUM_RACK_BANK_COUNT],
-    pub drop_target: Option<usize>,
+    /// The pad a release would load and the zone marking it.
+    pub drop_zone: Option<(usize, DropZone)>,
     pub accent: Color,
     pub panel: InstrumentPanel,
     pub entry: Option<&'a ValueEntry>,
@@ -663,7 +663,10 @@ impl<'a> DrumRackView<'a> {
             region: (start, end),
             selected: index == self.selected,
             firing,
-            drop_target: self.drop_target == Some(index),
+            drop_target: self
+                .drop_zone
+                .as_ref()
+                .is_some_and(|(pad, _)| *pad == index),
             accent: self.accent,
         };
         let filled = view.filled;
@@ -697,19 +700,30 @@ impl<'a> DrumRackView<'a> {
                         .into()
                 }),
                 border: iced::Border {
-                    color: if drop_target || selected || firing {
+                    color: if selected || firing {
                         accent
                     } else if filled {
                         th::border_light()
                     } else {
                         th::border()
                     },
-                    width: if drop_target { 2.0 } else { 1.0 },
+                    // A pad too small for an inset zone gives its edge
+                    // to the zone's dashes.
+                    width: if drop_target { 0.0 } else { 1.0 },
                     radius: FACE_RADIUS.into(),
                 },
                 ..Default::default()
             },
         );
+        // The pad a drop will load is marked even when the cursor is on the
+        // card around it, its zone on its own edge.
+        let zone = self
+            .drop_zone
+            .as_ref()
+            .filter(|(pad, _)| *pad == index)
+            .map(|(_, zone)| zone.clone());
+        let face =
+            crate::widgets::drop_highlight::drop_highlight(face.into(), zone, FACE_RADIUS, 0.0);
         let bezel = container(face)
             .padding(if tiny {
                 0.0

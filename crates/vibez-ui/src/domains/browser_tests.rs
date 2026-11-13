@@ -446,7 +446,10 @@ fn arrangement_hover_reports_compatible_and_invalid_targets() {
         beat: 8.5,
         compatible: false,
     });
-    assert!(action.status.unwrap().starts_with("Invalid target"));
+    assert_eq!(
+        action.status.as_deref(),
+        Some("Audio can't go on a MIDI lane")
+    );
 }
 
 #[test]
@@ -1423,10 +1426,9 @@ fn the_status_and_the_ghost_read_each_target_from_one_place() {
         assert!(!target.status().is_empty());
         assert_eq!(action.status, Some(target.status()));
         assert!(target.accepts_drop());
-        assert_eq!(
-            b.drag_ghost_label(),
-            (target.status().to_uppercase(), Some(true))
-        );
+        // The zone or lane names the outcome; the ghost only carries the
+        // sample and says whether the drop is taken.
+        assert_eq!(b.drag_accepted(), Some(true));
     }
     let mut b = dragging();
     b.update(BrowserMsg::DragHoverTrack {
@@ -1434,12 +1436,9 @@ fn the_status_and_the_ghost_read_each_target_from_one_place() {
         beat: 4.0,
         compatible: false,
     });
-    assert_eq!(b.drag_ghost_label().1, Some(false));
+    assert_eq!(b.drag_accepted(), Some(false));
     b.update(BrowserMsg::ClearDragTarget);
-    assert_eq!(
-        b.drag_ghost_label(),
-        ("CHOOSE A DROP TARGET".to_string(), None)
-    );
+    assert_eq!(b.drag_accepted(), None);
 }
 
 #[test]
@@ -1497,4 +1496,18 @@ fn leaving_a_card_hands_the_hover_back_to_the_panel() {
             drop: DevicePanelDrop::AddSampler,
         })
     );
+}
+
+#[test]
+fn only_the_hovered_lane_marks_a_refusal_zone() {
+    let hovered = TrackId::new();
+    let mut b = dragging();
+    b.update(BrowserMsg::DragHoverTrack {
+        track_id: hovered,
+        beat: 1.0,
+        compatible: false,
+    });
+    assert_eq!(b.lane_drop_zone(hovered), b.drop_zone());
+    assert!(b.lane_drop_zone(hovered).is_some());
+    assert_eq!(b.lane_drop_zone(TrackId::new()), None);
 }

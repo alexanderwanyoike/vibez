@@ -121,7 +121,16 @@ impl App {
             Some(crate::state::BrowserDropTarget::DevicePanel { track_id: target, .. })
                 if *target == track_id
         );
-        let content = crate::widgets::drop_highlight::drop_highlight(content.into(), highlighted);
+        use crate::widgets::device_chrome::CHAIN_PAD_BELOW;
+        use crate::widgets::drop_highlight::{drop_highlight, CARD_ZONE_INSET, CARD_ZONE_RADIUS};
+        let content = drop_highlight(
+            content.into(),
+            highlighted
+                .then(|| self.state.browser.drop_zone())
+                .flatten(),
+            CARD_ZONE_RADIUS,
+            iced::Padding::new(CARD_ZONE_INSET).bottom(CHAIN_PAD_BELOW + CARD_ZONE_INSET),
+        );
         // Wrap in mouse_area for right-click context menu
         let panel = mouse_area(content).on_right_press(Message::Devices(
             crate::domains::devices::DevicesMsg::ShowContextMenu {

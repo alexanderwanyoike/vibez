@@ -113,9 +113,7 @@ impl crate::state::BrowserDropTarget {
                 compatible: true,
                 ..
             } => format!("Audio lane at beat {beat:.2}"),
-            Target::ArrangementLane { .. } => {
-                "Invalid target: audio cannot be imported to a MIDI/instrument lane".into()
-            }
+            Target::ArrangementLane { .. } => "Audio can't go on a MIDI lane".into(),
             Target::EmptyArrangement { beat } => format!("New audio track at beat {beat:.2}"),
             Target::Sampler { .. } => DevicePanelDrop::LoadIntoExisting.hover_status(),
             Target::DrumRackPad { pad_index, .. } => {
@@ -153,12 +151,28 @@ impl crate::state::BrowserDropTarget {
 }
 
 impl BrowserState {
-    /// What the drag ghost says a release would do, and whether it would take
-    /// the audio; with no target under the cursor there is nothing to judge.
-    pub fn drag_ghost_label(&self) -> (String, Option<bool>) {
-        match &self.drag_target {
-            Some(target) => (target.status().to_uppercase(), Some(target.accepts_drop())),
-            None => ("CHOOSE A DROP TARGET".into(), None),
+    /// Whether a release would take the audio, for the ghost's dot; with no
+    /// target under the cursor there is nothing to judge.
+    pub fn drag_accepted(&self) -> Option<bool> {
+        self.drag_target
+            .as_ref()
+            .map(|target| target.accepts_drop())
+    }
+
+    /// The zone to mark where a release would land.
+    pub fn drop_zone(&self) -> Option<crate::domains::drop_zone::DropZone> {
+        self.drag_target.as_ref()?.drop_zone()
+    }
+
+    /// The zone `track_id`'s lane marks while a drag hovers it.
+    pub fn lane_drop_zone(&self, track_id: TrackId) -> Option<crate::domains::drop_zone::DropZone> {
+        match self.drag_target {
+            Some(crate::state::BrowserDropTarget::ArrangementLane { track_id: lane, .. })
+                if lane == track_id =>
+            {
+                self.drop_zone()
+            }
+            _ => None,
         }
     }
 

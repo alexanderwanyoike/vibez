@@ -48,34 +48,39 @@ impl App {
         let timeline = self.state.arrangement.resolve_timeline().editor;
         if self.state.project_tracks.tracks.is_empty() {
             let browser_drag_active = self.state.browser.drag_source.is_some();
-            let empty_beat = match self.state.browser.drag_target {
-                Some(crate::state::BrowserDropTarget::EmptyArrangement { beat }) => Some(beat),
+            let zone = match self.state.browser.drag_target {
+                Some(crate::state::BrowserDropTarget::EmptyArrangement { .. }) => {
+                    self.state.browser.drop_zone()
+                }
                 _ => None,
             };
-            let prompt_text = if browser_drag_active {
-                empty_beat
-                    .map(|beat| format!("DROP → NEW AUDIO TRACK · BEAT {beat:.2}"))
-                    .unwrap_or_else(|| "DROP → NEW AUDIO TRACK".into())
+            let prompt_text = if zone.is_some() {
+                ""
+            } else if browser_drag_active {
+                "Drop for a new audio track"
             } else {
-                "Right-click or Ctrl+T to add a track".into()
+                "Right-click or Ctrl+T to add a track"
             };
-            let prompt = text(prompt_text).size(16).color(if browser_drag_active {
-                th::accent()
-            } else {
-                th::text_dim()
-            });
+            let prompt = text(prompt_text).size(16).color(th::text_dim());
 
             let centered = center(prompt).width(Length::Fill).height(Length::Fill);
 
-            let mut area = mouse_area(
+            use crate::widgets::drop_highlight::{
+                drop_highlight, CARD_ZONE_INSET, CARD_ZONE_RADIUS,
+            };
+            let mut area = mouse_area(drop_highlight(
                 container(centered)
                     .width(Length::Fill)
                     .height(Length::FillPortion(5))
                     .style(|_theme: &Theme| container::Style {
                         background: Some(th::bg_dark().into()),
                         ..Default::default()
-                    }),
-            )
+                    })
+                    .into(),
+                zone,
+                CARD_ZONE_RADIUS,
+                CARD_ZONE_INSET,
+            ))
             .on_right_press(Message::View(ViewMsg::ShowContextMenu {
                 x: self.state.view.cursor_x,
                 y: self.state.view.cursor_y,
@@ -342,7 +347,8 @@ impl App {
                 timeline.marquee.as_ref().map(|marquee| marquee.rect),
             )
             .with_snap_targets(snap_targets.clone())
-            .with_clip_drag(timeline.clip_drag.as_ref().map(|drag| drag.preview.clone()));
+            .with_clip_drag(timeline.clip_drag.as_ref().map(|drag| drag.preview.clone()))
+            .with_drop_zone(self.state.browser.lane_drop_zone(track.id));
             if let Some(preview) = self.state.audio_recording.preview_for_track(track.id) {
                 let name = match preview.source {
                     crate::domains::audio_recording::AudioRecordingSource::HardwareInput => {
@@ -420,13 +426,19 @@ impl App {
         if self.state.browser.drag_source.is_some() {
             let grid = self.state.view.arrange_grid;
             let empty_geometry = geometry;
-            let empty_beat = match self.state.browser.drag_target {
-                Some(crate::state::BrowserDropTarget::EmptyArrangement { beat }) => Some(beat),
+            let zone = match self.state.browser.drag_target {
+                Some(crate::state::BrowserDropTarget::EmptyArrangement { .. }) => {
+                    self.state.browser.drop_zone()
+                }
                 _ => None,
             };
-            let label = empty_beat
-                .map(|beat| format!("NEW AUDIO TRACK · BEAT {beat:.2}"))
-                .unwrap_or_else(|| "NEW AUDIO TRACK".into());
+            // Until the drag reaches it, the lane only hints at what it is;
+            // once there, its zone says it.
+            let hint = if zone.is_some() {
+                ""
+            } else {
+                "New audio track"
+            };
             let header = container(text("+").size(14).color(th::accent()))
                 .width(Length::Fixed(
                     crate::widgets::track_header::TRACK_HEADER_TOTAL_WIDTH,
@@ -443,22 +455,20 @@ impl App {
                     },
                     ..Default::default()
                 });
-            let zone = mouse_area(
-                container(text(label).size(12).color(th::accent()))
-                    .padding([0, 10])
-                    .width(Length::Fill)
-                    .height(Length::Fixed(54.0))
-                    .align_y(iced::alignment::Vertical::Center)
-                    .style(|_theme: &Theme| container::Style {
-                        background: Some(th::accent_dim().into()),
-                        border: iced::Border {
-                            color: th::accent(),
-                            width: 1.0,
-                            radius: 0.0.into(),
-                        },
-                        ..Default::default()
-                    }),
-            )
+            use crate::widgets::drop_highlight::{
+                drop_highlight, CARD_ZONE_INSET, CARD_ZONE_RADIUS,
+            };
+            let lane = container(text(hint).size(12).color(th::text_muted()))
+                .width(Length::Fill)
+                .height(Length::Fixed(54.0))
+                .center_x(Length::Fill)
+                .center_y(Length::Fixed(54.0));
+            let zone = mouse_area(drop_highlight(
+                lane.into(),
+                zone,
+                CARD_ZONE_RADIUS,
+                CARD_ZONE_INSET,
+            ))
             .on_move(move |point| {
                 let beat = grid.snap_beat(
                     empty_geometry.x_to_beat(point.x),

@@ -89,7 +89,7 @@ const PRESET_MAX_W: f32 = 200.0;
 pub const PRESET_BUTTONS: usize = 4;
 /// Advanced, move up, move down and remove: the most a header carries.
 pub const MOST_ACTIONS: usize = 4;
-const CARD_RADIUS: f32 = 8.0;
+pub const CARD_RADIUS: f32 = 8.0;
 
 /// What a header's widths come to: its name and its preset selector.
 #[derive(Debug, Clone, Copy, PartialEq)]

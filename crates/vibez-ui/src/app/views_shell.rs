@@ -163,11 +163,10 @@ impl App {
                     .drag_preview_beats(self.state.transport.bpm)
                     .map(|beats| format!(" · {beats:.2} beats"))
                     .unwrap_or_default();
-                let (target, valid) = self.state.browser.drag_ghost_label();
+                let valid = self.state.browser.drag_accepted();
                 let ghost = canvas(crate::widgets::browser_drag_ghost::BrowserDragGhost {
                     cursor: iced::Point::new(self.state.view.cursor_x, self.state.view.cursor_y),
                     title: format!("{label} · {mode}{length}"),
-                    detail: target,
                     valid,
                 })
                 .width(Length::Fill)

@@ -126,8 +126,6 @@ impl TrackClipCanvas {
         // Background
         let bg_color = if drop_hover && drop_compatible {
             theme::accent_dim()
-        } else if drop_hover {
-            theme::with_alpha(theme::danger(), 0.16)
         } else if self.selected {
             theme::blend(theme::track_bg(), theme::text(), SELECTED_LANE_LIFT)
         } else {
@@ -355,12 +353,8 @@ impl TrackClipCanvas {
         // Drop-target indicator: bold accent border + vertical bar at the
         // cursor x + the track name overlaid so the user can verify which
         // lane will receive the drop.
-        if drop_hover {
-            let target_color = if drop_compatible {
-                theme::accent()
-            } else {
-                theme::danger()
-            };
+        if drop_hover && drop_compatible {
+            let target_color = theme::accent();
             let outline = canvas::Path::rectangle(
                 iced::Point::new(1.0, 1.0),
                 iced::Size::new(w - 2.0, h - 2.0),
@@ -386,42 +380,49 @@ impl TrackClipCanvas {
                             .with_width(2.0),
                     );
                 }
-                if drop_compatible {
-                    if let Some(duration_beats) = self.sample_drop_duration_beats {
-                        let preview_width = geometry.width_for_beats(duration_beats);
-                        let visible_width = preview_width.min((w - snapped_x).max(0.0));
-                        if visible_width > 0.0 {
-                            frame.fill_rectangle(
-                                iced::Point::new(snapped_x, 2.0),
-                                iced::Size::new(visible_width, h - 4.0),
-                                theme::with_alpha(theme::accent(), 0.18),
-                            );
-                        }
+                if let Some(duration_beats) = self.sample_drop_duration_beats {
+                    let preview_width = geometry.width_for_beats(duration_beats);
+                    let visible_width = preview_width.min((w - snapped_x).max(0.0));
+                    if visible_width > 0.0 {
+                        frame.fill_rectangle(
+                            iced::Point::new(snapped_x, 2.0),
+                            iced::Size::new(visible_width, h - 4.0),
+                            theme::with_alpha(theme::accent(), 0.18),
+                        );
                     }
                 }
                 frame.fill_text(canvas::Text {
-                    content: if drop_compatible {
-                        format!("Beat {beat:.2} · {}", self.track_name)
-                    } else {
-                        "INVALID · MIDI/instrument lane".into()
-                    },
+                    content: format!("Beat {beat:.2} · {}", self.track_name),
                     position: iced::Point::new(8.0, 8.0),
                     color: target_color,
                     size: 13.0.into(),
                     ..Default::default()
                 });
-                if drop_compatible {
-                    if let Some(detail) = self.sample_drop_detail.as_ref() {
-                        frame.fill_text(canvas::Text {
-                            content: detail.clone(),
-                            position: iced::Point::new(8.0, 28.0),
-                            color: theme::text(),
-                            size: 11.0.into(),
-                            ..Default::default()
-                        });
-                    }
+                if let Some(detail) = self.sample_drop_detail.as_ref() {
+                    frame.fill_text(canvas::Text {
+                        content: detail.clone(),
+                        position: iced::Point::new(8.0, 28.0),
+                        color: theme::text(),
+                        size: 11.0.into(),
+                        ..Default::default()
+                    });
                 }
             }
+        } else if let Some(zone) = self.drop_zone.as_ref().filter(|_| drop_hover) {
+            use crate::widgets::drop_highlight::{draw_zone, CARD_ZONE_INSET, CARD_ZONE_RADIUS};
+            let origin = bounds.position() + whole_pixel_offset(bounds.position());
+            let area = Rectangle::new(
+                iced::Point::new(CARD_ZONE_INSET, CARD_ZONE_INSET),
+                iced::Size::new(w - CARD_ZONE_INSET * 2.0, h - CARD_ZONE_INSET * 2.0),
+            );
+            draw_zone(
+                frame,
+                origin,
+                area,
+                CARD_ZONE_RADIUS,
+                zone,
+                cursor.position_in(bounds),
+            );
         }
 
         self.draw_drag_readout(frame, w, h);
