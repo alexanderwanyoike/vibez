@@ -43,14 +43,14 @@ impl App {
         });
         let card =
             self.native_instrument_frame("Sampler", track, accent, width, device, body.into());
-        use crate::widgets::drop_highlight::{drop_highlight, CARD_ZONE_INSET};
+        use crate::widgets::drop_highlight::{drop_highlight, CARD_ZONE_INSET, CARD_ZONE_RADIUS};
         let card = drop_highlight(
             card,
             (self.state.browser.drag_target
                 == Some(crate::state::BrowserDropTarget::Sampler { track_id }))
             .then(|| self.state.browser.drop_zone())
             .flatten(),
-            crate::widgets::device_chrome::CARD_RADIUS - CARD_ZONE_INSET,
+            CARD_ZONE_RADIUS,
             CARD_ZONE_INSET,
         );
         // A sample dragged in from the browser loads onto the card.

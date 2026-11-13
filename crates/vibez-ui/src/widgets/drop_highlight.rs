@@ -15,6 +15,8 @@ use crate::widgets::top_layer::top_layer;
 /// How far a zone sits inside a device card, so it reads as a place within
 /// the card rather than the card's own edge.
 pub const CARD_ZONE_INSET: f32 = 4.0;
+/// A card zone's corners, round enough to read as rounded at its inset.
+pub const CARD_ZONE_RADIUS: f32 = 6.0;
 const STROKE_W: f32 = 1.5;
 const DASH: f32 = 5.0;
 const GAP: f32 = 4.0;
