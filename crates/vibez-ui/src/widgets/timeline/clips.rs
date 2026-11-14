@@ -118,6 +118,9 @@ pub struct TrackClipCanvas {
     /// The Clip drag in flight on this lane's timeline, whichever lane it
     /// began on.
     pub clip_drag: Option<ClipDragPreview>,
+    /// The zone a Browser drag hovering this lane marks, where the lane will
+    /// not take the audio.
+    pub drop_zone: Option<crate::domains::drop_zone::DropZone>,
     /// The track name this canvas was constructed with. Drawn on the drop
     /// indicator so the user can verify which lane will receive the drop.
     pub track_name: String,
@@ -276,6 +279,7 @@ impl TrackClipCanvas {
             sample_drop_detail,
             snap_targets: Arc::default(),
             clip_drag: None,
+            drop_zone: None,
             track_name: track.name.clone(),
         };
         lane_timing::finish(timing, lane_timing::Phase::Build);
@@ -297,6 +301,11 @@ impl TrackClipCanvas {
 
     pub fn with_snap_targets(mut self, snap_targets: Arc<SnapTargets>) -> Self {
         self.snap_targets = snap_targets;
+        self
+    }
+
+    pub fn with_drop_zone(mut self, zone: Option<crate::domains::drop_zone::DropZone>) -> Self {
+        self.drop_zone = zone;
         self
     }
 

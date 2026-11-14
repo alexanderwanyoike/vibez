@@ -328,6 +328,12 @@ impl App {
             Message::DropSampleOnSampler { track_id } => {
                 return self.on_drop_sample_on_sampler(track_id)
             }
+            Message::DropSampleOnDrumRack { track_id } => {
+                return self.on_drop_sample_on_drum_rack(track_id)
+            }
+            Message::DropSampleOnDevicePanel { track_id } => {
+                return self.on_drop_sample_on_device_panel(track_id)
+            }
             Message::LocalSamplePreviewReady(source, generation, Ok(audio)) => {
                 return self.on_local_sample_preview_ready(source, generation, audio)
             }
@@ -360,6 +366,9 @@ impl App {
             }
             Message::SelectAdjacentBrowserResult(direction) => {
                 return self.select_adjacent_browser_result(direction);
+            }
+            Message::ReplaySelectedBrowserSample => {
+                return self.on_replay_key();
             }
             Message::LoadSelectedBrowserSampleToDevice => {
                 return self.handle_load_selected_browser_sample_to_device();

@@ -141,9 +141,9 @@ mod original {
                     let dry = buffer[idx];
                     let mut x = dry + self.fb[c] * self.feedback;
 
-                    for s in 0..STAGES {
-                        let y = -a * x + self.z[c][s];
-                        self.z[c][s] = x + a * y;
+                    for z in &mut self.z[c] {
+                        let y = -a * x + *z;
+                        *z = x + a * y;
                         x = y;
                     }
 

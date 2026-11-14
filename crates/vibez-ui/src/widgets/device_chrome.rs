@@ -89,7 +89,7 @@ const PRESET_MAX_W: f32 = 200.0;
 pub const PRESET_BUTTONS: usize = 4;
 /// Advanced, move up, move down and remove: the most a header carries.
 pub const MOST_ACTIONS: usize = 4;
-const CARD_RADIUS: f32 = 8.0;
+pub const CARD_RADIUS: f32 = 8.0;
 
 /// What a header's widths come to: its name and its preset selector.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -411,7 +411,7 @@ fn editor_button<'a>(gui_key: Option<PluginGuiKey>) -> Element<'a, Message> {
 }
 
 /// The room a chain that fits leaves under its cards.
-pub const CHAIN_PAD_BELOW: f32 = 8.0;
+pub const CHAIN_PAD_BELOW: f32 = 12.0;
 
 /// The device chain's scrollbar, and the gap it keeps from the cards: the
 /// two fill the room a chain that fits leaves under its cards.

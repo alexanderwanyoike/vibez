@@ -635,6 +635,12 @@ impl BrowserState {
             .min(window_width - ARRANGE_MIN_WIDTH_WITH_BROWSER)
     }
 
+    /// Whether keyboard shortcuts act on the Browser: it is open and the
+    /// producer last worked in it.
+    pub fn has_keyboard_focus(&self) -> bool {
+        self.open && self.keyboard_focus
+    }
+
     pub fn effective_dock_width(&self, window_width: f32) -> f32 {
         let available = (window_width - ARRANGE_MIN_WIDTH_WITH_BROWSER)
             .clamp(BROWSER_DOCK_MIN_WIDTH, BROWSER_DOCK_MAX_WIDTH);

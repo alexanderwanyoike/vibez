@@ -136,8 +136,7 @@ impl ClipEditor {
         });
         if let Some((clip, position)) = playing {
             self.playing.insert(track, clip);
-            self.started_at
-                .insert(track, state.effective_at_samples.saturating_sub(position));
+            self.anchor(track, position, state.effective_at_samples);
         } else {
             self.playing.remove(&track);
             self.started_at.remove(&track);
@@ -164,6 +163,36 @@ impl ClipEditor {
         });
         if self.next_request <= state.through_request {
             self.running = state.running;
+        }
+    }
+
+    /// The engine now plays `track`'s edited clip from `position` at
+    /// `effective_at`. A latent track hears this after the edit's request
+    /// retired and dropped its pending clip, so the store's copy stands in.
+    pub fn source_refreshed(
+        &mut self,
+        track: TrackId,
+        request_id: u64,
+        position: u64,
+        effective_at: u64,
+        clips: &ClipStore,
+    ) -> Option<&LauncherClip> {
+        let clip = self.pending.remove(&request_id).or_else(|| {
+            let id = self.playing.get(&track)?.id;
+            clips.by_id(id).cloned()
+        })?;
+        self.playing.insert(track, clip);
+        self.anchor(track, position, effective_at);
+        self.playing.get(&track)
+    }
+
+    /// The engine plays `track`'s clip from `position` at `effective_at`,
+    /// so its playhead counts from there; after a length change the engine
+    /// wraps its position, so the UI's earlier start no longer holds.
+    pub fn anchor(&mut self, track: TrackId, position: u64, effective_at: u64) {
+        if self.playing.contains_key(&track) {
+            self.started_at
+                .insert(track, effective_at.saturating_sub(position));
         }
     }
 

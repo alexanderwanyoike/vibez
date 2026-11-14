@@ -43,10 +43,22 @@ impl App {
         });
         let card =
             self.native_instrument_frame("Sampler", track, accent, width, device, body.into());
+        use crate::widgets::drop_highlight::{drop_highlight, CARD_ZONE_INSET, CARD_ZONE_RADIUS};
+        let card = drop_highlight(
+            card,
+            (self.state.browser.drag_target
+                == Some(crate::state::BrowserDropTarget::Sampler { track_id }))
+            .then(|| self.state.browser.drop_zone())
+            .flatten(),
+            CARD_ZONE_RADIUS,
+            CARD_ZONE_INSET,
+        );
         // A sample dragged in from the browser loads onto the card.
         mouse_area(card)
             .on_enter(Message::Browser(BrowserMsg::DragHoverSampler { track_id }))
-            .on_exit(Message::Browser(BrowserMsg::ClearDragTarget))
+            .on_exit(Message::Browser(BrowserMsg::LeaveDragTarget(
+                crate::state::BrowserDropTarget::Sampler { track_id },
+            )))
             .on_release(Message::DropSampleOnSampler { track_id })
             .into()
     }

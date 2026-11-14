@@ -354,15 +354,20 @@ impl App {
                         position,
                         effective_at_samples,
                     } => {
-                        let editor = &mut self.state.perform.clip_editor;
-                        if let Some(clip) = editor.pending.remove(&request_id) {
-                            let spb = self.state.transport.samples_per_beat();
-                            let source = CapturedTimelineSource::from_clip(&clip, spb);
-                            editor
-                                .started_at
-                                .insert(track_id, effective_at_samples.saturating_sub(position));
-                            editor.playing.insert(track_id, clip);
-                            self.state.perform.capture.clip_transition(
+                        let spb = self.state.transport.samples_per_beat();
+                        let perform = &mut self.state.perform;
+                        let source = perform
+                            .clip_editor
+                            .source_refreshed(
+                                track_id,
+                                request_id,
+                                position,
+                                effective_at_samples,
+                                &perform.clips,
+                            )
+                            .map(|clip| CapturedTimelineSource::from_clip(clip, spb));
+                        if let Some(source) = source {
+                            perform.capture.clip_transition(
                                 track_id,
                                 Some(source),
                                 effective_at_samples,
@@ -375,6 +380,11 @@ impl App {
                         position,
                         effective_at_samples,
                     } => {
+                        self.state.perform.clip_editor.anchor(
+                            track_id,
+                            position,
+                            effective_at_samples,
+                        );
                         let spb = self.state.transport.samples_per_beat();
                         let source = self
                             .state
@@ -400,12 +410,9 @@ impl App {
                     } => {
                         let editor = &mut self.state.perform.clip_editor;
                         editor.acknowledge_transition(track_id, request_id);
-                        editor.started_at.insert(
-                            track_id,
-                            effective_at_samples.saturating_sub(start_position),
-                        );
                         if let Some(clip) = editor.pending.remove(&request_id) {
                             editor.playing.insert(track_id, clip);
+                            editor.anchor(track_id, start_position, effective_at_samples);
                         } else {
                             editor.playing.remove(&track_id);
                         }
@@ -1170,3 +1177,7 @@ mod compensation_recording_tests;
 #[cfg(test)]
 #[path = "recording_observation_tests.rs"]
 mod recording_observation_tests;
+
+#[cfg(test)]
+#[path = "clip_length_change_tests.rs"]
+mod clip_length_change_tests;

@@ -8,6 +8,7 @@ use iced::Task;
 
 use crate::domains::arrangement::ArrangementMsg;
 use crate::domains::browser::BrowserMsg;
+use crate::domains::device_panel_drop::DevicePanelDrop;
 use crate::domains::piano_roll::PianoRollMsg;
 use crate::domains::view::ViewMsg;
 use vibez_core::id::{ClipId, TrackId};
@@ -341,10 +342,8 @@ impl App {
                     Message::BrowserWaveformReady(source.clone(), result)
                 });
             }
-        } else if self.state.browser.audition_enabled {
-            if let Some(raw) = self.state.browser.waveform_for_source(&source) {
-                return self.play_browser_mode(source, raw);
-            }
+        } else {
+            return self.replay_selected_browser_sample();
         }
         Task::none()
     }
@@ -521,6 +520,35 @@ impl App {
         };
         self.state.browser.cancel_media_drag();
         self.dispatch_drop_for_target(source, BrowserImportTarget::Sampler(track_id))
+    }
+
+    pub(super) fn on_drop_sample_on_drum_rack(&mut self, track_id: TrackId) -> Task<Message> {
+        let pad_index = self
+            .state
+            .find_track(track_id)
+            .and_then(crate::domains::sampler::selected_drum_pad);
+        match pad_index {
+            Some(pad_index) if self.state.browser.drag_source.is_some() => {
+                self.handle_drop_sample_on_drum_pad(track_id, pad_index)
+            }
+            _ => self.update(Message::Browser(BrowserMsg::EndDragSample)),
+        }
+    }
+
+    pub(super) fn on_drop_sample_on_device_panel(&mut self, track_id: TrackId) -> Task<Message> {
+        let takes_drop = self
+            .state
+            .find_track(track_id)
+            .and_then(DevicePanelDrop::for_channel)
+            .is_some();
+        if !takes_drop {
+            return self.update(Message::Browser(BrowserMsg::EndDragSample));
+        }
+        let Some(source) = self.state.browser.drag_source.take() else {
+            return Task::none();
+        };
+        self.state.browser.cancel_media_drag();
+        self.dispatch_drop_for_target(source, BrowserImportTarget::ImpliedSampler(track_id))
     }
 
     pub(super) fn on_local_sample_preview_ready(

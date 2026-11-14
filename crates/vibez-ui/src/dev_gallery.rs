@@ -2954,7 +2954,13 @@ impl DrumRackGallery {
                 device,
                 firing,
                 banks_firing: [true, false, false, false],
-                drop_target: Some(14),
+                drop_zone: Some((
+                    14,
+                    crate::domains::drop_zone::DropZone {
+                        action: crate::domains::drop_zone::DropAction::Load,
+                        label: None,
+                    },
+                )),
                 accent,
                 panel: panel.clone(),
                 entry: None,

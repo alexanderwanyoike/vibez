@@ -185,6 +185,7 @@ pub(in crate::app) async fn prepare_browser_import_audio_async(
     let device_target = matches!(
         target,
         crate::message::BrowserImportTarget::Sampler(_)
+            | crate::message::BrowserImportTarget::ImpliedSampler(_)
             | crate::message::BrowserImportTarget::DrumRackPad { .. }
     );
     if !device_target {

@@ -3,8 +3,9 @@
 //! operators, their envelopes, or the LFO and the voices. Tall wide cards
 //! show the concept's overview, everything at once.
 
+use iced::alignment::Horizontal;
 use iced::widget::{button, canvas, column, container, row, text};
-use iced::{Alignment, Color, Element, Length, Size, Theme};
+use iced::{Alignment, Color, Element, Length, Padding, Size, Theme};
 use vibez_core::id::TrackId;
 use vibez_instruments::fm::{op, param, OPERATORS};
 
@@ -56,6 +57,17 @@ impl PlotKind for Plot {
 }
 
 const TABLE_ROW_MAX_H: f32 = 26.0;
+const TABLE_ROW_GAP: f32 = 1.0;
+/// The inset either side of the operator table's rows, its headings set to
+/// match so every column lines up with its rows. Centring the text's line
+/// box leaves the descender space below the figures and capitals the table
+/// sets, so the extra top padding centres what is drawn.
+const TABLE_ROW_PAD: Padding = Padding {
+    top: 3.0,
+    right: 8.0,
+    bottom: 0.0,
+    left: 8.0,
+};
 const OPERATOR_KNOBS: [usize; 5] = [op::RATIO, op::FINE, op::LEVEL, op::FEEDBACK, op::KEY_TRACK];
 const ENVELOPE_KNOBS: [usize; 4] = [op::ATTACK, op::DECAY, op::SUSTAIN, op::RELEASE];
 const MACROS: [usize; 4] = [
@@ -240,25 +252,29 @@ impl<'a> FmView<'a> {
     /// Each operator's ratio, fine tune and level, the shown one marked;
     /// a click on a row shows that operator.
     fn operator_table(&self) -> Element<'a, Message> {
+        let column_w = Length::FillPortion(3);
         let cell = |content: String, color: Color| {
             container(text(content).size(VALUE_SIZE).color(color))
-                .width(Length::FillPortion(3))
-                .center_x(Length::FillPortion(3))
+                .width(column_w)
+                .align_x(Horizontal::Right)
         };
         let heading_cell = |content: &'static str| {
             container(text(content).size(LABEL_SIZE).color(th::text_dim()))
-                .width(Length::FillPortion(3))
-                .center_x(Length::FillPortion(3))
+                .width(column_w)
+                .align_x(Horizontal::Right)
         };
         let name_w = Length::FillPortion(1);
-        let mut table = column![row![
+        let heading = row![
             container(text("")).width(name_w),
             heading_cell("Ratio"),
             heading_cell("Fine"),
             heading_cell("Level"),
         ]
-        .height(Length::FillPortion(1))
-        .align_y(Alignment::Center)];
+        .height(Length::Fill)
+        .align_y(Alignment::Center);
+        let mut table = column![container(heading)
+            .padding(TABLE_ROW_PAD)
+            .height(Length::FillPortion(1))];
         for (operator, name) in OPERATOR_NAMES.iter().enumerate() {
             let shown = operator == self.shown();
             let value = |control: usize| self.param(param::of(operator, control)).value_text();
@@ -269,12 +285,13 @@ impl<'a> FmView<'a> {
                 cell(value(op::FINE), color),
                 cell(value(op::LEVEL), color),
             ]
+            .height(Length::Fill)
             .align_y(Alignment::Center);
             let accent = self.accent;
             let track_id = self.track_id;
             table = table.push(
                 button(line)
-                    .padding([0.0, 6.0])
+                    .padding(TABLE_ROW_PAD)
                     .width(Length::Fill)
                     .height(Length::FillPortion(1))
                     .on_press(Message::InstrumentCard(InstrumentCardMsg::ShowOscillator(
@@ -293,13 +310,8 @@ impl<'a> FmView<'a> {
                         ),
                         text_color: th::text(),
                         border: iced::Border {
-                            color: if shown {
-                                th::with_alpha(accent, 0.6)
-                            } else {
-                                Color::TRANSPARENT
-                            },
-                            width: 1.0,
-                            radius: 2.0.into(),
+                            radius: 3.0.into(),
+                            ..Default::default()
                         },
                         ..Default::default()
                     }),
@@ -307,9 +319,11 @@ impl<'a> FmView<'a> {
         }
         // Rows grow with the plot only so far, so a tall card keeps the
         // table compact in the middle.
-        let table = container(table.spacing(1))
+        let table = container(table.spacing(TABLE_ROW_GAP))
             .width(Length::Fill)
-            .max_height(TABLE_ROW_MAX_H * (OPERATORS + 1) as f32);
+            .max_height(
+                TABLE_ROW_MAX_H * (OPERATORS + 1) as f32 + TABLE_ROW_GAP * OPERATORS as f32,
+            );
         container(table)
             .padding(4)
             .width(Length::Fill)
