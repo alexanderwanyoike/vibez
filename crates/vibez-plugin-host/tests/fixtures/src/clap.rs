@@ -381,6 +381,7 @@ unsafe extern "C" fn process(
         let mut event_index = 0;
         let events = &*data.in_events;
         let output = &*data.audio_outputs;
+        echo_notes_an_octave_up(events, &*data.out_events);
         for frame in 0..data.frames_count {
             while event_index < (events.size.unwrap())(events) {
                 let header = (events.get.unwrap())(events, event_index);
@@ -446,6 +447,26 @@ unsafe extern "C" fn process(
         }
     }
     CLAP_PROCESS_CONTINUE
+}
+
+/// Plays like a note-generating plugin, so hosts can test note output.
+unsafe fn echo_notes_an_octave_up(
+    events: &clap_sys::events::clap_input_events,
+    output: &clap_sys::events::clap_output_events,
+) {
+    for index in 0..(events.size.unwrap())(events) {
+        let header = (events.get.unwrap())(events, index);
+        if (*header).space_id == clap_sys::events::CLAP_CORE_EVENT_SPACE_ID
+            && matches!(
+                (*header).type_,
+                clap_sys::events::CLAP_EVENT_NOTE_ON | clap_sys::events::CLAP_EVENT_NOTE_OFF
+            )
+        {
+            let mut echo = *(header as *const clap_sys::events::clap_event_note);
+            echo.key += 12;
+            (output.try_push.unwrap())(output, &echo.header);
+        }
+    }
 }
 
 unsafe extern "C" fn save(plugin: *const clap_plugin, stream: *const clap_ostream) -> bool {

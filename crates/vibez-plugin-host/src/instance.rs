@@ -70,6 +70,11 @@ pub trait PluginInstance: Send {
         self.note_off(pitch);
     }
     fn reset(&mut self);
+    /// The notes the plugin output during its last process call, with frame
+    /// offsets inside that call's buffer.
+    fn note_output(&self) -> Option<&vibez_core::note_output::NoteOutput> {
+        None
+    }
     /// Capture the plugin's opaque state blob (project persistence).
     /// Main-thread class in both CLAP and VST3. Default: unsupported.
     fn save_state(&mut self) -> Option<Vec<u8>> {
