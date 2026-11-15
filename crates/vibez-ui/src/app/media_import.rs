@@ -7,7 +7,6 @@ use std::sync::Arc;
 use iced::Task;
 
 use vibez_core::id::{ClipId, TrackId};
-use vibez_core::midi::TrackKind;
 use vibez_core::track::MediaSourceRef;
 use vibez_dropbox::DropboxEntry;
 use vibez_engine::commands::EngineCommand;
@@ -74,6 +73,11 @@ impl App {
         source: MediaSourceRef,
         target: BrowserImportTarget,
     ) -> Task<Message> {
+        if let MediaSourceRef::LocalFile { path } = &source {
+            if vibez_core::midi_file::is_midi_file_path(path) {
+                return self.dispatch_midi_file_drop(path.clone(), target);
+            }
+        }
         let treatment = self.state.browser.import_input_for_source(&source);
         match source {
             MediaSourceRef::LocalFile { path } => {
@@ -746,12 +750,13 @@ impl App {
         if let Some(source) = self.state.browser.selected_source.clone() {
             let name = source.display_name();
             let position_samples = self.state.transport.position_samples;
-            let selected_audio = self.state.arrangement.selected_track.filter(|track_id| {
+            let media = crate::domains::browser::DragMedia::of(&source);
+            let selected_lane = self.state.arrangement.selected_track.filter(|track_id| {
                 self.state
                     .find_track(*track_id)
-                    .is_some_and(|track| matches!(track.kind, TrackKind::Audio))
+                    .is_some_and(|track| media.lands_on(track.kind))
             });
-            let target = match selected_audio {
+            let target = match selected_lane {
                 Some(track_id) => BrowserImportTarget::ArrangementClipAt {
                     track_id,
                     position_samples,

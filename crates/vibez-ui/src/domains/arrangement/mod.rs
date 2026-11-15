@@ -86,6 +86,11 @@ impl ProjectTracksState {
         }
     }
 
+    /// Whether `count` more tracks fit beside the project's.
+    pub(crate) fn has_room_for(&self, count: usize) -> bool {
+        self.tracks.len() + count <= vibez_engine::mixer::CHANNEL_CAPACITY
+    }
+
     /// Create one numbered Project Track with the standard channel strip, or
     /// `None` when the project already holds `CHANNEL_CAPACITY` tracks.
     /// Callers remain responsible for adding its timeline lane and selecting it.
@@ -95,7 +100,7 @@ impl ProjectTracksState {
         kind: TrackKind,
         engine: &mut impl EngineHandle,
     ) -> Option<TrackId> {
-        if self.tracks.len() >= vibez_engine::mixer::CHANNEL_CAPACITY {
+        if !self.has_room_for(1) {
             return None;
         }
         let track_number = self.next_unique_track_number(prefix);
@@ -774,6 +779,7 @@ mod audio_clip_inspector;
 mod clip_edges;
 mod clip_trims;
 mod fragment_geometry;
+mod imported_note_clips;
 mod media_ops;
 mod ops;
 mod overwrite;

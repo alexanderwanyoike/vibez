@@ -227,19 +227,24 @@ pub(super) fn browser_result_style(selected: bool) -> container::Style {
 }
 
 /// The icon leading a results row: a folder, or audio lit while selected.
-pub(super) fn browser_result_icon<'a>(folder: bool, selected: bool) -> Element<'a, Message> {
-    crate::icons::icon(if folder {
+/// The glyph for a folder or an audio file.
+pub(super) fn browser_result_glyph(folder: bool) -> char {
+    if folder {
         crate::icons::FOLDER
     } else {
         crate::icons::AUDIO_WAVEFORM
-    })
-    .size(13)
-    .color(if selected {
-        th::accent()
-    } else {
-        th::text_dim()
-    })
-    .into()
+    }
+}
+
+pub(super) fn browser_result_icon<'a>(glyph: char, selected: bool) -> Element<'a, Message> {
+    crate::icons::icon(glyph)
+        .size(13)
+        .color(if selected {
+            th::accent()
+        } else {
+            th::text_dim()
+        })
+        .into()
 }
 
 /// The hairline between the places and results columns.
