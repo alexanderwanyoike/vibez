@@ -127,7 +127,7 @@ fn queue_event(
     None
 }
 
-pub(super) fn emit_repeated(
+pub(super) fn emit_pair(
     source: EngineEvent,
     heard: EngineEvent,
     events: &mut rtrb::Producer<EngineEvent>,

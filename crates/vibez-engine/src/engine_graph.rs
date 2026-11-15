@@ -287,7 +287,7 @@ impl AudioEngine {
                             clock.source(effective, canonical),
                             clock.notice(effective, canonical),
                         );
-                        presentation_overflow = !presentation_queue::emit_repeated(
+                        presentation_overflow = !presentation_queue::emit_pair(
                             source,
                             event,
                             events,

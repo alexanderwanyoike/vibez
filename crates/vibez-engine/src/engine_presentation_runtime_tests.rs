@@ -284,7 +284,7 @@ fn repeated_source_and_heard_events_share_zero_delay_backpressure() {
         section_position_samples: None,
         canonical_section_position_samples: None,
     });
-    assert!(presentation_queue::emit_repeated(
+    assert!(presentation_queue::emit_pair(
         source,
         heard,
         &mut engine.event_tx,
