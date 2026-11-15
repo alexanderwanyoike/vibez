@@ -400,7 +400,7 @@ mod local_catalog_tests {
         }
         fs::write(root.join("upper.M4A"), []).unwrap();
         fs::write(root.join("raw.aac"), []).unwrap();
-        fs::write(root.join("notes.mid"), []).unwrap();
+        fs::write(root.join("notes.txt"), []).unwrap();
 
         let catalog = scan_sample_root(&root).unwrap();
 
@@ -416,7 +416,33 @@ mod local_catalog_tests {
         assert!(!catalog
             .entries
             .iter()
-            .any(|entry| entry.name == "notes.mid"));
+            .any(|entry| entry.name == "notes.txt"));
+    }
+
+    #[test]
+    fn local_catalog_lists_midi_files_beside_audio() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("Phrases");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("Rebeater P3.mid"), []).unwrap();
+        fs::write(root.join("Song.MIDI"), []).unwrap();
+        fs::write(root.join("kick.wav"), []).unwrap();
+
+        let catalog = scan_sample_root(&root).unwrap();
+
+        let formats: Vec<_> = catalog
+            .entries
+            .iter()
+            .map(|entry| (entry.name.as_str(), entry.format.as_str()))
+            .collect();
+        assert_eq!(
+            formats,
+            vec![
+                ("Rebeater P3.mid", "MIDI"),
+                ("Song.MIDI", "MIDI"),
+                ("kick.wav", "WAV"),
+            ]
+        );
     }
 
     #[test]
