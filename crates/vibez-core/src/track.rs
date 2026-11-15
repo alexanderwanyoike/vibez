@@ -390,7 +390,7 @@ pub struct TrackInfo {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sends: Vec<(TrackId, f32)>,
     /// Another track whose played notes this MIDI track also plays.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub midi_from: Option<crate::midi_from::MidiFrom>,
 }
 

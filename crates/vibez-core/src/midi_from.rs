@@ -11,8 +11,8 @@ pub struct MidiFrom {
 
 impl MidiFrom {
     /// `None` when a track would take its own notes.
-    pub fn new(_receiver: TrackId, source: TrackId) -> Option<Self> {
-        Some(Self { source })
+    pub fn new(receiver: TrackId, source: TrackId) -> Option<Self> {
+        (receiver != source).then_some(Self { source })
     }
 
     pub fn source(self) -> TrackId {
