@@ -221,8 +221,20 @@ impl RoutingGraph {
                 }
             }
         }
+        // MIDI From only orders rendering. Notes carry no audio, latency or gain,
+        // so they stay out of `edges` and every audio and compensation pass.
+        let note_routes: Vec<(usize, usize)> = channels
+            .iter()
+            .filter_map(|channel| {
+                let from = graph.index(channel.midi_from?, NodeStage::Source)?;
+                Some((from, graph.index(channel.id, NodeStage::Source)?))
+            })
+            .collect();
         let mut pending: Vec<usize> = (0..graph.nodes.len())
-            .map(|node| graph.edges.iter().filter(|edge| edge.to == node).count())
+            .map(|node| {
+                graph.edges.iter().filter(|edge| edge.to == node).count()
+                    + note_routes.iter().filter(|&&(_, to)| to == node).count()
+            })
             .collect();
         for (node, dependencies) in pending.iter().enumerate() {
             if *dependencies == 0 {
@@ -232,10 +244,21 @@ impl RoutingGraph {
         let mut cursor = 0;
         while cursor < graph.order.len() {
             let node = graph.order[cursor];
-            for edge in graph.edges.iter().filter(|edge| edge.from == node) {
-                pending[edge.to] -= 1;
-                if pending[edge.to] == 0 {
-                    graph.order.push(edge.to);
+            let targets = graph
+                .edges
+                .iter()
+                .filter(|edge| edge.from == node)
+                .map(|edge| edge.to)
+                .chain(
+                    note_routes
+                        .iter()
+                        .filter(|&&(from, _)| from == node)
+                        .map(|&(_, to)| to),
+                );
+            for to in targets {
+                pending[to] -= 1;
+                if pending[to] == 0 {
+                    graph.order.push(to);
                 }
             }
             cursor += 1;
