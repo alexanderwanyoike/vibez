@@ -218,7 +218,7 @@ impl AudioEngine {
                     if self.is_device_recovering(node.channel, None) {
                         continue;
                     }
-                    self.admit_routed_notes(channel_index);
+                    self.admit_routed_notes(channel_index, frames as u32);
                     let prepared = self.routing.as_mut();
                     let Some(track) =
                         binding.get_mut(&mut self.tracks, &mut self.buses, &mut self.master)

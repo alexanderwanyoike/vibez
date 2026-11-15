@@ -16,6 +16,11 @@ pub(crate) struct RoutedNotes {
     incoming: Vec<BlockNote>,
     block: Vec<BlockNote>,
     sounding: u128,
+    /// Note-offs due at the next block's first frame.
+    deferred: u128,
+    /// The frame each held pitch last started on in this block.
+    started: [u32; 128],
+    source: Option<NoteSource>,
     release_pending: bool,
 }
 
@@ -25,32 +30,48 @@ impl Default for RoutedNotes {
             incoming: Vec::with_capacity(NoteOutput::CAPACITY),
             block: Vec::with_capacity(BLOCK_CAPACITY),
             sounding: 0,
+            deferred: 0,
+            started: [u32::MAX; 128],
+            source: None,
             release_pending: false,
         }
     }
 }
 
 impl RoutedNotes {
-    /// Replaces the block's notes with `incoming`, in frame order, after any
-    /// pending release.
+    /// Replaces the block's notes with `incoming` from `source`, in frame
+    /// order, after any pending release. A changed source releases what the
+    /// old one started, since it will never end those notes.
     pub(crate) fn admit(
         &mut self,
-        _source: Option<NoteSource>,
+        source: Option<NoteSource>,
         incoming: &[BlockNote],
-        _frames: u32,
+        frames: u32,
     ) {
         self.block.clear();
-        if std::mem::take(&mut self.release_pending) {
-            for pitch in Self::pitches(std::mem::take(&mut self.sounding)) {
-                self.block.push(BlockNote::off(0, pitch));
-            }
+        if source != self.source {
+            self.source = source;
+            self.release_pending = true;
         }
+        if std::mem::take(&mut self.release_pending) {
+            self.deferred |= std::mem::take(&mut self.sounding);
+        }
+        for pitch in pitches(std::mem::take(&mut self.deferred)) {
+            self.block.push(BlockNote::off(0, pitch));
+        }
+        let last = frames.saturating_sub(1);
         self.incoming.clear();
-        let room = self.incoming.capacity();
-        self.incoming
-            .extend_from_slice(&incoming[..incoming.len().min(room)]);
-        self.incoming
-            .sort_unstable_by_key(|note| (note.frame, note.on));
+        for &note in incoming.iter().filter(|note| note.pitch < 128) {
+            if self.incoming.len() == self.incoming.capacity() {
+                break;
+            }
+            self.incoming.push(BlockNote {
+                frame: note.frame.min(last),
+                ..note
+            });
+        }
+        sort_by_frame(&mut self.incoming);
+        self.started = [u32::MAX; 128];
         for &note in &self.incoming {
             let bit = 1u128 << note.pitch;
             let held = self.sounding & bit != 0;
@@ -59,27 +80,27 @@ impl RoutedNotes {
                     self.block.push(BlockNote::off(note.frame, note.pitch));
                 }
                 self.sounding |= bit;
+                self.started[note.pitch as usize] = note.frame;
                 self.block.push(note);
             } else if held {
                 self.sounding &= !bit;
-                self.block.push(note);
+                // A receiving plugin plays note-offs before note-ons at one
+                // frame, so an off sharing its note-on's frame moves later.
+                if self.started[note.pitch as usize] != note.frame {
+                    self.block.push(note);
+                } else if note.frame < last {
+                    self.block.push(BlockNote::off(note.frame + 1, note.pitch));
+                } else {
+                    self.deferred |= bit;
+                }
             }
         }
+        sort_by_frame(&mut self.block);
     }
 
     /// Releases every routed note still sounding at the start of the next block.
     pub(crate) fn release(&mut self) {
         self.release_pending = true;
-    }
-
-    fn pitches(mut mask: u128) -> impl Iterator<Item = u8> {
-        std::iter::from_fn(move || {
-            (mask != 0).then(|| {
-                let pitch = mask.trailing_zeros() as u8;
-                mask &= mask - 1;
-                pitch
-            })
-        })
     }
 
     /// The notes to play this block, in frame order.
@@ -108,6 +129,27 @@ impl RoutedNotes {
                 instrument.note_off(note.pitch);
             }
             *cursor += 1;
+        }
+    }
+}
+
+fn pitches(mut mask: u128) -> impl Iterator<Item = u8> {
+    std::iter::from_fn(move || {
+        (mask != 0).then(|| {
+            let pitch = mask.trailing_zeros() as u8;
+            mask &= mask - 1;
+            pitch
+        })
+    })
+}
+
+/// Stable, so notes at one frame keep the source's order, and allocation-free.
+fn sort_by_frame(notes: &mut [BlockNote]) {
+    for index in 1..notes.len() {
+        let mut slot = index;
+        while slot > 0 && notes[slot - 1].frame > notes[slot].frame {
+            notes.swap(slot - 1, slot);
+            slot -= 1;
         }
     }
 }

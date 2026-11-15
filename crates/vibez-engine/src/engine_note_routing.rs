@@ -13,7 +13,7 @@ impl AudioEngine {
 
     /// The routing order renders a source before its receiver, so the
     /// source's notes for this block are already kept.
-    pub(super) fn admit_routed_notes(&mut self, channel_index: usize) {
+    pub(super) fn admit_routed_notes(&mut self, channel_index: usize, frames: u32) {
         let channels = &self.routing.channels;
         let ChannelIndex::Track(receiver) = channels[channel_index].binding else {
             return;
@@ -26,7 +26,7 @@ impl AudioEngine {
                     _ => None,
                 });
         let Some(source) = source else {
-            self.tracks[receiver].routed_notes.admit(None, &[], 0);
+            self.tracks[receiver].routed_notes.admit(None, &[], frames);
             return;
         };
         let (receiving, playing) = if receiver < source {
@@ -38,7 +38,7 @@ impl AudioEngine {
         };
         receiving
             .routed_notes
-            .admit(None, playing.played_notes.notes(), 0);
+            .admit(Some((playing.id, 0)), playing.played_notes.notes(), frames);
     }
 
     /// Ends routed notes on every track whose MIDI From source `next` changes.
