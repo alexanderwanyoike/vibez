@@ -10,6 +10,7 @@ pub mod effect;
 pub mod id;
 pub mod level;
 pub mod midi;
+pub mod midi_file;
 pub mod onset;
 pub mod perform;
 pub mod routing;
