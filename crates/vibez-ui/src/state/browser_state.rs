@@ -134,6 +134,9 @@ pub struct BrowserState {
 pub enum DesktopDrop {
     /// Over the window; the pointer is the other app's until the drop.
     Hovering,
+    /// Over the window, and the pointer has reported where it is, so a drop
+    /// with no target under it lands nowhere.
+    PointerSeen,
     /// Dropped before any target was under the pointer, so the next target
     /// the pointer reports takes it.
     Dropped,

@@ -257,7 +257,7 @@ impl BrowserState {
     /// Makes a file another app drags over the window the drag in flight;
     /// only the first of several files is taken.
     fn hover_desktop_file(&mut self, path: PathBuf) -> Option<String> {
-        if self.drag_source.is_some() {
+        if self.drag_source.is_some() && !self.desktop_drop_waits_for_target() {
             return None;
         }
         let name = path
@@ -269,30 +269,55 @@ impl BrowserState {
         {
             return Some(format!("Vibez can't import {name}"));
         }
-        self.cancel_pending_drag();
+        self.cancel_media_drag();
         self.drag_source = Some(MediaSourceRef::LocalFile { path });
         self.drag_label = Some(name);
-        self.drag_target = None;
         self.desktop_drop = Some(crate::state::DesktopDrop::Hovering);
         Some(self.moving_status())
     }
 
-    /// The target the dropped file goes to, once the pointer is over one.
-    fn drop_desktop_file(
-        &mut self,
-        path: &std::path::Path,
-    ) -> Option<crate::state::BrowserDropTarget> {
+    /// Releases the dropped file on the target under the pointer, cancels
+    /// it when the pointer showed nothing there, or waits for a target.
+    fn drop_desktop_file(&mut self, path: &std::path::Path, action: &mut BrowserAction) {
+        use crate::state::DesktopDrop;
         let dragged = matches!(
             &self.drag_source,
             Some(MediaSourceRef::LocalFile { path: dragged }) if dragged == path
         );
-        if !dragged || self.desktop_drop != Some(crate::state::DesktopDrop::Hovering) {
-            return None;
+        let over_window = matches!(
+            self.desktop_drop,
+            Some(DesktopDrop::Hovering | DesktopDrop::PointerSeen)
+        );
+        if !dragged || !over_window {
+            return;
         }
-        if self.drag_target.is_none() {
-            self.desktop_drop = Some(crate::state::DesktopDrop::Dropped);
+        match self.drag_target.clone() {
+            Some(target) => self.release_desktop_drop(target, action),
+            None if self.desktop_drop == Some(DesktopDrop::PointerSeen) => {
+                self.miss_desktop_drop(action);
+            }
+            None => self.desktop_drop = Some(DesktopDrop::Dropped),
         }
-        self.drag_target.clone()
+    }
+
+    fn release_desktop_drop(
+        &mut self,
+        target: crate::state::BrowserDropTarget,
+        action: &mut BrowserAction,
+    ) {
+        if target.accepts_drop() {
+            action.release = Some(target);
+            return;
+        }
+        let refusal = target.status(self.drag_media().unwrap_or(DragMedia::Audio));
+        self.cancel_media_drag();
+        action.status = Some(refusal);
+    }
+
+    fn miss_desktop_drop(&mut self, action: &mut BrowserAction) {
+        let name = self.drag_label.clone().unwrap_or_default();
+        self.cancel_media_drag();
+        action.status = Some(format!("Nothing here takes {name}"));
     }
 
     /// Instrument and device targets take samples, never MIDI files; a MIDI
@@ -555,20 +580,20 @@ impl BrowserState {
                     Some(self.hover(crate::state::BrowserDropTarget::ClipSlot { track_id, row }));
             }
             BrowserMsg::DesktopFileHovered(path) => action.status = self.hover_desktop_file(path),
-            BrowserMsg::DesktopFileDropped(path) => action.release = self.drop_desktop_file(&path),
+            BrowserMsg::DesktopFileDropped(path) => self.drop_desktop_file(&path, &mut action),
             BrowserMsg::DesktopDragLeft => {
                 if self.drags_from_desktop() {
                     self.cancel_media_drag();
                     action.status = Some("Drag cancelled".into());
                 }
             }
-            BrowserMsg::DesktopPointerMoved => {
-                if self.desktop_drop_waits_for_target() {
-                    let name = self.drag_label.clone().unwrap_or_default();
-                    self.cancel_media_drag();
-                    action.status = Some(format!("Nothing here takes {name}"));
+            BrowserMsg::DesktopPointerMoved => match self.desktop_drop {
+                Some(crate::state::DesktopDrop::Hovering) => {
+                    self.desktop_drop = Some(crate::state::DesktopDrop::PointerSeen);
                 }
-            }
+                Some(crate::state::DesktopDrop::Dropped) => self.miss_desktop_drop(&mut action),
+                _ => {}
+            },
             BrowserMsg::ClearDragTarget => {
                 action.status = self.clear_drag_target();
             }
@@ -775,7 +800,9 @@ impl BrowserState {
         // A file dropped before the pointer reached a target goes to the first
         // target the pointer then reports.
         if self.desktop_drop_waits_for_target() && action.release.is_none() {
-            action.release = self.drag_target.clone();
+            if let Some(target) = self.drag_target.clone() {
+                self.release_desktop_drop(target, &mut action);
+            }
         }
         action
     }

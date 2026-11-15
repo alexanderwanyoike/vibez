@@ -99,9 +99,7 @@ impl App {
         // Pointer events reach this router after the widgets under the
         // pointer reported their drop target, so a desktop drop still
         // waiting here has none.
-        if matches!(msg, ViewMsg::CursorMoved(..))
-            && self.state.browser.desktop_drop_waits_for_target()
-        {
+        if matches!(msg, ViewMsg::CursorMoved(..)) && self.state.browser.drags_from_desktop() {
             let action = self.state.browser.update(BrowserMsg::DesktopPointerMoved);
             let _ = self.apply_browser_action(action);
         }
