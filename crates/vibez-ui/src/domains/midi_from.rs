@@ -5,12 +5,17 @@ use vibez_core::midi_from::MidiFrom;
 
 use crate::state::{ProjectTrack, ProjectTracksState};
 
+/// Whether `track` can take another track's notes at all.
+pub fn can_receive(track: &ProjectTrack) -> bool {
+    track.kind.is_midi()
+}
+
 /// Tracks whose plugin instrument could feed `receiver` without a MIDI From
 /// loop, in track order. Built-in instruments play no notes out.
 pub fn sources(tracks: &[ProjectTrack], receiver: TrackId) -> Vec<TrackId> {
     if !tracks
         .iter()
-        .any(|track| track.id == receiver && track.kind.is_midi())
+        .any(|track| track.id == receiver && can_receive(track))
     {
         return Vec::new();
     }

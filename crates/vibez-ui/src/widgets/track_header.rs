@@ -61,7 +61,7 @@ fn shows_audio_input(track: &ProjectTrack) -> bool {
 }
 
 fn shows_midi_from(track: &ProjectTrack) -> bool {
-    track.kind.is_midi()
+    crate::domains::midi_from::can_receive(track)
 }
 
 impl TrackHeaderFlags {
