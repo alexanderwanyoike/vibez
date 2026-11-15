@@ -24,18 +24,8 @@ pub fn sources(tracks: &[ProjectTrack], receiver: TrackId) -> Vec<TrackId> {
         .collect()
 }
 
-/// One entry in a MIDI track's MIDI From picker.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MidiFromChoice {
-    pub source: Option<TrackId>,
-    pub label: String,
-}
-
-impl std::fmt::Display for MidiFromChoice {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(&self.label)
-    }
-}
+/// One entry in a MIDI track's MIDI From picker: a source, or none.
+pub type MidiFromChoice = crate::domains::labelled_choice::LabelledChoice<Option<TrackId>>;
 
 /// The picker's entries for `receiver`, and the one it shows as chosen.
 pub fn choices(
@@ -43,7 +33,7 @@ pub fn choices(
     receiver: &ProjectTrack,
 ) -> (Vec<MidiFromChoice>, MidiFromChoice) {
     let choice = |source: TrackId| MidiFromChoice {
-        source: Some(source),
+        value: Some(source),
         label: format!(
             "MF \u{b7} {}",
             tracks
@@ -53,7 +43,7 @@ pub fn choices(
         ),
     };
     let mut entries = vec![MidiFromChoice {
-        source: None,
+        value: None,
         label: "No Input".into(),
     }];
     entries.extend(sources(tracks, receiver.id).into_iter().map(choice));
@@ -273,8 +263,8 @@ mod tests {
         let (entries, chosen) = choices(&tracks.tracks, &tracks.tracks[2]);
         let labels: Vec<_> = entries.iter().map(ToString::to_string).collect();
         assert_eq!(labels, ["No Input", "MF \u{b7} Rebeater", "MF \u{b7} Arp"]);
-        assert_eq!(chosen.source, None);
-        assert_eq!(entries[2].source, Some(arp.id));
+        assert_eq!(chosen.value, None);
+        assert_eq!(entries[2].value, Some(arp.id));
 
         set(&mut tracks, lead.id, Some(arp.id));
         let (_, chosen) = choices(&tracks.tracks, &tracks.tracks[2]);

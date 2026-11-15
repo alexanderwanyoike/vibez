@@ -89,17 +89,7 @@ pub struct TrackHeaderRecordingView<'a> {
     pub source_tracks: &'a [ProjectTrack],
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct AudioInputChoice {
-    route: AudioInputRoute,
-    label: String,
-}
-
-impl std::fmt::Display for AudioInputChoice {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(&self.label)
-    }
-}
+type AudioInputChoice = crate::domains::labelled_choice::LabelledChoice<AudioInputRoute>;
 
 fn compact_input_pick_list<'a, T>(
     options: impl Borrow<[T]> + 'a,
@@ -312,14 +302,14 @@ pub fn view_track_header<'a>(
         for channel in 0..audio_input_channels {
             let route = AudioInputRoute::Mono { channel };
             routes.push(AudioInputChoice {
-                route,
+                value: route,
                 label: route.to_string(),
             });
         }
         for left in (0..audio_input_channels.saturating_sub(1)).step_by(2) {
             let route = AudioInputRoute::Stereo { left };
             routes.push(AudioInputChoice {
-                route,
+                value: route,
                 label: route.to_string(),
             });
         }
@@ -328,7 +318,7 @@ pub fn view_track_header<'a>(
                 .iter()
                 .filter(|source| source.id != track.id && source.is_playable_midi_target())
                 .map(|source| AudioInputChoice {
-                    route: AudioInputRoute::Resample {
+                    value: AudioInputRoute::Resample {
                         track_id: source.id,
                     },
                     label: format!("RS · {}", source.name),
@@ -336,10 +326,10 @@ pub fn view_track_header<'a>(
         );
         let selected_route = routes
             .iter()
-            .find(|choice| choice.route == track.audio_input_route)
+            .find(|choice| choice.value == track.audio_input_route)
             .cloned()
             .unwrap_or_else(|| AudioInputChoice {
-                route: track.audio_input_route,
+                value: track.audio_input_route,
                 label: match track.audio_input_route {
                     AudioInputRoute::Resample { .. } => "RS · Missing Track".into(),
                     route => route.to_string(),
@@ -353,7 +343,7 @@ pub fn view_track_header<'a>(
         let route = compact_input_pick_list(
             routes,
             selected_route,
-            move |choice| Message::SetAudioTrackInputRoute(track_id, choice.route),
+            move |choice| Message::SetAudioTrackInputRoute(track_id, choice.value),
             if is_resample { 119.0 } else { 78.0 },
             is_resample,
         );
@@ -378,12 +368,12 @@ pub fn view_track_header<'a>(
         }
     } else if shows_midi_from(track) {
         let (entries, chosen) = crate::domains::midi_from::choices(source_tracks, track);
-        let routed = chosen.source.is_some();
+        let routed = chosen.value.is_some();
         let track_id = track.id;
         let picker = compact_input_pick_list(
             entries,
             chosen,
-            move |choice| Message::SetMidiFrom(track_id, choice.source),
+            move |choice| Message::SetMidiFrom(track_id, choice.value),
             if routed { 119.0 } else { 78.0 },
             routed,
         );

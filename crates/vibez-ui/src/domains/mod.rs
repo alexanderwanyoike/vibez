@@ -36,6 +36,7 @@ pub mod fm;
 pub mod gain;
 pub mod gate;
 pub mod instrument_card;
+pub mod labelled_choice;
 pub mod limiter;
 pub mod midi_from;
 pub mod param_entry;
