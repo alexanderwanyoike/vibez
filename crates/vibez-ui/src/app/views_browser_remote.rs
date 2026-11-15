@@ -258,9 +258,12 @@ impl App {
                 Message::ClickRemoteBrowserEntry((*entry).clone())
             };
             let body = container(
-                row![browser_result_icon(entry.is_folder, selected), cells]
-                    .spacing(9)
-                    .align_y(iced::Alignment::Center),
+                row![
+                    browser_result_icon(browser_result_glyph(entry.is_folder), selected),
+                    cells
+                ]
+                .spacing(9)
+                .align_y(iced::Alignment::Center),
             )
             .padding([6, 8])
             .width(Length::Fill);
@@ -333,9 +336,12 @@ impl App {
                 .into()
             };
             let body = container(
-                row![browser_result_icon(false, selected), cells]
-                    .spacing(9)
-                    .align_y(iced::Alignment::Center),
+                row![
+                    browser_result_icon(browser_result_glyph(false), selected),
+                    cells
+                ]
+                .spacing(9)
+                .align_y(iced::Alignment::Center),
             )
             .padding([6, 8])
             .width(Length::Fill);

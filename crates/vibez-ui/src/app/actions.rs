@@ -403,6 +403,9 @@ impl App {
         if action.persist_settings {
             self.persist_ui_settings();
         }
+        if let Some(target) = action.release {
+            return self.release_media_drag_at(target);
+        }
         if !action.debounce_root_scans.is_empty() {
             return Task::batch(
                 action

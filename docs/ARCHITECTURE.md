@@ -191,6 +191,9 @@ engine owns two explicit clock domains: the canonical Arrange cursor advances
 only while Arrange renders, while a zero-based monotonic Perform clock advances
 during Section playback and stopped-start count-in. Section queue, Record,
 Note Repeat, monitored input, Track Mute, and Capture events use the latter.
+While Clips play, instruments and effects also hear it as their song position,
+delayed by their compensated input latency, so a Clip loop never restarts a
+tempo-synced device; Clip content and Clip automation keep the Clip's own clock.
 `PlaybackPosition` therefore always means Arrange cursor;
 `PerformancePosition` is the independent value shown as Performance time.
 `PerformanceCaptureStarted`, `SectionTransitioned`, and

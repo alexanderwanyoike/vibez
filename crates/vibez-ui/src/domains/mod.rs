@@ -38,6 +38,8 @@ pub mod gate;
 pub mod instrument_card;
 pub mod labelled_choice;
 pub mod limiter;
+pub mod midi_file_import;
+pub mod midi_file_landing;
 pub mod midi_from;
 pub mod param_entry;
 pub mod perform;

@@ -1423,8 +1423,8 @@ fn the_status_and_the_ghost_read_each_target_from_one_place() {
         let mut b = dragging();
         let action = b.update(hover);
         let target = b.drag_target.clone().unwrap();
-        assert!(!target.status().is_empty());
-        assert_eq!(action.status, Some(target.status()));
+        assert!(!target.status(DragMedia::Audio).is_empty());
+        assert_eq!(action.status, Some(target.status(DragMedia::Audio)));
         assert!(target.accepts_drop());
         // The zone or lane names the outcome; the ghost only carries the
         // sample and says whether the drop is taken.

@@ -40,6 +40,8 @@ rtrb = "0.3"
 audio_thread_priority = "0.32"
 midir = "0.10"
 rustfft = "6.4"
+# Standard MIDI File reading; "parallel" would pull in rayon.
+midly = { version = "0.5", default-features = false, features = ["std"] }
 
 # GUI
 iced = { version = "0.13", features = ["advanced", "canvas", "lazy", "tokio"] }
