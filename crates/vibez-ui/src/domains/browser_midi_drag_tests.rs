@@ -141,3 +141,16 @@ fn a_lane_of_the_other_kind_says_why_it_refuses_the_drag() {
     );
     assert_eq!(BrowserState::default().lane_refusal(TrackKind::Midi), None);
 }
+
+#[test]
+fn stepping_onto_a_midi_file_loads_no_waveform() {
+    let mut browser = BrowserState::default();
+    let source = MediaSourceRef::LocalFile {
+        path: PathBuf::from("/tmp/Rebeater P3.mid"),
+    };
+
+    let action = browser.update(BrowserMsg::SelectSampleBrowserEntry(source.clone()));
+
+    assert_eq!(browser.selected_source, Some(source));
+    assert_eq!(action.load_waveform, None);
+}
