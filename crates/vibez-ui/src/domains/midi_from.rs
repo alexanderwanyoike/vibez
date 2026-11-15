@@ -46,15 +46,11 @@ pub fn change(
     (next != current).then_some(next)
 }
 
-/// Applies [`change`]; false when there was nothing to apply.
-pub fn set(tracks: &mut ProjectTracksState, receiver: TrackId, source: Option<TrackId>) -> bool {
-    let Some(next) = change(tracks, receiver, source) else {
-        return false;
-    };
+/// Gives `receiver` the MIDI From a [`change`] returned.
+pub fn apply(tracks: &mut ProjectTracksState, receiver: TrackId, next: Option<MidiFrom>) {
     if let Some(track) = tracks.tracks.iter_mut().find(|track| track.id == receiver) {
         track.midi_from = next;
     }
-    true
 }
 
 /// Audio edges never enter a track's Source stage, so only a chain of MIDI
@@ -118,6 +114,15 @@ pub fn drop_impossible(tracks: &mut [ProjectTrack]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// [`change`] then [`apply`]; false when there was nothing to apply.
+    fn set(tracks: &mut ProjectTracksState, receiver: TrackId, source: Option<TrackId>) -> bool {
+        let Some(next) = change(tracks, receiver, source) else {
+            return false;
+        };
+        apply(tracks, receiver, next);
+        true
+    }
     use vibez_core::midi::TrackKind;
 
     fn project(tracks: Vec<ProjectTrack>) -> ProjectTracksState {
