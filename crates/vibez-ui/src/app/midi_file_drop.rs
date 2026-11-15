@@ -157,10 +157,13 @@ impl App {
             .iter()
             .map(|(track_id, new, _)| (*track_id, *new))
             .collect();
-        self.place_note_clips(landing, placed);
+        // New tracks reach the engine before their Clips, so the Clips and a
+        // playing Section's refresh find them there.
         for (track_id, new) in &tracks {
-            if let Some(track) = self.state.find_track(*track_id).cloned().filter(|_| *new) {
-                self.replay_track_to_engine(&track);
+            if *new {
+                if let Some(track) = self.state.find_track(*track_id).cloned() {
+                    self.replay_track_to_engine(&track);
+                }
             }
         }
         if new_tracks > 0 {
@@ -168,6 +171,7 @@ impl App {
                 .perform
                 .sync_project_tracks(&self.state.project_tracks.tracks);
         }
+        self.place_note_clips(landing, placed);
         self.state.arrangement.selected_track = tracks.first().map(|(track_id, _)| *track_id);
         let names: Vec<_> = tracks
             .iter()
@@ -198,28 +202,29 @@ impl App {
         track_id
     }
 
-    /// Puts each Clip where the landing says. Only Clips on existing Arrange
-    /// lanes are sent to the engine here; a new track's reach it when the
-    /// track replays.
+    /// Puts each Clip where the landing says, sending Arrange Clips to the
+    /// engine.
     fn place_note_clips(&mut self, landing: MidiLanding, placed: Vec<(TrackId, bool, UiNoteClip)>) {
         let Some(location) = landing.timeline() else {
             if let MidiLanding::Slot { row, .. } = landing {
+                let first = placed.first().map(|(_, _, clip)| clip.id);
                 for (track_id, _, clip) in placed {
                     let id = clip.id;
                     let mut timeline = ArrangementTimeline::default();
                     timeline.ensure(track_id).note_clips.push(clip);
                     self.add_launcher_clip(id, track_id, row, timeline);
                 }
+                if let Some(first) = first {
+                    self.state.perform.select_launcher_clip(first);
+                }
             }
             return;
         };
         self.with_timeline_editor_at(location, |editor, _, engine| {
             let timeline = Arc::make_mut(&mut editor.timeline);
-            for (track_id, new, clip) in placed {
+            for (track_id, _, clip) in placed {
                 let content = timeline.ensure(track_id);
-                if !new {
-                    engine.send(clip.add_command_beside(track_id, content.note_clips.len()));
-                }
+                engine.send(clip.add_command_beside(track_id, content.note_clips.len()));
                 content.note_clips.push(clip);
             }
             ArrangementAction {
