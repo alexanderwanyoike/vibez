@@ -135,13 +135,22 @@ mod tests {
     }
 
     #[test]
-    fn a_lane_that_takes_the_audio_marks_the_drop_itself() {
+    fn a_lane_that_takes_the_drag_marks_a_dashed_zone_as_a_device_does() {
         let target = BrowserDropTarget::ArrangementLane {
             track_id: TrackId::new(),
             beat: 1.0,
             compatible: true,
         };
-        assert_eq!(target.drop_zone(DragMedia::Audio), None);
+        for media in [DragMedia::Audio, DragMedia::Midi] {
+            assert_eq!(
+                target.drop_zone(media),
+                Some(DropZone {
+                    action: DropAction::Add,
+                    label: Some(target.status(media)),
+                }),
+                "{media:?}"
+            );
+        }
     }
 
     #[test]
