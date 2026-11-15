@@ -1,4 +1,4 @@
-//! Which tracks a MIDI track can take its played notes from, and the edit that sets it.
+//! The MIDI From choices a MIDI track can make among the project's tracks.
 
 use vibez_core::id::TrackId;
 use vibez_core::midi_from::MidiFrom;

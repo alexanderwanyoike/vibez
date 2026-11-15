@@ -15,7 +15,8 @@ pub fn swap_changed_controls(
     target: &ProjectTrack,
 ) {
     // Every field is named, as in `same_channel_layout`, so a new one has to
-    // be sent here or held equal there.
+    // be sent here, held equal there, or reach the engine some other way
+    // (MIDI From goes through the routing sync).
     let ProjectTrack {
         id: track_id,
         gain,
