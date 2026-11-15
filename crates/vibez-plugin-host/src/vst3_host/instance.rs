@@ -51,6 +51,7 @@ pub struct Vst3PluginInstance {
     configuration_failed: bool,
     recovery_attempts: u8,
     note_events: Vec<NoteEvent>,
+    note_output: vibez_core::note_output::NoteOutput,
     sample_rate: f64,
     latency_samples: u32,
     audio_context: Option<vibez_core::audio_context::DeviceAudioContext>,
@@ -396,6 +397,9 @@ impl Vst3PluginInstance {
             configuration_failed: false,
             recovery_attempts: 0,
             note_events: Vec::with_capacity(2048),
+            note_output: vibez_core::note_output::NoteOutput::with_capacity(
+                crate::output_note::NOTE_OUTPUT_CAPACITY,
+            ),
             sample_rate,
             latency_samples: 0,
             audio_context: None,
@@ -600,6 +604,7 @@ impl PluginInstance for Vst3PluginInstance {
         channels: usize,
         inputs: &[vibez_core::routing::ExternalInputBlock<'_>],
     ) {
+        self.note_output.clear();
         if !self.active || self.processor.is_null() {
             buffer.fill(0.0);
             return;
@@ -660,6 +665,8 @@ impl PluginInstance for Vst3PluginInstance {
         self.note_events
             .sort_unstable_by_key(|event| (event.frame_offset, event.is_on));
         let mut live_events = LiveEventList::new(&self.note_events);
+        let mut note_output =
+            super::note_output::Vst3NoteOutput::new(&mut self.note_output, frames as u32);
 
         let mut transport = self.audio_context.map(crate::process_context::vst3);
         let mut process_data = ProcessDataRaw {
@@ -677,7 +684,7 @@ impl PluginInstance for Vst3PluginInstance {
             },
             output_parameter_changes: param_changes_stub(),
             input_events: live_events.as_raw_mut(),
-            output_events: std::ptr::null_mut(),
+            output_events: note_output.as_raw_mut(),
             process_context: transport
                 .as_mut()
                 .map_or(std::ptr::null_mut(), |transport| {
@@ -758,6 +765,10 @@ impl PluginInstance for Vst3PluginInstance {
             velocity: 0,
             frame_offset,
         });
+    }
+
+    fn note_output(&self) -> Option<&vibez_core::note_output::NoteOutput> {
+        Some(&self.note_output)
     }
 
     fn reset(&mut self) {
