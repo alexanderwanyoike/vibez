@@ -32,6 +32,7 @@ use crate::widgets::track_header::{
 };
 
 use super::*;
+use crate::domains::browser::DragMedia;
 
 /// Expanded return or master automation scrolls inside this cap so the
 /// pinned footer can never squeeze the track list out of the window.
@@ -56,6 +57,8 @@ impl App {
             };
             let prompt_text = if zone.is_some() {
                 ""
+            } else if self.state.browser.drag_media() == Some(DragMedia::Midi) {
+                "Drop for a new MIDI track"
             } else if browser_drag_active {
                 "Drop for a new audio track"
             } else {
@@ -348,7 +351,8 @@ impl App {
             )
             .with_snap_targets(snap_targets.clone())
             .with_clip_drag(timeline.clip_drag.as_ref().map(|drag| drag.preview.clone()))
-            .with_drop_zone(self.state.browser.lane_drop_zone(track.id));
+            .with_drop_zone(self.state.browser.lane_drop_zone(track.id))
+            .with_drop_refusal(self.state.browser.lane_refusal(track.kind));
             if let Some(preview) = self.state.audio_recording.preview_for_track(track.id) {
                 let name = match preview.source {
                     crate::domains::audio_recording::AudioRecordingSource::HardwareInput => {
@@ -383,7 +387,7 @@ impl App {
                     });
             }
             let track_id = track.id;
-            let compatible = !track.kind.is_midi();
+            let compatible = self.state.browser.drag_lands_on(track.kind);
             let grid = self.state.view.arrange_grid;
             let track_geometry = geometry;
             let mut clip_canvas_area = mouse_area(
@@ -434,10 +438,10 @@ impl App {
             };
             // Until the drag reaches it, the lane only hints at what it is;
             // once there, its zone says it.
-            let hint = if zone.is_some() {
-                ""
-            } else {
-                "New audio track"
+            let hint = match (zone.is_some(), self.state.browser.drag_media()) {
+                (true, _) => "",
+                (false, Some(DragMedia::Midi)) => "New MIDI track",
+                (false, _) => "New audio track",
             };
             let header = container(text("+").size(14).color(th::accent()))
                 .width(Length::Fixed(

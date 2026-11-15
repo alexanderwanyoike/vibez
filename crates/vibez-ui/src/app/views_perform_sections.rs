@@ -385,6 +385,7 @@ impl App {
                 .with_snap_targets(snap_targets.clone())
                 .with_clip_drag(editor.clip_drag.as_ref().map(|drag| drag.preview.clone()))
                 .with_drop_zone(self.state.browser.lane_drop_zone(track.id))
+                .with_drop_refusal(self.state.browser.lane_refusal(track.kind))
                 .with_vertical_track_scrolling();
                 if let Some(preview) = recording_preview.as_ref().filter(|preview| {
                     preview.target_id == section_id && preview.track_id == track.id
@@ -417,7 +418,7 @@ impl App {
                 clip_canvas = clip_canvas.with_playback_playhead(playback_playhead_beats);
                 let geometry = viewport.geometry();
                 let grid = self.state.view.arrange_grid;
-                let compatible = !track.kind.is_midi();
+                let compatible = self.state.browser.drag_lands_on(track.kind);
                 let focused_clip_canvas: Element<'_, Message> = Element::from(
                     canvas(clip_canvas)
                         .width(Length::Fill)

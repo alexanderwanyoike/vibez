@@ -121,7 +121,7 @@ impl TrackClipCanvas {
         let geometry = self.geometry();
         let ppb = geometry.pixels_per_beat();
         let drop_hover = self.drop_hover(bounds, cursor);
-        let drop_compatible = !self.is_instrument;
+        let drop_compatible = self.sample_drop_refusal.is_none();
 
         // Background
         let bg_color = if drop_hover && drop_compatible {
@@ -203,7 +203,7 @@ impl TrackClipCanvas {
         let h = bounds.height;
         let geometry = self.geometry();
         let drop_hover = self.drop_hover(bounds, cursor);
-        let drop_compatible = !self.is_instrument;
+        let drop_compatible = self.sample_drop_refusal.is_none();
 
         self.draw_drag_origin(frame, h);
 

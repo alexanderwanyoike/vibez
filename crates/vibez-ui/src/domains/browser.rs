@@ -126,25 +126,35 @@ impl DragMedia {
     pub fn lands_on(self, kind: vibez_core::midi::TrackKind) -> bool {
         kind.is_midi() == (self == Self::Midi)
     }
+
+    fn noun(self) -> &'static str {
+        match self {
+            Self::Audio => "audio",
+            Self::Midi => "MIDI",
+        }
+    }
+
+    /// What a lane of the other kind says when it turns this media away.
+    fn refused_lane_status(self) -> String {
+        match self {
+            Self::Audio => "Audio can't go on a MIDI lane".into(),
+            Self::Midi => "MIDI can't go on an audio lane".into(),
+        }
+    }
 }
 
 impl crate::state::BrowserDropTarget {
     /// What a release of `media` here does, as the status bar says it.
     pub fn status(&self, media: DragMedia) -> String {
         use crate::state::BrowserDropTarget as Target;
-        let (kind, other_lane) = match media {
-            DragMedia::Audio => ("audio", "a MIDI"),
-            DragMedia::Midi => ("MIDI", "an audio"),
-        };
+        let kind = media.noun();
         match self {
             Target::ArrangementLane {
                 beat,
                 compatible: true,
                 ..
             } => format!("{} lane at beat {beat:.2}", capitalised(kind)),
-            Target::ArrangementLane { .. } => {
-                format!("{} can't go on {other_lane} lane", capitalised(kind))
-            }
+            Target::ArrangementLane { .. } => media.refused_lane_status(),
             Target::EmptyArrangement { beat } => format!("New {kind} track at beat {beat:.2}"),
             Target::Sampler { .. } => DevicePanelDrop::LoadIntoExisting.hover_status(),
             Target::DrumRackPad { pad_index, .. } => {
@@ -203,7 +213,8 @@ impl BrowserState {
 
     /// Why a lane of `kind` turns the drag in flight away, if it does.
     pub fn lane_refusal(&self, kind: vibez_core::midi::TrackKind) -> Option<String> {
-        todo!("{kind:?}")
+        let media = self.drag_media()?;
+        (!media.lands_on(kind)).then(|| media.refused_lane_status())
     }
 
     /// Instrument and device targets take samples, never MIDI files; a MIDI

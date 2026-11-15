@@ -109,6 +109,8 @@ pub struct TrackClipCanvas {
     /// True while a sample is being drag-dropped from the browser.
     /// Controls whether mouse-up on this lane emits `DropSampleOnArrangement`.
     pub sample_drop_active: bool,
+    /// Why this lane turns the Browser drag away, which a release reports.
+    pub sample_drop_refusal: Option<String>,
     /// Musical length shown by the placement preview. RAW derives this at the
     /// project tempo; WARP retains the source's confirmed musical length.
     pub sample_drop_duration_beats: Option<f64>,
@@ -275,6 +277,7 @@ impl TrackClipCanvas {
             selection_end_beats,
             time_selection_track,
             sample_drop_active,
+            sample_drop_refusal: None,
             sample_drop_duration_beats,
             sample_drop_detail,
             snap_targets: Arc::default(),
@@ -301,6 +304,11 @@ impl TrackClipCanvas {
 
     pub fn with_snap_targets(mut self, snap_targets: Arc<SnapTargets>) -> Self {
         self.snap_targets = snap_targets;
+        self
+    }
+
+    pub fn with_drop_refusal(mut self, refusal: Option<String>) -> Self {
+        self.sample_drop_refusal = refusal;
         self
     }
 
@@ -782,14 +790,11 @@ impl canvas::Program<Message> for TrackClipCanvas {
                 // inside this lane on release, emit a drop message.
                 if self.sample_drop_active {
                     if let Some(pos) = cursor.position_in(bounds) {
-                        if self.is_instrument {
+                        if let Some(refusal) = &self.sample_drop_refusal {
                             state.drag = None;
                             return (
                                 canvas::event::Status::Captured,
-                                Some(Message::Browser(BrowserMsg::CancelDrag(
-                                    "Invalid target: audio cannot be imported to a MIDI/instrument lane"
-                                        .into(),
-                                ))),
+                                Some(Message::Browser(BrowserMsg::CancelDrag(refusal.clone()))),
                             );
                         }
                         // Snap the drop position to the nearest beat so it
