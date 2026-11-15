@@ -250,7 +250,7 @@ pub(crate) fn scan_root_into(
             scan_root_into(root, &path, entries, folders, warnings)?;
             continue;
         }
-        if !file_type.is_file() || !is_supported_audio_file(&path) {
+        if !file_type.is_file() || !is_browsable_file(&path) {
             continue;
         }
         let relative_path = path
@@ -277,10 +277,14 @@ pub(crate) fn scan_root_into(
             name,
             root_path: root.clone(),
             relative_path,
-            format: vibez_core::audio_format::audio_format_for_path(&item.path())
-                .map(|format| format.label)
-                .unwrap_or("AUDIO")
-                .to_string(),
+            format: if vibez_core::midi_file::is_midi_file_path(&item.path()) {
+                "MIDI"
+            } else {
+                vibez_core::audio_format::audio_format_for_path(&item.path())
+                    .map(|format| format.label)
+                    .unwrap_or("AUDIO")
+            }
+            .to_string(),
             duration_seconds: None,
             channels: None,
             sample_rate: None,
@@ -323,8 +327,11 @@ pub(crate) fn path_contains_hidden_component(path: &std::path::Path) -> bool {
     })
 }
 
-pub(crate) fn is_supported_audio_file(path: &std::path::Path) -> bool {
+/// Audio the Browser auditions and imports, and MIDI files it drags onto
+/// MIDI tracks.
+pub(crate) fn is_browsable_file(path: &std::path::Path) -> bool {
     vibez_core::audio_format::is_supported_audio_path(path)
+        || vibez_core::midi_file::is_midi_file_path(path)
 }
 
 #[cfg(test)]
