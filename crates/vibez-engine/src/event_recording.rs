@@ -42,6 +42,32 @@ impl From<SourceRecordingPosition> for RepeatNoticePosition {
 }
 
 impl EngineEvent {
+    pub(crate) fn input_pair(
+        track_id: TrackId,
+        note: vibez_core::note_output::BlockNote,
+        source: SourceRecordingPosition,
+        notice: RepeatNoticePosition,
+    ) -> (Self, Self) {
+        (
+            Self::SourceNoteInput(SourceNoteInputEvent {
+                track_id,
+                pitch: note.pitch,
+                velocity: note.velocity,
+                on: note.on,
+                position: source,
+            }),
+            Self::InstrumentNoteInput(InstrumentNoteInputEvent {
+                track_id,
+                pitch: note.pitch,
+                velocity: note.velocity,
+                on: note.on,
+                effective_at_samples: notice.effective_at_samples,
+                section_id: notice.section_id,
+                section_position_samples: notice.section_position_samples,
+            }),
+        )
+    }
+
     pub(crate) fn repeated_pair(
         track_id: TrackId,
         trigger: NoteRepeatTrigger,

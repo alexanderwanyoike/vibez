@@ -298,6 +298,13 @@ impl PreparedRouting {
                         };
                         PreparedChannel {
                             id: channel.id,
+                            note_source: channel.midi_from.and_then(|source| {
+                                channels.iter().position(|candidate| {
+                                    candidate.id == source
+                                        && !candidate.is_bus
+                                        && !candidate.id.is_master()
+                                })
+                            }),
                             direct_latency: compensation.direct_path_latency(&graph, channel.id),
                             source: !channel.is_bus && !channel.id.is_master(),
                             binding,
@@ -481,6 +488,8 @@ pub enum ChannelIndex {
 pub struct PreparedChannel {
     pub id: vibez_core::id::TrackId,
     pub binding: ChannelIndex,
+    /// The prepared channel whose played notes this one's MIDI From takes.
+    pub(crate) note_source: Option<usize>,
     pub direct_latency: u32,
     pub source: bool,
     pub(crate) audible_return: bool,

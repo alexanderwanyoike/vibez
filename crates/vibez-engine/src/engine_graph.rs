@@ -214,9 +214,11 @@ impl AudioEngine {
             }
             match node.stage {
                 NodeStage::Source => {
+                    self.forget_played_notes(channel_index);
                     if self.is_device_recovering(node.channel, None) {
                         continue;
                     }
+                    self.admit_routed_notes(channel_index);
                     let prepared = self.routing.as_mut();
                     let Some(track) =
                         binding.get_mut(&mut self.tracks, &mut self.buses, &mut self.master)
@@ -275,6 +277,25 @@ impl AudioEngine {
                         performing,
                         continuous_sample,
                     };
+                    for &note in track.routed_notes.notes() {
+                        let sample = block.repeat_pos + u64::from(note.frame);
+                        let (source, event) = EngineEvent::input_pair(
+                            id,
+                            note,
+                            clock.source(sample, sample),
+                            clock.notice(sample, sample),
+                        );
+                        presentation_overflow = presentation_overflow
+                            || !presentation_queue::emit_pair(
+                                source,
+                                event,
+                                events,
+                                scheduled,
+                                continuous_sample,
+                                clock.due(sample),
+                                self.output_position,
+                            );
+                    }
                     let mut repeated = |trigger: crate::note_repeat::NoteRepeatTrigger| {
                         if presentation_overflow {
                             return;
@@ -335,6 +356,7 @@ impl AudioEngine {
                         }
                     }
                     std::mem::swap(&mut track.mix_buffer, &mut prepared.nodes[index].samples);
+                    track.keep_played_notes();
                     let activity = track.take_note_activity();
                     if presentation_overflow {
                         self.fail_presentation();

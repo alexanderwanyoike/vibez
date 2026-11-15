@@ -1,6 +1,7 @@
 //! The notes MIDI From routes into a track, admitted so each note-on gets exactly one note-off.
 
 use vibez_core::note_output::{BlockNote, NoteOutput};
+use vibez_instruments::Instrument;
 
 /// A release adds a note-off per held pitch, and a retrigger adds one before
 /// its note-on, so the block never outgrows this.
@@ -75,6 +76,30 @@ impl RoutedNotes {
     /// The notes to play this block, in frame order.
     pub(crate) fn notes(&self) -> &[BlockNote] {
         &self.block
+    }
+
+    /// Hands a batch instrument every note with its frame offset.
+    pub(crate) fn schedule(&self, instrument: &mut dyn Instrument) {
+        for note in &self.block {
+            if note.on {
+                instrument.note_on_at(note.pitch, note.velocity, note.frame);
+            } else {
+                instrument.note_off_at(note.pitch, note.frame);
+            }
+        }
+    }
+
+    /// Plays the notes due at `frame` on an instrument rendered frame by frame;
+    /// `cursor` starts at zero each block.
+    pub(crate) fn play_due(&self, frame: u32, cursor: &mut usize, instrument: &mut dyn Instrument) {
+        while let Some(note) = self.block.get(*cursor).filter(|note| note.frame == frame) {
+            if note.on {
+                instrument.note_on(note.pitch, note.velocity);
+            } else {
+                instrument.note_off(note.pitch);
+            }
+            *cursor += 1;
+        }
     }
 }
 

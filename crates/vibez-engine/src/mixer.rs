@@ -188,6 +188,9 @@ pub struct EngineTrack {
     /// Cosmetic feedback is deliberately lossy when the UI event ring is full.
     pending_note_activity: u128,
     pub(crate) suppress_source_notes: bool,
+    /// What this track's instrument played last block, for its MIDI From receivers.
+    pub(crate) played_notes: vibez_core::note_output::NoteOutput,
+    pub(crate) routed_notes: routed_notes::RoutedNotes,
 }
 
 impl EngineTrack {
@@ -287,6 +290,7 @@ impl EngineTrack {
 
         // Send all events with timing, then render the whole buffer at once
         let instrument = self.instrument.as_mut().unwrap();
+        self.routed_notes.schedule(instrument.as_mut());
 
         for &(frame, pitch) in &self.timed_note_offs {
             instrument.note_off_at(pitch, frame);
@@ -356,6 +360,7 @@ impl EngineTrack {
         self.collect_source_note_events(pos, frames, spb, swing);
         let mut note_on_index = 0;
         let mut note_off_index = 0;
+        let mut routed = 0;
 
         for frame in 0..frames {
             let (repeat_triggers, repeat_count) =
@@ -390,6 +395,8 @@ impl EngineTrack {
                 on_repeat(trigger);
                 rendered = true;
             }
+            self.routed_notes
+                .play_due(frame as u32, &mut routed, instrument.as_mut());
 
             let start = frame * channels;
             let end = start + channels;
@@ -434,6 +441,19 @@ impl EngineTrack {
             &mut self.timed_note_ons,
             &mut self.timed_note_offs,
         );
+    }
+
+    pub(crate) fn keep_played_notes(&mut self) {
+        self.played_notes.clear();
+        if let Some(output) = self
+            .instrument
+            .as_ref()
+            .and_then(|instrument| instrument.note_output())
+        {
+            for &note in output.notes() {
+                self.played_notes.push(note);
+            }
+        }
     }
 
     pub(crate) fn take_note_activity(&mut self) -> u128 {

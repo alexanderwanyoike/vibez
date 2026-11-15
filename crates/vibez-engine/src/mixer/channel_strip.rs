@@ -48,6 +48,8 @@ impl EngineTrack {
             note_owners: [None; 128],
             pending_note_activity: 0,
             suppress_source_notes: false,
+            played_notes: vibez_core::note_output::NoteOutput::default(),
+            routed_notes: super::routed_notes::RoutedNotes::default(),
         }
     }
 
