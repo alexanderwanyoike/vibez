@@ -309,3 +309,20 @@ async fn choosing_a_midi_file_in_the_browser_selects_it_without_auditioning() {
         );
     }
 }
+
+#[tokio::test]
+async fn escape_cancels_a_multi_track_file_waiting_for_its_layout() {
+    let directory = tempfile::tempdir().unwrap();
+    let (mut app, track_id) = app_with_track(TrackKind::Midi);
+    drop_on_lane(&mut app, track_id, 0.0, split_phrase(directory.path())).await;
+
+    super::test_support::deliver_key(
+        &mut app,
+        super::test_support::escape_key(),
+        iced::event::Status::Ignored,
+    );
+
+    assert!(app.state.view.midi_file_layout_choice.is_none());
+    assert!(note_clips(&app, track_id).is_empty());
+    assert!(app.state.project.history.undo.is_empty());
+}
