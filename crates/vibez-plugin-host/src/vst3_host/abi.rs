@@ -35,8 +35,12 @@ pub(super) unsafe extern "system" fn static_com_query_interface(
     _iid: *const u8,
     obj: *mut *mut std::ffi::c_void,
 ) -> i32 {
-    // Static object: answer everything with ourselves; refcounting is
-    // a no-op so over-answering is harmless.
+    // Host-owned objects outlive every call the plugin makes on them, so
+    // refcounting is a no-op and answering every interface with ourselves is
+    // harmless.
+    if obj.is_null() {
+        return vst3::Steinberg::kInvalidArgument;
+    }
     unsafe { *obj = this };
     0
 }
