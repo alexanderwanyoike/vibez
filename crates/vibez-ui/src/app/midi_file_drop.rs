@@ -83,13 +83,15 @@ impl App {
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_default();
         self.state.status_text = format!("Reading {name}...");
-        Task::perform(read_midi_file_async(path), move |result| {
+        let generation = self.browser_import_request.begin();
+        let task = Task::perform(read_midi_file_async(path), move |result| {
             Message::MidiFileRead {
                 target: target.clone(),
-                generation: 0,
+                generation,
                 result,
             }
-        })
+        });
+        self.browser_import_request.attach(task)
     }
 
     /// A MIDI file in the Browser has nothing to audition, so choosing it
@@ -105,8 +107,12 @@ impl App {
     pub(super) fn on_midi_file_read(
         &mut self,
         target: BrowserImportTarget,
+        generation: u64,
         result: Result<MidiFileImport, String>,
     ) {
+        if !self.browser_import_request.finish(generation) {
+            return;
+        }
         match result {
             Err(error) => self.state.status_text = error,
             Ok(import) if import.offers_layouts() => {
@@ -166,11 +172,15 @@ impl App {
                 section_id,
                 track_id,
                 position_samples,
-            } if midi_track(track_id) => Ok(MidiLanding::Section {
-                section_id,
-                onto: Some(track_id),
-                beat: beat(position_samples),
-            }),
+            } if midi_track(track_id)
+                && self.state.perform.sections.by_id(section_id).is_some() =>
+            {
+                Ok(MidiLanding::Section {
+                    section_id,
+                    onto: Some(track_id),
+                    beat: beat(position_samples),
+                })
+            }
             BrowserImportTarget::LauncherClipAt { track_id, row } if midi_track(track_id) => {
                 if self.state.perform.layout != PerformLayout::Clips
                     || self.state.perform.clips.at(track_id, row).is_some()
