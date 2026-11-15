@@ -348,6 +348,10 @@ unsafe extern "C" fn process(
     check_audio_role(plugin);
     if state(plugin).timing.flag(24) {
         state(plugin).timing.clear_flag(24);
+        if state(plugin).instrument {
+            // A plugin can output notes and still fail the call.
+            echo_notes_an_octave_up(&*(*data).in_events, &*(*data).out_events);
+        }
         return CLAP_PROCESS_ERROR;
     }
     let in_call = &*std::ptr::addr_of!((*((*plugin).plugin_data as *mut State)).in_call);

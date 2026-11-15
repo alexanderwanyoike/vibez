@@ -60,3 +60,26 @@ fn a_hosted_instrument_reports_its_plugins_notes_after_each_render() {
         instrument.stop_processing();
     }
 }
+
+#[test]
+fn a_failed_process_call_reports_no_notes() {
+    let fixture = support::Fixture::new();
+    for format in ["clap", "vst3"] {
+        let mut plugin = fixture.load_instrument(format, 64);
+        let fail_next_process: Vec<u8> = [0u32, 0, 1 << 24]
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect();
+        assert!(plugin.load_state(&fail_next_process), "{format}");
+        plugin.note_on_at(60, 100, 5);
+        plugin.process_audio(&mut [0.0; 128], 2);
+
+        assert_eq!(
+            plugin.note_output().map(NoteOutput::notes),
+            Some(&[][..]),
+            "{format}"
+        );
+        plugin.stop_processing();
+        plugin.deactivate();
+    }
+}
