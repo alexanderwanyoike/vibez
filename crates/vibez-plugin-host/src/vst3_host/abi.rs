@@ -30,7 +30,7 @@ pub(super) struct ParamChangesVtbl {
     ) -> *mut std::ffi::c_void,
 }
 
-pub(super) unsafe extern "system" fn pc_query_interface(
+pub(super) unsafe extern "system" fn static_com_query_interface(
     this: *mut std::ffi::c_void,
     _iid: *const u8,
     obj: *mut *mut std::ffi::c_void,
@@ -40,10 +40,10 @@ pub(super) unsafe extern "system" fn pc_query_interface(
     unsafe { *obj = this };
     0
 }
-pub(super) unsafe extern "system" fn pc_add_ref(_this: *mut std::ffi::c_void) -> u32 {
+pub(super) unsafe extern "system" fn static_com_add_ref(_this: *mut std::ffi::c_void) -> u32 {
     1
 }
-pub(super) unsafe extern "system" fn pc_release(_this: *mut std::ffi::c_void) -> u32 {
+pub(super) unsafe extern "system" fn static_com_release(_this: *mut std::ffi::c_void) -> u32 {
     1
 }
 unsafe extern "system" fn pc_count(_this: *mut std::ffi::c_void) -> i32 {
@@ -114,9 +114,9 @@ unsafe extern "system" fn pq_add_point(
 }
 
 pub(super) static PARAM_QUEUE_VTBL: ParamQueueVtbl = ParamQueueVtbl {
-    query_interface: pc_query_interface,
-    add_ref: pc_add_ref,
-    release: pc_release,
+    query_interface: static_com_query_interface,
+    add_ref: static_com_add_ref,
+    release: static_com_release,
     get_parameter_id: pq_parameter_id,
     get_point_count: pq_point_count,
     get_point: pq_get_point,
@@ -133,9 +133,9 @@ pub(super) static PARAM_QUEUE_STUB: ParamQueueStub = ParamQueueStub {
 };
 
 pub(super) static PARAM_CHANGES_VTBL: ParamChangesVtbl = ParamChangesVtbl {
-    query_interface: pc_query_interface,
-    add_ref: pc_add_ref,
-    release: pc_release,
+    query_interface: static_com_query_interface,
+    add_ref: static_com_add_ref,
+    release: static_com_release,
     get_parameter_count: pc_count,
     get_parameter_data: pc_get_data,
     add_parameter_data: pc_add_data,
@@ -192,9 +192,9 @@ unsafe extern "system" fn lpq_get_point(
 }
 
 pub(super) static LIVE_PARAM_QUEUE_VTBL: ParamQueueVtbl = ParamQueueVtbl {
-    query_interface: pc_query_interface,
-    add_ref: pc_add_ref,
-    release: pc_release,
+    query_interface: static_com_query_interface,
+    add_ref: static_com_add_ref,
+    release: static_com_release,
     get_parameter_id: lpq_parameter_id,
     get_point_count: lpq_point_count,
     get_point: lpq_get_point,
@@ -223,9 +223,9 @@ unsafe extern "system" fn lpc_get_data(
 }
 
 pub(super) static LIVE_PARAM_CHANGES_VTBL: ParamChangesVtbl = ParamChangesVtbl {
-    query_interface: pc_query_interface,
-    add_ref: pc_add_ref,
-    release: pc_release,
+    query_interface: static_com_query_interface,
+    add_ref: static_com_add_ref,
+    release: static_com_release,
     get_parameter_count: lpc_count,
     get_parameter_data: lpc_get_data,
     add_parameter_data: pc_add_data,
@@ -406,9 +406,9 @@ unsafe extern "system" fn event_list_add(
 }
 
 pub(super) static LIVE_EVENT_LIST_VTBL: EventListVtbl = EventListVtbl {
-    query_interface: pc_query_interface,
-    add_ref: pc_add_ref,
-    release: pc_release,
+    query_interface: static_com_query_interface,
+    add_ref: static_com_add_ref,
+    release: static_com_release,
     get_event_count: event_list_count,
     get_event: event_list_get,
     add_event: event_list_add,

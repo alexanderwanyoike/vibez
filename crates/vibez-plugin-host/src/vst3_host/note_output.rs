@@ -4,7 +4,9 @@ use vibez_core::note_output::NoteOutput;
 use vst3::Steinberg::Vst::Event as VstEvent;
 use vst3::Steinberg::Vst::Event_::EventTypes_::{kNoteOffEvent, kNoteOnEvent};
 
-use super::abi::{pc_add_ref, pc_query_interface, pc_release, vst_event, EventListVtbl};
+use super::abi::{
+    static_com_add_ref, static_com_query_interface, static_com_release, vst_event, EventListVtbl,
+};
 use crate::output_note;
 
 /// Lives on the stack for one `process` call; the plugin must not keep it.
@@ -79,9 +81,9 @@ unsafe extern "system" fn add(this: *mut std::ffi::c_void, event: *mut VstEvent)
 }
 
 static NOTE_OUTPUT_VTBL: EventListVtbl = EventListVtbl {
-    query_interface: pc_query_interface,
-    add_ref: pc_add_ref,
-    release: pc_release,
+    query_interface: static_com_query_interface,
+    add_ref: static_com_add_ref,
+    release: static_com_release,
     get_event_count: count,
     get_event: get,
     add_event: add,
