@@ -91,6 +91,26 @@ pub struct TrackHeaderRecordingView<'a> {
 
 type AudioInputChoice = crate::domains::labelled_choice::LabelledChoice<AudioInputRoute>;
 
+/// A source picker widens when it names a track, so the track name fits.
+const INPUT_PICKER_WIDTH: f32 = 78.0;
+const ROUTED_INPUT_PICKER_WIDTH: f32 = 119.0;
+
+fn input_picker_width(routed: bool) -> f32 {
+    if routed {
+        ROUTED_INPUT_PICKER_WIDTH
+    } else {
+        INPUT_PICKER_WIDTH
+    }
+}
+
+/// The controls row of a header with input pickers beside Mute and Solo.
+fn input_controls_row<'a>(controls: Vec<Element<'a, Message>>) -> Element<'a, Message> {
+    iced::widget::Row::with_children(controls)
+        .spacing(3)
+        .align_y(iced::Alignment::Center)
+        .into()
+}
+
 fn compact_input_pick_list<'a, T>(
     options: impl Borrow<[T]> + 'a,
     selected: T,
@@ -344,14 +364,16 @@ pub fn view_track_header<'a>(
             routes,
             selected_route,
             move |choice| Message::SetAudioTrackInputRoute(track_id, choice.value),
-            if is_resample { 119.0 } else { 78.0 },
+            input_picker_width(is_resample),
             is_resample,
         );
         if is_resample {
-            row![mute_btn, solo_btn, arm_btn, route]
-                .spacing(3)
-                .align_y(iced::Alignment::Center)
-                .into()
+            input_controls_row(vec![
+                mute_btn.into(),
+                solo_btn.into(),
+                arm_btn.into(),
+                route,
+            ])
         } else {
             let track_id = track.id;
             let monitor = compact_input_pick_list(
@@ -361,10 +383,13 @@ pub fn view_track_header<'a>(
                 42.0,
                 track.input_monitoring != InputMonitoring::Off,
             );
-            row![mute_btn, solo_btn, arm_btn, route, monitor]
-                .spacing(3)
-                .align_y(iced::Alignment::Center)
-                .into()
+            input_controls_row(vec![
+                mute_btn.into(),
+                solo_btn.into(),
+                arm_btn.into(),
+                route,
+                monitor,
+            ])
         }
     } else if shows_midi_from(track) {
         let (entries, chosen) = crate::domains::midi_from::choices(source_tracks, track);
@@ -374,13 +399,10 @@ pub fn view_track_header<'a>(
             entries,
             chosen,
             move |choice| Message::SetMidiFrom(track_id, choice.value),
-            if routed { 119.0 } else { 78.0 },
+            input_picker_width(routed),
             routed,
         );
-        row![mute_btn, solo_btn, picker]
-            .spacing(3)
-            .align_y(iced::Alignment::Center)
-            .into()
+        input_controls_row(vec![mute_btn.into(), solo_btn.into(), picker])
     } else {
         row![mute_btn, solo_btn].spacing(4).into()
     };
