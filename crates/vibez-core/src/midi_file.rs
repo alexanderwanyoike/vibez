@@ -5,7 +5,7 @@ use std::path::Path;
 use crate::midi::MidiNote;
 
 /// Extensions a file must carry to be offered as a MIDI file.
-pub const MIDI_FILE_EXTENSIONS: &[&str] = &["mid", "midi"];
+const MIDI_FILE_EXTENSIONS: &[&str] = &["mid", "midi"];
 
 /// The General MIDI percussion channel (channel 10), zero-based.
 const DRUM_CHANNEL: u8 = 9;
@@ -15,7 +15,7 @@ const DRUM_CHANNEL: u8 = 9;
 pub struct MidiFile {
     /// The tracks that play notes, in file order.
     pub tracks: Vec<MidiFileTrack>,
-    /// Where the file ends: its last End of Track, never before a note ends.
+    /// The file's last End of Track, or its last note's end if that is later.
     pub length_beats: f64,
 }
 
@@ -34,6 +34,8 @@ pub enum MidiFileError {
     Malformed(String),
     /// Timed in SMPTE frames rather than beats.
     TimecodeTiming,
+    /// A type 2 file, whose tracks are independent patterns.
+    SequentialPatterns,
     NoNotes,
 }
 
@@ -42,6 +44,9 @@ impl std::fmt::Display for MidiFileError {
         match self {
             Self::Malformed(reason) => write!(f, "not a readable MIDI file ({reason})"),
             Self::TimecodeTiming => f.write_str("SMPTE-timed MIDI files are not supported"),
+            Self::SequentialPatterns => {
+                f.write_str("type 2 MIDI files of separate patterns are not supported")
+            }
             Self::NoNotes => f.write_str("the MIDI file has no notes"),
         }
     }
@@ -67,11 +72,14 @@ impl MidiFile {
             midly::Timing::Metrical(ticks) => f64::from(ticks.as_int().max(1)),
             midly::Timing::Timecode(..) => return Err(MidiFileError::TimecodeTiming),
         };
+        if smf.header.format == midly::Format::Sequential {
+            return Err(MidiFileError::SequentialPatterns);
+        }
         let beats = |tick: u64| tick as f64 / ticks_per_beat;
         let mut end_tick = 0;
         let mut tracks = Vec::new();
         for events in &smf.tracks {
-            let track = TrackReader::read(events);
+            let track = TickTrack::read(events);
             end_tick = end_tick.max(track.end_tick);
             if track.notes.is_empty() {
                 continue;
@@ -87,7 +95,7 @@ impl MidiFile {
                     duration_beats: beats((note.end - note.start).max(1)),
                 })
                 .collect();
-            sort_notes(&mut notes);
+            MidiNote::sort(&mut notes);
             tracks.push(MidiFileTrack {
                 name: track.name,
                 on_drum_channel: track.notes.iter().all(|note| note.channel == DRUM_CHANNEL),
@@ -115,22 +123,14 @@ impl MidiFile {
             .iter()
             .flat_map(|track| track.notes.iter().copied())
             .collect();
-        sort_notes(&mut notes);
+        MidiNote::sort(&mut notes);
         notes
     }
 
-    /// Every note sits on the General MIDI percussion channel.
+    /// Every track is on the drum channel.
     pub fn on_drum_channel(&self) -> bool {
         self.tracks.iter().all(|track| track.on_drum_channel)
     }
-}
-
-fn sort_notes(notes: &mut [MidiNote]) {
-    notes.sort_by(|a, b| {
-        a.start_beat
-            .total_cmp(&b.start_beat)
-            .then(a.pitch.cmp(&b.pitch))
-    });
 }
 
 struct TickNote {
@@ -141,14 +141,15 @@ struct TickNote {
     end: u64,
 }
 
-/// One track's notes in ticks, paired from its note-on and note-off events.
-struct TrackReader {
+/// One track's name and notes in ticks, paired from its note-on and note-off
+/// events, and the tick it ends on.
+struct TickTrack {
     name: Option<String>,
     notes: Vec<TickNote>,
     end_tick: u64,
 }
 
-impl TrackReader {
+impl TickTrack {
     fn read(events: &[midly::TrackEvent<'_>]) -> Self {
         let mut reader = Self {
             name: None,
@@ -188,6 +189,9 @@ impl TrackReader {
                         _ => {}
                     }
                 }
+                // midly reads on to the end of the chunk; whatever follows
+                // End of Track is not part of the track.
+                midly::TrackEventKind::Meta(midly::MetaMessage::EndOfTrack) => break,
                 midly::TrackEventKind::Meta(midly::MetaMessage::TrackName(name)) => {
                     reader.name = Some(String::from_utf8_lossy(name).trim().to_string())
                         .filter(|name| !name.is_empty());
@@ -195,7 +199,6 @@ impl TrackReader {
                 _ => {}
             }
         }
-        // End of Track is the last event, so the final tick is where it sits.
         reader.end_tick = tick;
         for index in sounding {
             reader.notes[index].end = tick;
