@@ -9,6 +9,10 @@ use vibez_core::perform::GrooveGrid;
 
 use crate::state::UiNoteClip;
 
+/// Where a MIDI file can go, said when it is dropped anywhere else.
+pub const MIDI_FILE_TARGETS: &str =
+    "MIDI files go on a MIDI track, empty Arrange or a MIDI track's Clip slot";
+
 /// How a file with several playing tracks lands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MidiFileLayout {

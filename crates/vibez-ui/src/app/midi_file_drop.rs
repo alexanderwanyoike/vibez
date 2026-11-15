@@ -11,13 +11,10 @@ use vibez_project::PerformLayout;
 
 use super::App;
 use crate::domains::midi_file_import::{
-    MidiClipTrack, MidiFileImport, MidiFileLayout, MidiFileLayoutChoice,
+    MidiClipTrack, MidiFileImport, MidiFileLayout, MidiFileLayoutChoice, MIDI_FILE_TARGETS,
 };
 use crate::message::{BrowserImportTarget, Message};
 use crate::state::UiNoteClip;
-
-pub(super) const MIDI_FILE_TARGETS: &str =
-    "MIDI files go on a MIDI track, empty Arrange or a MIDI track's Clip slot";
 
 /// Where the Clips of one MIDI file drop go.
 #[derive(Debug, Clone, Copy)]
