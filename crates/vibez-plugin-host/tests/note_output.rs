@@ -36,3 +36,8 @@ fn reports_output_notes_with_their_frames(format: &str) {
 fn a_clap_plugin_reports_the_notes_it_outputs_with_their_frames() {
     reports_output_notes_with_their_frames("clap");
 }
+
+#[test]
+fn a_vst3_plugin_reports_the_notes_it_outputs_with_their_frames() {
+    reports_output_notes_with_their_frames("vst3");
+}

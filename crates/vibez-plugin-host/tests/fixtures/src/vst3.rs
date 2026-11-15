@@ -390,6 +390,9 @@ impl IAudioProcessorTrait for Probe {
             let events = ComRef::from_raw(data.inputEvents);
             let mut event_index = 0;
             let output = &*data.outputs;
+            if let (Some(input), Some(output)) = (&events, ComRef::from_raw(data.outputEvents)) {
+                echo_notes_an_octave_up(input, output);
+            }
             for frame in 0..data.numSamples {
                 if let Some(events) = &events {
                     while event_index < events.getEventCount() {
@@ -637,5 +640,21 @@ impl Drop for Probe {
         if self.processing.get() || self.main_thread != crate::thread_id() {
             crate::lifecycle_error();
         }
+    }
+}
+
+/// Plays like a note-generating plugin, so hosts can test note output.
+unsafe fn echo_notes_an_octave_up(input: &ComRef<'_, IEventList>, output: ComRef<'_, IEventList>) {
+    for index in 0..input.getEventCount() {
+        let mut event: Event = std::mem::zeroed();
+        if input.getEvent(index, &mut event) != kResultOk {
+            continue;
+        }
+        match event.r#type as u32 {
+            Event_::EventTypes_::kNoteOnEvent => event.__field0.noteOn.pitch += 12,
+            Event_::EventTypes_::kNoteOffEvent => event.__field0.noteOff.pitch += 12,
+            _ => continue,
+        }
+        output.addEvent(&mut event);
     }
 }
