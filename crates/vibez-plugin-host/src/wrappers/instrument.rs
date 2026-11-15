@@ -119,6 +119,10 @@ impl Instrument for PluginInstrumentWrapper {
         }
     }
 
+    fn note_output(&self) -> Option<&vibez_core::note_output::NoteOutput> {
+        self.inner.note_output()
+    }
+
     fn reset(&mut self) {
         self.inner.reset();
     }

@@ -4,6 +4,7 @@ pub(crate) mod host_context;
 pub mod host_impl;
 pub mod instance;
 mod latency;
+mod note_output;
 pub mod runloop;
 pub mod scanner;
 

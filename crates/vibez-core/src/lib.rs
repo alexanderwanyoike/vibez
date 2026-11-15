@@ -11,6 +11,7 @@ pub mod id;
 pub mod level;
 pub mod midi;
 pub mod midi_file;
+pub mod note_output;
 pub mod onset;
 pub mod perform;
 pub mod routing;

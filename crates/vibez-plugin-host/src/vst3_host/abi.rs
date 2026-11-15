@@ -1,6 +1,7 @@
 //! VST3 process layouts, event adapters and parameter ABI objects.
 
 use vibez_core::effect::ParamDescriptor;
+use vibez_core::note_output::BlockNote;
 use vst3::Steinberg::Vst::{
     Event as VstEvent, Event__type0 as VstEventData, NoteOffEvent, NoteOnEvent,
 };
@@ -29,20 +30,24 @@ pub(super) struct ParamChangesVtbl {
     ) -> *mut std::ffi::c_void,
 }
 
-unsafe extern "system" fn pc_query_interface(
+pub(super) unsafe extern "system" fn static_com_query_interface(
     this: *mut std::ffi::c_void,
     _iid: *const u8,
     obj: *mut *mut std::ffi::c_void,
 ) -> i32 {
-    // Static object: answer everything with ourselves; refcounting is
-    // a no-op so over-answering is harmless.
+    // Host-owned objects outlive every call the plugin makes on them, so
+    // refcounting is a no-op and answering every interface with ourselves is
+    // harmless.
+    if obj.is_null() {
+        return vst3::Steinberg::kInvalidArgument;
+    }
     unsafe { *obj = this };
     0
 }
-unsafe extern "system" fn pc_add_ref(_this: *mut std::ffi::c_void) -> u32 {
+pub(super) unsafe extern "system" fn static_com_add_ref(_this: *mut std::ffi::c_void) -> u32 {
     1
 }
-unsafe extern "system" fn pc_release(_this: *mut std::ffi::c_void) -> u32 {
+pub(super) unsafe extern "system" fn static_com_release(_this: *mut std::ffi::c_void) -> u32 {
     1
 }
 unsafe extern "system" fn pc_count(_this: *mut std::ffi::c_void) -> i32 {
@@ -113,9 +118,9 @@ unsafe extern "system" fn pq_add_point(
 }
 
 pub(super) static PARAM_QUEUE_VTBL: ParamQueueVtbl = ParamQueueVtbl {
-    query_interface: pc_query_interface,
-    add_ref: pc_add_ref,
-    release: pc_release,
+    query_interface: static_com_query_interface,
+    add_ref: static_com_add_ref,
+    release: static_com_release,
     get_parameter_id: pq_parameter_id,
     get_point_count: pq_point_count,
     get_point: pq_get_point,
@@ -132,9 +137,9 @@ pub(super) static PARAM_QUEUE_STUB: ParamQueueStub = ParamQueueStub {
 };
 
 pub(super) static PARAM_CHANGES_VTBL: ParamChangesVtbl = ParamChangesVtbl {
-    query_interface: pc_query_interface,
-    add_ref: pc_add_ref,
-    release: pc_release,
+    query_interface: static_com_query_interface,
+    add_ref: static_com_add_ref,
+    release: static_com_release,
     get_parameter_count: pc_count,
     get_parameter_data: pc_get_data,
     add_parameter_data: pc_add_data,
@@ -191,9 +196,9 @@ unsafe extern "system" fn lpq_get_point(
 }
 
 pub(super) static LIVE_PARAM_QUEUE_VTBL: ParamQueueVtbl = ParamQueueVtbl {
-    query_interface: pc_query_interface,
-    add_ref: pc_add_ref,
-    release: pc_release,
+    query_interface: static_com_query_interface,
+    add_ref: static_com_add_ref,
+    release: static_com_release,
     get_parameter_id: lpq_parameter_id,
     get_point_count: lpq_point_count,
     get_point: lpq_get_point,
@@ -222,9 +227,9 @@ unsafe extern "system" fn lpc_get_data(
 }
 
 pub(super) static LIVE_PARAM_CHANGES_VTBL: ParamChangesVtbl = ParamChangesVtbl {
-    query_interface: pc_query_interface,
-    add_ref: pc_add_ref,
-    release: pc_release,
+    query_interface: static_com_query_interface,
+    add_ref: static_com_add_ref,
+    release: static_com_release,
     get_parameter_count: lpc_count,
     get_parameter_data: lpc_get_data,
     add_parameter_data: pc_add_data,
@@ -291,14 +296,6 @@ pub(super) fn char16_to_string(chars: &[u16]) -> String {
     String::from_utf16_lossy(&units)
 }
 
-#[allow(dead_code)]
-pub(super) struct NoteEvent {
-    pub(super) is_on: bool,
-    pub(super) pitch: u8,
-    pub(super) velocity: u8,
-    pub(super) frame_offset: u32,
-}
-
 // ── Live IEventList (input) ──
 // Stack-allocated for each process() call. The VST3 processor reads this
 // COM object synchronously and must not retain it after process() returns.
@@ -321,11 +318,11 @@ pub(super) struct EventListVtbl {
 #[repr(C)]
 pub(super) struct LiveEventList<'a> {
     pub(super) vtbl: *const EventListVtbl,
-    pub(super) events: &'a [NoteEvent],
+    pub(super) events: &'a [BlockNote],
 }
 
 impl<'a> LiveEventList<'a> {
-    pub(super) fn new(events: &'a [NoteEvent]) -> Self {
+    pub(super) fn new(events: &'a [BlockNote]) -> Self {
         Self {
             vtbl: &LIVE_EVENT_LIST_VTBL,
             events,
@@ -345,9 +342,9 @@ impl<'a> LiveEventList<'a> {
     }
 }
 
-pub(super) fn vst_event(event: &NoteEvent) -> VstEvent {
-    let sample_offset = event.frame_offset.min(i32::MAX as u32) as i32;
-    if event.is_on {
+pub(super) fn vst_event(event: &BlockNote) -> VstEvent {
+    let sample_offset = event.frame.min(i32::MAX as u32) as i32;
+    if event.on {
         VstEvent {
             busIndex: 0,
             sampleOffset: sample_offset,
@@ -413,9 +410,9 @@ unsafe extern "system" fn event_list_add(
 }
 
 pub(super) static LIVE_EVENT_LIST_VTBL: EventListVtbl = EventListVtbl {
-    query_interface: pc_query_interface,
-    add_ref: pc_add_ref,
-    release: pc_release,
+    query_interface: static_com_query_interface,
+    add_ref: static_com_add_ref,
+    release: static_com_release,
     get_event_count: event_list_count,
     get_event: event_list_get,
     add_event: event_list_add,
@@ -510,22 +507,26 @@ mod tests {
     }
 
     #[test]
+    fn a_query_without_an_out_pointer_is_refused() {
+        let mut list = super::LiveEventList::new(&[]);
+        let result = unsafe {
+            super::static_com_query_interface(
+                list.as_raw_mut(),
+                [0; 16].as_ptr(),
+                std::ptr::null_mut(),
+            )
+        };
+
+        assert_eq!(result, vst3::Steinberg::kInvalidArgument);
+    }
+
+    #[test]
     fn live_event_list_exposes_timed_clip_notes_to_vst3() {
         let mut events = vec![
-            super::NoteEvent {
-                is_on: false,
-                pitch: 64,
-                velocity: 0,
-                frame_offset: 91,
-            },
-            super::NoteEvent {
-                is_on: true,
-                pitch: 64,
-                velocity: 96,
-                frame_offset: 17,
-            },
+            super::BlockNote::off(91, 64),
+            super::BlockNote::on(17, 64, 96),
         ];
-        events.sort_unstable_by_key(|event| (event.frame_offset, event.is_on));
+        events.sort_unstable_by_key(|event| (event.frame, event.on));
         let mut list = super::LiveEventList::new(&events);
 
         assert_eq!(list.event_count(), 2);
