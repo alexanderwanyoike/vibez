@@ -54,6 +54,37 @@ impl MidiFileImport {
         self.file.tracks.len() > 1
     }
 
+    /// Each playing track's name, or the file's numbered by position.
+    pub fn track_names(&self) -> Vec<String> {
+        self.file
+            .tracks
+            .iter()
+            .enumerate()
+            .map(|(index, track)| {
+                track
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| format!("{} {}", self.name, index + 1))
+            })
+            .collect()
+    }
+
+    /// What a track per file track adds, as the layout choice says it.
+    pub fn track_each_summary(&self) -> String {
+        let tracks = self.file.tracks.len();
+        match self
+            .file
+            .tracks
+            .iter()
+            .filter(|track| track.on_drum_channel)
+            .count()
+        {
+            0 => format!("{tracks} new MIDI tracks"),
+            drums if drums == tracks => format!("{tracks} new MIDI tracks, each on a Drum Rack"),
+            drums => format!("{tracks} new MIDI tracks, {drums} of them on a Drum Rack"),
+        }
+    }
+
     /// The Clips for a drop at `position_beats` on `onto`, or on new tracks
     /// where there is no track to land on.
     pub fn plan(
@@ -68,19 +99,13 @@ impl MidiFileImport {
                 .file
                 .tracks
                 .iter()
-                .enumerate()
-                .map(|(index, track)| {
-                    let name = track
-                        .name
-                        .clone()
-                        .unwrap_or_else(|| format!("{} {}", self.name, index + 1));
-                    PlannedMidiClip {
-                        clip: clip(&name, track.notes.clone()),
-                        track: MidiClipTrack::New {
-                            name,
-                            drum_rack: track.on_drum_channel,
-                        },
-                    }
+                .zip(self.track_names())
+                .map(|(track, name)| PlannedMidiClip {
+                    clip: clip(&name, track.notes.clone()),
+                    track: MidiClipTrack::New {
+                        name,
+                        drum_rack: track.on_drum_channel,
+                    },
                 })
                 .collect();
         }

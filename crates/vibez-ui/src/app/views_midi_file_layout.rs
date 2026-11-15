@@ -15,28 +15,6 @@ impl App {
         &'a self,
         choice: &'a MidiFileLayoutChoice,
     ) -> Element<'a, Message> {
-        let tracks = &choice.import.file.tracks;
-        let names: Vec<_> = tracks
-            .iter()
-            .enumerate()
-            .map(|(index, track)| {
-                track
-                    .name
-                    .clone()
-                    .unwrap_or_else(|| format!("Track {}", index + 1))
-            })
-            .collect();
-        let drums = tracks.iter().filter(|track| track.on_drum_channel).count();
-        let split_detail = match drums {
-            0 => format!("{} new MIDI tracks", tracks.len()),
-            drums if drums == tracks.len() => {
-                format!("{} new MIDI tracks, each on a Drum Rack", tracks.len())
-            }
-            drums => format!(
-                "{} new MIDI tracks, {drums} of them on a Drum Rack",
-                tracks.len()
-            ),
-        };
         let cancel = button(text("Cancel").size(12).color(th::text()))
             .on_press(Message::ChooseMidiFileLayout(None))
             .padding([7, 14]);
@@ -44,7 +22,9 @@ impl App {
             text(format!("Import {}", choice.import.name))
                 .size(18)
                 .color(th::text()),
-            text(names.join(", ")).size(11).color(th::text_dim()),
+            text(choice.import.track_names().join(", "))
+                .size(11)
+                .color(th::text_dim()),
             row![
                 dialog_choice(
                     "One Clip".into(),
@@ -54,7 +34,7 @@ impl App {
                 ),
                 dialog_choice(
                     "A track each".into(),
-                    split_detail,
+                    choice.import.track_each_summary(),
                     false,
                     Message::ChooseMidiFileLayout(Some(MidiFileLayout::TrackPerFileTrack)),
                 ),

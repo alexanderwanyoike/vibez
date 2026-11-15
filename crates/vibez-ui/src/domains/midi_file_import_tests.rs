@@ -157,3 +157,32 @@ fn every_planned_clip_has_its_own_identity() {
     let ids: HashSet<_> = plan.iter().map(|planned| planned.clip.id).collect();
     assert_eq!(ids.len(), plan.len());
 }
+
+#[test]
+fn track_names_fall_back_to_the_file_name_numbered_by_position() {
+    assert_eq!(
+        split_phrase().track_names(),
+        vec!["Kick", "Closed Hat", "Rebeater P3 3"]
+    );
+}
+
+#[test]
+fn a_track_each_says_how_many_tracks_and_drum_racks_it_adds() {
+    assert_eq!(
+        split_phrase().track_each_summary(),
+        "3 new MIDI tracks, 2 of them on a Drum Rack"
+    );
+    let drums = import(vec![
+        track(Some("Kick"), vec![hit(36, 0.0)], true),
+        track(Some("Snare"), vec![hit(38, 1.0)], true),
+    ]);
+    assert_eq!(
+        drums.track_each_summary(),
+        "2 new MIDI tracks, each on a Drum Rack"
+    );
+    let keys = import(vec![
+        track(None, vec![hit(60, 0.0)], false),
+        track(None, vec![hit(64, 0.0)], false),
+    ]);
+    assert_eq!(keys.track_each_summary(), "2 new MIDI tracks");
+}
