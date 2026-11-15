@@ -13,7 +13,6 @@ impl AudioEngine {
             self.project_routing_published = true;
             return;
         }
-        self.release_rerouted_notes(&prepared);
         {
             let previous = &mut self.routing;
             let signal_path_changed = previous.graph.nodes != prepared.graph.nodes

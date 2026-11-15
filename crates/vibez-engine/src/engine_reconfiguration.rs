@@ -262,6 +262,7 @@ impl AudioEngine {
                 }
                 HandoffRequestFacts::Instrument => {
                     let mut instrument = track.instrument.take().unwrap();
+                    track.note_epoch += 1;
                     instrument.stop_for_reconfiguration();
                     requested = Some(DeviceReconfiguration::Instrument {
                         handoff_id,

@@ -216,6 +216,7 @@ impl AudioEngine {
                 NodeStage::Source => {
                     self.forget_played_notes(channel_index);
                     if self.is_device_recovering(node.channel, None) {
+                        self.release_routed_notes(channel_index);
                         continue;
                     }
                     self.admit_routed_notes(channel_index, frames as u32);

@@ -188,8 +188,14 @@ pub struct EngineTrack {
     /// Cosmetic feedback is deliberately lossy when the UI event ring is full.
     pending_note_activity: u128,
     pub(crate) suppress_source_notes: bool,
-    /// What this track's instrument played last block, for its MIDI From receivers.
+    /// What this track's instrument played this block, for its MIDI From
+    /// receivers, which render after it.
     pub(crate) played_notes: vibez_core::note_output::NoteOutput,
+    /// Whether `played_notes` came from rendering this block.
+    pub(crate) played_this_block: bool,
+    /// Counts instrument changes, so a receiver can tell that notes the old
+    /// instrument started will never end.
+    pub(crate) note_epoch: u64,
     pub(crate) routed_notes: routed_notes::RoutedNotes,
 }
 
@@ -444,6 +450,7 @@ impl EngineTrack {
     }
 
     pub(crate) fn keep_played_notes(&mut self) {
+        self.played_this_block = true;
         self.played_notes.clear();
         if let Some(output) = self
             .instrument

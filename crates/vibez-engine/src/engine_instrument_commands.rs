@@ -9,6 +9,7 @@ impl AudioEngine {
         allowance: &mut RetirementAllowance,
     ) {
         if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+            track.note_epoch += 1;
             if let Some(instrument) = track.instrument.take() {
                 self.dispose_instrument(instrument, allowance);
             }

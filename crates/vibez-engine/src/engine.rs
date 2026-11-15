@@ -140,6 +140,9 @@ pub struct AudioEngine {
     /// Vibez extends MPC Note Repeat to stopped transport. The first held pad
     /// establishes this shared musical downbeat until the last repeat stops.
     stopped_note_repeat_anchor: Option<u64>,
+    /// Whether the transport was playing at the last callback, so any stop,
+    /// commanded or not, releases routed notes once.
+    routed_notes_playing: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -325,6 +328,7 @@ impl AudioEngine {
             clip_record: None,
             clock_domain: ClockDomain::Arrange,
             stopped_note_repeat_anchor: None,
+            routed_notes_playing: false,
         };
 
         (engine, cmd_tx, event_rx)
@@ -396,6 +400,7 @@ impl AudioEngine {
 
         // ---- 1. Drain commands ------------------------------------------
         self.drain_commands();
+        self.release_routed_notes_after_stop();
         self.rendered_callback_frames = 0;
         self.begin_device_reconfiguration();
         self.validate_compensation();
