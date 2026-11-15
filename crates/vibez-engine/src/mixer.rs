@@ -16,6 +16,7 @@ mod groove;
 mod note_repeat;
 mod pan;
 mod render_context;
+mod routed_notes;
 pub use effect_slot::EffectSlot;
 pub(crate) use effect_slot::MeterSide;
 use groove::collect_timed_note_events;
