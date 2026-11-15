@@ -39,7 +39,7 @@ pub struct ClapPluginInstance {
     input_events_storage: Vec<ClapNoteEventWrapper>,
     param_events_storage: Vec<clap_sys::events::clap_event_param_value>,
     event_headers: Vec<*const clap_event_header>,
-    note_events: Vec<NoteEvent>,
+    note_events: Vec<vibez_core::note_output::BlockNote>,
     note_output: vibez_core::note_output::NoteOutput,
     sample_rate: f64,
     latency_samples: u32,
@@ -56,14 +56,6 @@ pub struct ClapPluginInstance {
 // Safety: CLAP plugins are expected to be thread-safe for audio processing.
 // The plugin is only accessed from one thread at a time.
 unsafe impl Send for ClapPluginInstance {}
-
-struct NoteEvent {
-    is_on: bool,
-    pitch: u8,
-    velocity: u8,
-    /// Frame offset within the current process buffer for sample-accurate timing.
-    time: u32,
-}
 
 /// A partially loaded CLAP plugin — DSO loaded on a background thread.
 /// Only the shared library is loaded; NO CLAP API calls have been made.
@@ -539,14 +531,14 @@ impl PluginInstance for ClapPluginInstance {
         let input_events_storage = &mut self.input_events_storage;
         // Sort events by frame offset so the plugin sees them in order
         self.note_events
-            .sort_unstable_by_key(|event| (event.time, event.is_on));
+            .sort_unstable_by_key(|event| (event.frame, event.on));
         for ne in self.note_events.drain(..) {
             let event = clap_event_note {
                 header: clap_event_header {
                     size: std::mem::size_of::<clap_event_note>() as u32,
-                    time: ne.time,
+                    time: ne.frame,
                     space_id: CLAP_CORE_EVENT_SPACE_ID,
-                    type_: if ne.is_on {
+                    type_: if ne.on {
                         CLAP_EVENT_NOTE_ON
                     } else {
                         CLAP_EVENT_NOTE_OFF
@@ -647,48 +639,36 @@ impl PluginInstance for ClapPluginInstance {
         if self.note_events.len() == self.note_events.capacity() {
             return;
         }
-        self.note_events.push(NoteEvent {
-            is_on: true,
-            pitch,
-            velocity,
-            time: 0,
-        });
+        self.note_events
+            .push(vibez_core::note_output::BlockNote::on(0, pitch, velocity));
     }
 
     fn note_off(&mut self, pitch: u8) {
         if self.note_events.len() == self.note_events.capacity() {
             return;
         }
-        self.note_events.push(NoteEvent {
-            is_on: false,
-            pitch,
-            velocity: 0,
-            time: 0,
-        });
+        self.note_events
+            .push(vibez_core::note_output::BlockNote::off(0, pitch));
     }
 
     fn note_on_at(&mut self, pitch: u8, velocity: u8, frame_offset: u32) {
         if self.note_events.len() == self.note_events.capacity() {
             return;
         }
-        self.note_events.push(NoteEvent {
-            is_on: true,
-            pitch,
-            velocity,
-            time: frame_offset,
-        });
+        self.note_events
+            .push(vibez_core::note_output::BlockNote::on(
+                frame_offset,
+                pitch,
+                velocity,
+            ));
     }
 
     fn note_off_at(&mut self, pitch: u8, frame_offset: u32) {
         if self.note_events.len() == self.note_events.capacity() {
             return;
         }
-        self.note_events.push(NoteEvent {
-            is_on: false,
-            pitch,
-            velocity: 0,
-            time: frame_offset,
-        });
+        self.note_events
+            .push(vibez_core::note_output::BlockNote::off(frame_offset, pitch));
     }
 
     fn note_output(&self) -> Option<&vibez_core::note_output::NoteOutput> {
