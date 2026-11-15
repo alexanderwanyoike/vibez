@@ -679,6 +679,22 @@ audible through the normal project mix while recording; Resample never injects
 it into the target Audio Track and cannot create a feedback edge. This is live
 Resample, distinct from the existing offline Bounce renderer.
 
+**MIDI From** lets a MIDI Track play the notes another Track's instrument
+outputs (a phrase or arpeggiator plugin), as Ableton's MIDI From does. The
+routing graph orders the source's Source stage before the receiver's in every
+block, and rejects a MIDI From loop as a feedback loop, but adds no audio edge,
+so compensation, solo and gain never see it. After rendering, each Track keeps
+the notes its instrument output that block. The receiver admits its source's
+notes through `RoutedNotes`, which plays them at their frames on either render
+path and gives every note-on exactly one note-off: a note-on for a held pitch
+releases it first, a stray note-off is dropped, and a changed or removed MIDI
+From, or Stop, ends held routed notes at the next block start. Each admitted
+note is also reported as the receiver's `SourceNoteInput` and
+`InstrumentNoteInput` at its exact sample, so Section Record, Clip Record and
+Capture record it like played input. The source keeps sounding its own
+instrument, its mute silences only its audio, and the receiver plays routed
+notes whether or not it is the record target.
+
 `EngineTrack` is the shared project channel strip: it owns the instrument,
 effects, sends, gain/pan, mute/solo, meters, and preallocated render scratch.
 Time-based content is a separate `PreparedPlaybackSource` behind an owned
