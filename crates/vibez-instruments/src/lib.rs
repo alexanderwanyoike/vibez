@@ -97,6 +97,11 @@ pub trait Instrument: Send {
         self.note_off(pitch);
     }
     fn render(&mut self, buffer: &mut [f32], channels: usize);
+    /// The notes the instrument itself played during its last `render`, with
+    /// frame offsets inside that render's buffer.
+    fn note_output(&self) -> Option<&vibez_core::note_output::NoteOutput> {
+        None
+    }
     fn reset(&mut self);
     /// End an isolated offline processing run on its render thread.
     /// Native instruments need no lifecycle transition.

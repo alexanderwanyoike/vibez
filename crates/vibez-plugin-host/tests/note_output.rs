@@ -41,3 +41,22 @@ fn a_clap_plugin_reports_the_notes_it_outputs_with_their_frames() {
 fn a_vst3_plugin_reports_the_notes_it_outputs_with_their_frames() {
     reports_output_notes_with_their_frames("vst3");
 }
+
+#[test]
+fn a_hosted_instrument_reports_its_plugins_notes_after_each_render() {
+    use vibez_instruments::Instrument;
+    let fixture = support::Fixture::new();
+    for format in ["clap", "vst3"] {
+        let mut instrument =
+            vibez_plugin_host::PluginInstrumentWrapper::new(fixture.load_instrument(format, 64));
+        instrument.note_on_at(48, 90, 7);
+        instrument.render(&mut [0.0; 128], 2);
+
+        assert_eq!(
+            instrument.note_output().map(NoteOutput::notes),
+            Some(&[BlockNote::on(7, 60, 90)][..]),
+            "{format}"
+        );
+        instrument.stop_processing();
+    }
+}
