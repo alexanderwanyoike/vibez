@@ -142,7 +142,7 @@ fn repeats_observe_the_same_coordinates_during_graph_playback_and_idle() {
 
 #[test]
 fn shared_repeat_constructor_wraps_source_coordinates_without_changing_notice_coordinates() {
-    use crate::events::{RepeatNoticePosition, SourceSectionClock};
+    use crate::events::{HeardNotePosition, SourceSectionClock};
     let source_section = SectionId::new();
     let notice_section = SectionId::new();
     let track = TrackId::new();
@@ -166,7 +166,7 @@ fn shared_repeat_constructor_wraps_source_coordinates_without_changing_notice_co
     );
     assert_eq!(source.section_position_samples, Some(6));
     assert_eq!(source.canonical_section_position_samples, Some(2));
-    let notice = RepeatNoticePosition {
+    let notice = HeardNotePosition {
         effective_at_samples: 80,
         canonical_at_samples: 72,
         section_id: Some(notice_section),

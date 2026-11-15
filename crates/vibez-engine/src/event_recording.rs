@@ -29,7 +29,7 @@ impl SourceRecordingPosition {
     }
 }
 
-impl From<SourceRecordingPosition> for RepeatNoticePosition {
+impl From<SourceRecordingPosition> for HeardNotePosition {
     fn from(position: SourceRecordingPosition) -> Self {
         Self {
             effective_at_samples: position.effective_at_samples,
@@ -46,7 +46,7 @@ impl EngineEvent {
         track_id: TrackId,
         note: vibez_core::note_output::BlockNote,
         source: SourceRecordingPosition,
-        notice: RepeatNoticePosition,
+        notice: HeardNotePosition,
     ) -> (Self, Self) {
         (
             Self::SourceNoteInput(SourceNoteInputEvent {
@@ -72,7 +72,7 @@ impl EngineEvent {
         track_id: TrackId,
         trigger: NoteRepeatTrigger,
         source: SourceRecordingPosition,
-        notice: RepeatNoticePosition,
+        notice: HeardNotePosition,
     ) -> (Self, Self) {
         // Notice coordinates are supplied independently: presentation mapping
         // must never move the Source take behind its own recording boundary.

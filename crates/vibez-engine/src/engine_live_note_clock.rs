@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::compensation_clock::{PresentationHistory, PresentationPosition};
-use crate::events::{RepeatNoticePosition, SourceRecordingPosition, SourceSectionClock};
+use crate::events::{HeardNotePosition, SourceRecordingPosition, SourceSectionClock};
 
 /// Live notes carry Perform samples inside the block being rendered.
 #[derive(Clone, Copy)]
@@ -32,10 +32,10 @@ impl LiveNoteClock<'_> {
         )
     }
 
-    pub(super) fn notice(&self, effective: u64, canonical: u64) -> RepeatNoticePosition {
+    pub(super) fn notice(&self, effective: u64, canonical: u64) -> HeardNotePosition {
         let effective_context = self.context(effective);
         let canonical_context = self.context(canonical);
-        RepeatNoticePosition {
+        HeardNotePosition {
             effective_at_samples: self.heard(effective, effective_context),
             canonical_at_samples: self.heard(canonical, canonical_context),
             section_id: effective_context.and_then(|context| context.section_id),
