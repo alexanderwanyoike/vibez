@@ -45,12 +45,20 @@ impl NoteOutput {
         }
     }
 
-    pub fn clear(&mut self) {}
+    pub fn clear(&mut self) {
+        self.notes.clear();
+    }
 
-    pub fn push(&mut self, _note: BlockNote) {}
+    pub fn push(&mut self, note: BlockNote) {
+        if self.notes.len() < self.notes.capacity() {
+            self.notes.push(note);
+        } else {
+            self.dropped += 1;
+        }
+    }
 
     pub fn notes(&self) -> &[BlockNote] {
-        &[]
+        &self.notes
     }
 
     /// Notes lost to a full buffer over this output's lifetime.
