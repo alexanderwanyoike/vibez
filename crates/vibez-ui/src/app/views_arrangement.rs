@@ -103,9 +103,6 @@ impl App {
                     .on_exit(Message::Browser(BrowserMsg::LeaveDragTarget(
                         crate::state::BrowserDropTarget::EmptyArrangement { beat: 0.0 },
                     )))
-                    .on_exit(Message::Browser(BrowserMsg::LeaveDragTarget(
-                        crate::state::BrowserDropTarget::EmptyArrangement { beat: 0.0 },
-                    )))
                     .on_release(Message::DropSampleOnEmptyArrangement);
             }
             return area.into();
@@ -480,6 +477,9 @@ impl App {
                     beat: beat.max(0.0),
                 })
             })
+            .on_exit(Message::Browser(BrowserMsg::LeaveDragTarget(
+                crate::state::BrowserDropTarget::EmptyArrangement { beat: 0.0 },
+            )))
             .on_release(Message::DropSampleOnEmptyArrangement);
             track_rows = track_rows.push(row![header, zone].height(Length::Fixed(54.0)));
         }
