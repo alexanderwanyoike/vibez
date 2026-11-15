@@ -8,14 +8,13 @@ use vibez_core::id::TrackId;
 use vibez_core::midi::{InstrumentKind, TrackKind};
 use vibez_core::midi_file::MidiFile;
 use vibez_core::track::MediaSourceRef;
+use vibez_project::TimelineLocation;
 
 use super::App;
-use crate::domains::arrangement::ArrangementAction;
 use crate::domains::midi_file_import::{
     MidiClipTrack, MidiFileImport, MidiFileLayout, MidiFileLayoutChoice,
 };
 use crate::domains::midi_file_landing::{MidiLanding, MidiLandingCtx};
-use crate::domains::EngineHandle;
 use crate::message::{BrowserImportTarget, Message};
 use crate::state::{ArrangementTimeline, UiNoteClip};
 
@@ -142,40 +141,32 @@ impl App {
         }
         self.push_undo_snapshot(None);
         self.mark_project_dirty();
-        let placed: Vec<_> = plan
+        let landed: Vec<_> = plan
             .into_iter()
             .map(|planned| match planned.track {
-                MidiClipTrack::Existing(track_id) => (track_id, false, planned.clip),
-                MidiClipTrack::New { name, drum_rack } => (
-                    self.add_imported_midi_track(name, drum_rack),
-                    true,
-                    planned.clip,
-                ),
+                MidiClipTrack::Existing(track_id) => (track_id, planned.clip),
+                MidiClipTrack::New { name, drum_rack } => {
+                    let track_id = self.add_imported_midi_track(name, drum_rack);
+                    // The new track reaches the engine before its Clip, so the
+                    // Clip and a playing Section's refresh find it there.
+                    if let Some(track) = self.state.find_track(track_id).cloned() {
+                        self.replay_track_to_engine(&track);
+                    }
+                    (track_id, planned.clip)
+                }
             })
             .collect();
-        let tracks: Vec<_> = placed
-            .iter()
-            .map(|(track_id, new, _)| (*track_id, *new))
-            .collect();
-        // New tracks reach the engine before their Clips, so the Clips and a
-        // playing Section's refresh find them there.
-        for (track_id, new) in &tracks {
-            if *new {
-                if let Some(track) = self.state.find_track(*track_id).cloned() {
-                    self.replay_track_to_engine(&track);
-                }
-            }
-        }
         if new_tracks > 0 {
             self.state
                 .perform
                 .sync_project_tracks(&self.state.project_tracks.tracks);
         }
-        self.place_note_clips(landing, placed);
-        self.state.arrangement.selected_track = tracks.first().map(|(track_id, _)| *track_id);
+        let tracks: Vec<_> = landed.iter().map(|(track_id, _)| *track_id).collect();
+        self.place_note_clips(landing, landed);
+        self.state.arrangement.selected_track = tracks.first().copied();
         let names: Vec<_> = tracks
             .iter()
-            .filter_map(|(track_id, _)| self.state.find_track(*track_id))
+            .filter_map(|track_id| self.state.find_track(*track_id))
             .map(|track| track.name.as_str())
             .collect();
         self.state.status_text = landing.status(&import.name, &names);
@@ -202,13 +193,13 @@ impl App {
         track_id
     }
 
-    /// Puts each Clip where the landing says, sending Arrange Clips to the
-    /// engine.
-    fn place_note_clips(&mut self, landing: MidiLanding, placed: Vec<(TrackId, bool, UiNoteClip)>) {
-        let Some(location) = landing.timeline() else {
-            if let MidiLanding::Slot { row, .. } = landing {
-                let first = placed.first().map(|(_, _, clip)| clip.id);
-                for (track_id, _, clip) in placed {
+    /// Puts each Clip where the landing says; the first of several in a
+    /// row of Clip slots is the one left open.
+    fn place_note_clips(&mut self, landing: MidiLanding, clips: Vec<(TrackId, UiNoteClip)>) {
+        match landing {
+            MidiLanding::Slot { row, .. } => {
+                let first = clips.first().map(|(_, clip)| clip.id);
+                for (track_id, clip) in clips {
                     let id = clip.id;
                     let mut timeline = ArrangementTimeline::default();
                     timeline.ensure(track_id).note_clips.push(clip);
@@ -218,19 +209,23 @@ impl App {
                     self.state.perform.select_launcher_clip(first);
                 }
             }
-            return;
-        };
-        self.with_timeline_editor_at(location, |editor, _, engine| {
-            let timeline = Arc::make_mut(&mut editor.timeline);
-            for (track_id, _, clip) in placed {
-                let content = timeline.ensure(track_id);
-                engine.send(clip.add_command_beside(track_id, content.note_clips.len()));
-                content.note_clips.push(clip);
+            MidiLanding::Arrange { .. } => {
+                self.add_imported_note_clips_at(TimelineLocation::Arrange, clips)
             }
-            ArrangementAction {
-                mark_dirty: true,
-                ..ArrangementAction::default()
+            MidiLanding::Section { section_id, .. } => {
+                self.add_imported_note_clips_at(TimelineLocation::Section(section_id), clips)
             }
+        }
+    }
+
+    fn add_imported_note_clips_at(
+        &mut self,
+        location: TimelineLocation,
+        clips: Vec<(TrackId, UiNoteClip)>,
+    ) {
+        let action = self.with_timeline_editor_at(location, |editor, _, engine| {
+            editor.add_imported_note_clips(engine, clips)
         });
+        let _ = self.apply_arrangement_action_at(action, location);
     }
 }

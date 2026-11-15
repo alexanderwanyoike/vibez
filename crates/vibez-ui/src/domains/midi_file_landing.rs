@@ -2,7 +2,6 @@
 //! has been read.
 
 use vibez_core::id::{SectionId, TrackId};
-use vibez_project::TimelineLocation;
 
 use crate::domains::midi_file_import::MIDI_FILE_TARGETS;
 use crate::domains::perform::PerformState;
@@ -100,15 +99,6 @@ impl MidiLanding {
         match self {
             Self::Arrange { beat, .. } | Self::Section { beat, .. } => beat,
             Self::Slot { .. } => 0.0,
-        }
-    }
-
-    /// The timeline the Clips land on, unless they fill a Clip slot.
-    pub fn timeline(self) -> Option<TimelineLocation> {
-        match self {
-            Self::Arrange { .. } => Some(TimelineLocation::Arrange),
-            Self::Section { section_id, .. } => Some(TimelineLocation::Section(section_id)),
-            Self::Slot { .. } => None,
         }
     }
 

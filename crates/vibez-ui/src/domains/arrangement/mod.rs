@@ -779,6 +779,7 @@ mod audio_clip_inspector;
 mod clip_edges;
 mod clip_trims;
 mod fragment_geometry;
+mod imported_note_clips;
 mod media_ops;
 mod ops;
 mod overwrite;
