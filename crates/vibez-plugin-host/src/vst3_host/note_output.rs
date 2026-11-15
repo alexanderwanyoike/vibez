@@ -34,10 +34,10 @@ impl<'a> Vst3NoteOutput<'a> {
     fn add(&mut self, event: &VstEvent) -> bool {
         let frame = u32::try_from(event.sampleOffset).unwrap_or(0);
         // SAFETY: the type tag selects the union field the plugin wrote.
-        let note = if u32::from(event.r#type) == kNoteOnEvent {
+        let note = if event.r#type == kNoteOnEvent as u16 {
             let on = unsafe { event.__field0.noteOn };
             output_note::note_on(frame, self.frames, on.pitch.into(), on.velocity.into())
-        } else if u32::from(event.r#type) == kNoteOffEvent {
+        } else if event.r#type == kNoteOffEvent as u16 {
             let off = unsafe { event.__field0.noteOff };
             output_note::note_off(frame, self.frames, off.pitch.into())
         } else {

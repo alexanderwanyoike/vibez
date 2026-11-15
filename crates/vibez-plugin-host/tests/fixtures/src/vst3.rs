@@ -658,10 +658,13 @@ unsafe fn echo_notes_an_octave_up(input: &ComRef<'_, IEventList>, output: ComRef
         if input.getEvent(index, &mut event) != kResultOk {
             continue;
         }
-        match event.r#type as u32 {
-            Event_::EventTypes_::kNoteOnEvent => event.__field0.noteOn.pitch += 12,
-            Event_::EventTypes_::kNoteOffEvent => event.__field0.noteOff.pitch += 12,
-            _ => continue,
+        // Generated event types are signed on Windows and unsigned elsewhere.
+        if event.r#type == Event_::EventTypes_::kNoteOnEvent as u16 {
+            event.__field0.noteOn.pitch += 12;
+        } else if event.r#type == Event_::EventTypes_::kNoteOffEvent as u16 {
+            event.__field0.noteOff.pitch += 12;
+        } else {
+            continue;
         }
         output.addEvent(&mut event);
     }
