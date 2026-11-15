@@ -556,3 +556,14 @@ async fn a_track_each_on_a_clip_slot_fills_that_row_and_selects_the_first_track_
     assert_eq!(app.state.arrangement.selected_track, Some(added[0]));
     assert_eq!(app.state.perform.clip_editor.selected, Some(first));
 }
+
+#[tokio::test]
+async fn a_project_reset_closes_a_waiting_layout_choice() {
+    let directory = tempfile::tempdir().unwrap();
+    let (mut app, track_id) = app_with_track(TrackKind::Midi);
+    drop_on_lane(&mut app, track_id, 0.0, split_phrase(directory.path())).await;
+
+    app.reset_to_new_project();
+
+    assert!(app.state.view.midi_file_layout_choice.is_none());
+}
