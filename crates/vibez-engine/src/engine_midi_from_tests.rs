@@ -260,3 +260,86 @@ fn routed_notes_reach_recording_as_the_receivers_input_at_their_samples() {
         [(true, 60, 10), (false, 60, BLOCK as u64 + 44)]
     );
 }
+
+/// Plays the same notes every block, without touching the allocator.
+struct LoopingPlayer {
+    notes: [BlockNote; 3],
+    output: NoteOutput,
+}
+
+impl vibez_instruments::Instrument for LoopingPlayer {
+    fn instrument_kind(&self) -> InstrumentKind {
+        InstrumentKind::SubtractiveSynth
+    }
+    fn param_descriptors(&self) -> &'static [vibez_core::effect::ParamDescriptor] {
+        &[]
+    }
+    fn set_param(&mut self, _: usize, _: f32) -> bool {
+        false
+    }
+    fn get_param(&self, _: usize) -> f32 {
+        0.0
+    }
+    fn note_on(&mut self, _: u8, _: u8) {}
+    fn note_off(&mut self, _: u8) {}
+    fn render(&mut self, _: &mut [f32], _: usize) {
+        self.output.clear();
+        for note in self.notes {
+            self.output.push(note);
+        }
+    }
+    fn note_output(&self) -> Option<&NoteOutput> {
+        Some(&self.output)
+    }
+    fn reset(&mut self) {}
+}
+
+#[test]
+fn a_routed_block_allocates_nothing() {
+    let (source, receiver) = (TrackId::new(), TrackId::new());
+    let mut receiving = routing_channel(receiver);
+    receiving.midi_from = Some(source);
+    let (mut engine, mut commands, mut events) = graph_engine(&[
+        receiving,
+        routing_channel(source),
+        routing_channel(TrackId::MASTER),
+    ]);
+    for (track, instrument) in [
+        (
+            receiver,
+            Box::new(crate::test_support::DelayProbeInstrument::new(0, 1.0))
+                as Box<dyn vibez_instruments::Instrument>,
+        ),
+        (
+            source,
+            Box::new(LoopingPlayer {
+                notes: [
+                    BlockNote::on(3, 60, 90),
+                    BlockNote::on(9, 60, 90),
+                    BlockNote::on(12, 64, 90),
+                ],
+                output: NoteOutput::default(),
+            }),
+        ),
+    ] {
+        commands.push(EngineCommand::add_track(track)).unwrap();
+        commands
+            .push(EngineCommand::SetInstrument {
+                track_id: track,
+                instrument,
+            })
+            .unwrap();
+    }
+    commands.push(EngineCommand::Play).unwrap();
+    let mut buffer = [0.0; BLOCK * 2];
+    engine.process(&mut buffer, 2);
+    while events.pop().is_ok() {}
+    commands.push(EngineCommand::Stop).unwrap();
+
+    let measured = crate::retirement::tests::allocations(|| {
+        engine.process(&mut buffer, 2);
+        engine.process(&mut buffer, 2);
+    });
+
+    assert_eq!(measured, (0, 0));
+}
