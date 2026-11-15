@@ -1,16 +1,16 @@
-//! The drop zone a Browser drag shows over the device it would land on.
+//! The drop zone a Browser drag shows over the lane or device it would land on.
 
 use crate::domains::browser::DragMedia;
 use crate::domains::device_panel_drop::DevicePanelDrop;
 use crate::state::BrowserDropTarget;
 
-/// What a release in the zone does to the device, for its icon.
+/// What a release in the zone does, for its icon.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DropAction {
     Add,
     Replace,
     Load,
-    /// The target will not take the audio.
+    /// The target will not take what is dragged.
     Refuse,
 }
 

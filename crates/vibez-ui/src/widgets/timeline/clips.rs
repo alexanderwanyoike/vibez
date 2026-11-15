@@ -116,8 +116,7 @@ pub struct TrackClipCanvas {
     /// The Clip drag in flight on this lane's timeline, whichever lane it
     /// began on.
     pub clip_drag: Option<ClipDragPreview>,
-    /// The zone a Browser drag hovering this lane marks, where the lane will
-    /// not take the audio.
+    /// The zone a Browser drag hovering this lane marks.
     pub drop_zone: Option<crate::domains::drop_zone::DropZone>,
 }
 
