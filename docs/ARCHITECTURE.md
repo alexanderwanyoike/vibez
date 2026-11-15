@@ -685,10 +685,15 @@ routing graph orders the source's Source stage before the receiver's in every
 block, and rejects a MIDI From loop as a feedback loop, but adds no audio edge,
 so compensation, solo and gain never see it. After rendering, each Track keeps
 the notes its instrument output that block. The receiver admits its source's
-notes through `RoutedNotes`, which plays them at their frames on either render
-path and gives every note-on exactly one note-off: a note-on for a held pitch
-releases it first, a stray note-off is dropped, and a changed or removed MIDI
-From, or Stop, ends held routed notes at the next block start. Each admitted
+notes through `RoutedNotes`, which plays them at their frames, in the source's
+order within a frame, on either render path and gives every note-on exactly
+one note-off. A note-on for a held pitch releases it first, a stray note-off
+is dropped, and a note-off on its note-on's frame moves a frame later, because
+a receiving plugin plays note-offs first within a frame. Each block the
+receiver names its source by track and instrument; when that changes (a new
+or removed MIDI From, a replaced or removed instrument, a source that did not
+render), and when the receiver skips a block or the transport stops for any
+reason, held routed notes end at the next block start. Each admitted
 note is also reported as the receiver's `SourceNoteInput` and
 `InstrumentNoteInput` at its exact sample, so Section Record, Clip Record and
 Capture record it like played input. The source keeps sounding its own
