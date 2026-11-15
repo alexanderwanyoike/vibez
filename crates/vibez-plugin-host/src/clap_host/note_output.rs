@@ -10,13 +10,13 @@ use crate::output_note;
 
 /// Lives on the stack for one `process` call; the plugin must not keep it.
 pub(super) struct ClapNoteOutput<'a> {
-    notes: &'a mut NoteOutput,
+    output: &'a mut NoteOutput,
     frames: u32,
 }
 
 impl<'a> ClapNoteOutput<'a> {
-    pub(super) fn new(notes: &'a mut NoteOutput, frames: u32) -> Self {
-        Self { notes, frames }
+    pub(super) fn new(output: &'a mut NoteOutput, frames: u32) -> Self {
+        Self { output, frames }
     }
 
     /// Valid while `self` stays in place, which `process` guarantees by
@@ -51,7 +51,7 @@ impl<'a> ClapNoteOutput<'a> {
             }
             _ => None,
         };
-        note.is_none_or(|note| self.notes.push(note))
+        note.is_none_or(|note| self.output.push(note))
     }
 }
 

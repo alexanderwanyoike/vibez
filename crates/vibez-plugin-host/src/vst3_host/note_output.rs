@@ -13,15 +13,15 @@ use crate::output_note;
 #[repr(C)]
 pub(super) struct Vst3NoteOutput<'a> {
     vtbl: *const EventListVtbl,
-    notes: &'a mut NoteOutput,
+    output: &'a mut NoteOutput,
     frames: u32,
 }
 
 impl<'a> Vst3NoteOutput<'a> {
-    pub(super) fn new(notes: &'a mut NoteOutput, frames: u32) -> Self {
+    pub(super) fn new(output: &'a mut NoteOutput, frames: u32) -> Self {
         Self {
             vtbl: &NOTE_OUTPUT_VTBL,
-            notes,
+            output,
             frames,
         }
     }
@@ -43,13 +43,13 @@ impl<'a> Vst3NoteOutput<'a> {
         } else {
             None
         };
-        note.is_none_or(|note| self.notes.push(note))
+        note.is_none_or(|note| self.output.push(note))
     }
 }
 
 unsafe extern "system" fn count(this: *mut std::ffi::c_void) -> i32 {
     let list = unsafe { &*this.cast::<Vst3NoteOutput<'_>>() };
-    list.notes.notes().len() as i32
+    list.output.notes().len() as i32
 }
 
 unsafe extern "system" fn get(
@@ -60,7 +60,7 @@ unsafe extern "system" fn get(
     let list = unsafe { &*this.cast::<Vst3NoteOutput<'_>>() };
     let note = usize::try_from(index)
         .ok()
-        .and_then(|index| list.notes.notes().get(index));
+        .and_then(|index| list.output.notes().get(index));
     match note {
         Some(note) if !event.is_null() => {
             unsafe { *event = vst_event(note) };
@@ -105,6 +105,6 @@ mod tests {
             .count();
 
         assert!(accepted < NoteOutput::CAPACITY);
-        assert_eq!(accepted, list.notes.notes().len());
+        assert_eq!(accepted, list.output.notes().len());
     }
 }
