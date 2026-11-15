@@ -103,6 +103,13 @@ pub struct BrowserAction {
     pub scan_root: Option<(PathBuf, u64)>,
 }
 
+/// What a drag carries, which decides the tracks it lands on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DragMedia {
+    Audio,
+    Midi,
+}
+
 impl crate::state::BrowserDropTarget {
     /// What a release here does, as the status bar says it.
     pub fn status(&self) -> String {
@@ -151,6 +158,16 @@ impl crate::state::BrowserDropTarget {
 }
 
 impl BrowserState {
+    /// What the drag in flight carries.
+    pub fn drag_media(&self) -> Option<DragMedia> {
+        todo!()
+    }
+
+    /// Whether a lane of `kind` takes the drag in flight.
+    pub fn drag_lands_on(&self, kind: vibez_core::midi::TrackKind) -> bool {
+        todo!("{kind:?}")
+    }
+
     /// Whether a release would take the audio, for the ghost's dot; with no
     /// target under the cursor there is nothing to judge.
     pub fn drag_accepted(&self) -> Option<bool> {
@@ -586,6 +603,10 @@ impl BrowserState {
         action
     }
 }
+
+#[cfg(test)]
+#[path = "browser_midi_drag_tests.rs"]
+mod midi_drag_tests;
 
 #[cfg(test)]
 #[path = "browser_tests.rs"]
