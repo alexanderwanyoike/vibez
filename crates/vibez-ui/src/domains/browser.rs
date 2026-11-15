@@ -201,6 +201,11 @@ impl BrowserState {
         self.drag_media().is_some_and(|media| media.lands_on(kind))
     }
 
+    /// Why a lane of `kind` turns the drag in flight away, if it does.
+    pub fn lane_refusal(&self, kind: vibez_core::midi::TrackKind) -> Option<String> {
+        todo!("{kind:?}")
+    }
+
     /// Instrument and device targets take samples, never MIDI files; a MIDI
     /// drag passing over one says where it can go instead.
     fn refuses_device_targets(&mut self) -> Option<String> {

@@ -124,3 +124,20 @@ fn an_audio_drag_still_names_audio_targets() {
         Some(BrowserDropTarget::ArrangementLane { .. })
     ));
 }
+
+#[test]
+fn a_lane_of_the_other_kind_says_why_it_refuses_the_drag() {
+    let midi = dragging("Rebeater P3.mid");
+    let audio = dragging("kick.wav");
+
+    assert_eq!(
+        midi.lane_refusal(TrackKind::Audio).as_deref(),
+        Some("MIDI can't go on an audio lane")
+    );
+    assert_eq!(midi.lane_refusal(TrackKind::Midi), None);
+    assert_eq!(
+        audio.lane_refusal(TrackKind::Midi).as_deref(),
+        Some("Audio can't go on a MIDI lane")
+    );
+    assert_eq!(BrowserState::default().lane_refusal(TrackKind::Midi), None);
+}
