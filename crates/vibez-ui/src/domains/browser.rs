@@ -244,82 +244,6 @@ impl BrowserState {
         (!media.lands_on(kind)).then(|| media.refused_lane_status())
     }
 
-    /// Whether the drag in flight is a file from another app.
-    pub fn drags_from_desktop(&self) -> bool {
-        self.desktop_drop.is_some()
-    }
-
-    /// Whether a desktop drop waits for the pointer to report a target.
-    pub fn desktop_drop_waits_for_target(&self) -> bool {
-        self.desktop_drop == Some(crate::state::DesktopDrop::Dropped)
-    }
-
-    /// Makes a file another app drags over the window the drag in flight;
-    /// only the first of several files is taken.
-    fn hover_desktop_file(&mut self, path: PathBuf) -> Option<String> {
-        if self.drag_source.is_some() && !self.desktop_drop_waits_for_target() {
-            return None;
-        }
-        let name = path
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| path.display().to_string());
-        if !vibez_core::audio_format::is_supported_audio_path(&path)
-            && !vibez_core::midi_file::is_midi_file_path(&path)
-        {
-            return Some(format!("Vibez can't import {name}"));
-        }
-        self.cancel_media_drag();
-        self.drag_source = Some(MediaSourceRef::LocalFile { path });
-        self.drag_label = Some(name);
-        self.desktop_drop = Some(crate::state::DesktopDrop::Hovering);
-        Some(self.moving_status())
-    }
-
-    /// Releases the dropped file on the target under the pointer, cancels
-    /// it when the pointer showed nothing there, or waits for a target.
-    fn drop_desktop_file(&mut self, path: &std::path::Path, action: &mut BrowserAction) {
-        use crate::state::DesktopDrop;
-        let dragged = matches!(
-            &self.drag_source,
-            Some(MediaSourceRef::LocalFile { path: dragged }) if dragged == path
-        );
-        let over_window = matches!(
-            self.desktop_drop,
-            Some(DesktopDrop::Hovering | DesktopDrop::PointerSeen)
-        );
-        if !dragged || !over_window {
-            return;
-        }
-        match self.drag_target.clone() {
-            Some(target) => self.release_desktop_drop(target, action),
-            None if self.desktop_drop == Some(DesktopDrop::PointerSeen) => {
-                self.miss_desktop_drop(action);
-            }
-            None => self.desktop_drop = Some(DesktopDrop::Dropped),
-        }
-    }
-
-    fn release_desktop_drop(
-        &mut self,
-        target: crate::state::BrowserDropTarget,
-        action: &mut BrowserAction,
-    ) {
-        if target.accepts_drop() {
-            action.release = Some(target);
-            return;
-        }
-        let refusal = target.status(self.drag_media().unwrap_or(DragMedia::Audio));
-        self.cancel_media_drag();
-        action.status = Some(refusal);
-    }
-
-    fn miss_desktop_drop(&mut self, action: &mut BrowserAction) {
-        let name = self.drag_label.clone().unwrap_or_default();
-        self.cancel_media_drag();
-        action.status = Some(format!("Nothing here takes {name}"));
-    }
-
     /// Instrument and device targets take samples, never MIDI files; a MIDI
     /// drag passing over one says where it can go instead.
     fn refuses_device_targets(&mut self) -> Option<String> {
@@ -817,6 +741,9 @@ impl BrowserState {
         action
     }
 }
+
+#[path = "browser_desktop_drop.rs"]
+mod desktop_drop;
 
 #[cfg(test)]
 #[path = "browser_desktop_drop_tests.rs"]
