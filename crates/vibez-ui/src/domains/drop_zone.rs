@@ -1,5 +1,6 @@
 //! The drop zone a Browser drag shows over the device it would land on.
 
+use crate::domains::browser::DragMedia;
 use crate::domains::device_panel_drop::DevicePanelDrop;
 use crate::state::BrowserDropTarget;
 
@@ -32,7 +33,7 @@ pub struct DropZone {
 impl BrowserDropTarget {
     /// The zone to mark under the cursor, or `None` on a lane that takes the
     /// audio, which previews the Clip it would place instead.
-    pub fn drop_zone(&self) -> Option<DropZone> {
+    pub fn drop_zone(&self, media: DragMedia) -> Option<DropZone> {
         let action = match self {
             Self::ArrangementLane {
                 compatible: true, ..
@@ -54,7 +55,7 @@ impl BrowserDropTarget {
         };
         Some(DropZone {
             action,
-            label: Some(self.status()),
+            label: Some(self.status(media)),
         })
     }
 }
@@ -87,10 +88,10 @@ mod tests {
         ] {
             let target = panel(drop);
             assert_eq!(
-                target.drop_zone(),
+                target.drop_zone(DragMedia::Audio),
                 Some(DropZone {
                     action,
-                    label: Some(target.status()),
+                    label: Some(target.status(DragMedia::Audio)),
                 })
             );
         }
@@ -102,10 +103,10 @@ mod tests {
             track_id: TrackId::new(),
         };
         assert_eq!(
-            target.drop_zone(),
+            target.drop_zone(DragMedia::Audio),
             Some(DropZone {
                 action: DropAction::Load,
-                label: Some(target.status()),
+                label: Some(target.status(DragMedia::Audio)),
             })
         );
     }
@@ -124,7 +125,7 @@ mod tests {
             },
         ] {
             assert_eq!(
-                target.drop_zone(),
+                target.drop_zone(DragMedia::Audio),
                 Some(DropZone {
                     action: DropAction::Load,
                     label: None,
@@ -140,7 +141,7 @@ mod tests {
             beat: 1.0,
             compatible: true,
         };
-        assert_eq!(target.drop_zone(), None);
+        assert_eq!(target.drop_zone(DragMedia::Audio), None);
     }
 
     #[test]
@@ -151,10 +152,10 @@ mod tests {
             compatible: false,
         };
         assert_eq!(
-            target.drop_zone(),
+            target.drop_zone(DragMedia::Audio),
             Some(DropZone {
                 action: DropAction::Refuse,
-                label: Some(target.status()),
+                label: Some(target.status(DragMedia::Audio)),
             })
         );
     }
@@ -163,10 +164,10 @@ mod tests {
     fn the_new_track_lane_adds_and_says_so() {
         let target = BrowserDropTarget::EmptyArrangement { beat: 2.0 };
         assert_eq!(
-            target.drop_zone(),
+            target.drop_zone(DragMedia::Audio),
             Some(DropZone {
                 action: DropAction::Add,
-                label: Some(target.status()),
+                label: Some(target.status(DragMedia::Audio)),
             })
         );
     }

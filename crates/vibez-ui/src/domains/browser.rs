@@ -110,18 +110,42 @@ pub enum DragMedia {
     Midi,
 }
 
+impl DragMedia {
+    pub fn of(source: &MediaSourceRef) -> Self {
+        match source {
+            MediaSourceRef::LocalFile { path }
+                if vibez_core::midi_file::is_midi_file_path(path) =>
+            {
+                Self::Midi
+            }
+            _ => Self::Audio,
+        }
+    }
+
+    /// Whether a lane of `kind` takes this media.
+    pub fn lands_on(self, kind: vibez_core::midi::TrackKind) -> bool {
+        kind.is_midi() == (self == Self::Midi)
+    }
+}
+
 impl crate::state::BrowserDropTarget {
-    /// What a release here does, as the status bar says it.
-    pub fn status(&self) -> String {
+    /// What a release of `media` here does, as the status bar says it.
+    pub fn status(&self, media: DragMedia) -> String {
         use crate::state::BrowserDropTarget as Target;
+        let (kind, other_lane) = match media {
+            DragMedia::Audio => ("audio", "a MIDI"),
+            DragMedia::Midi => ("MIDI", "an audio"),
+        };
         match self {
             Target::ArrangementLane {
                 beat,
                 compatible: true,
                 ..
-            } => format!("Audio lane at beat {beat:.2}"),
-            Target::ArrangementLane { .. } => "Audio can't go on a MIDI lane".into(),
-            Target::EmptyArrangement { beat } => format!("New audio track at beat {beat:.2}"),
+            } => format!("{} lane at beat {beat:.2}", capitalised(kind)),
+            Target::ArrangementLane { .. } => {
+                format!("{} can't go on {other_lane} lane", capitalised(kind))
+            }
+            Target::EmptyArrangement { beat } => format!("New {kind} track at beat {beat:.2}"),
             Target::Sampler { .. } => DevicePanelDrop::LoadIntoExisting.hover_status(),
             Target::DrumRackPad { pad_index, .. } => {
                 format!("Load into Drum Rack pad {}", pad_index + 1)
@@ -157,15 +181,34 @@ impl crate::state::BrowserDropTarget {
     }
 }
 
+/// "audio" and "MIDI" as a sentence starts them.
+fn capitalised(kind: &str) -> String {
+    let mut chars = kind.chars();
+    chars
+        .next()
+        .map(|first| first.to_uppercase().chain(chars).collect())
+        .unwrap_or_default()
+}
+
 impl BrowserState {
     /// What the drag in flight carries.
     pub fn drag_media(&self) -> Option<DragMedia> {
-        todo!()
+        self.drag_source.as_ref().map(DragMedia::of)
     }
 
     /// Whether a lane of `kind` takes the drag in flight.
     pub fn drag_lands_on(&self, kind: vibez_core::midi::TrackKind) -> bool {
-        todo!("{kind:?}")
+        self.drag_media().is_some_and(|media| media.lands_on(kind))
+    }
+
+    /// Instrument and device targets take samples, never MIDI files; a MIDI
+    /// drag passing over one says where it can go instead.
+    fn refuses_device_targets(&mut self) -> Option<String> {
+        if self.drag_media() != Some(DragMedia::Midi) {
+            return None;
+        }
+        self.drag_target = None;
+        Some(crate::domains::midi_file_import::MIDI_FILE_TARGETS.into())
     }
 
     /// Whether a release would take the audio, for the ghost's dot; with no
@@ -178,7 +221,9 @@ impl BrowserState {
 
     /// The zone to mark where a release would land.
     pub fn drop_zone(&self) -> Option<crate::domains::drop_zone::DropZone> {
-        self.drag_target.as_ref()?.drop_zone()
+        self.drag_target
+            .as_ref()?
+            .drop_zone(self.drag_media().unwrap_or(DragMedia::Audio))
     }
 
     /// The zone `track_id`'s lane marks while a drag hovers it.
@@ -212,7 +257,7 @@ impl BrowserState {
 
     /// Makes `target` the drop target and returns its status.
     fn hover(&mut self, target: crate::state::BrowserDropTarget) -> String {
-        let status = target.status();
+        let status = target.status(self.drag_media().unwrap_or(DragMedia::Audio));
         self.drag_target = Some(target);
         status
     }
@@ -226,7 +271,11 @@ impl BrowserState {
 
     fn moving_status(&self) -> String {
         let label = self.drag_label.as_deref().unwrap_or("media");
-        format!("Moving {label} - choose an audio lane, empty Arrange, or a MIDI track's devices")
+        let targets = match self.drag_media() {
+            Some(DragMedia::Midi) => "a MIDI lane, empty Arrange, or a MIDI track's Clip slot",
+            _ => "an audio lane, empty Arrange, or a MIDI track's devices",
+        };
+        format!("Moving {label} - choose {targets}")
     }
 
     fn hovers_drum_rack_pad(&self, track_id: TrackId) -> bool {
@@ -351,6 +400,10 @@ impl BrowserState {
                 if self.drag_source.is_none() {
                     return action;
                 }
+                if let Some(status) = self.refuses_device_targets() {
+                    action.status = Some(status);
+                    return action;
+                }
                 action.status =
                     Some(self.hover(crate::state::BrowserDropTarget::Sampler { track_id }));
             }
@@ -359,6 +412,10 @@ impl BrowserState {
                 pad_index,
             } => {
                 if self.drag_source.is_none() {
+                    return action;
+                }
+                if let Some(status) = self.refuses_device_targets() {
+                    action.status = Some(status);
                     return action;
                 }
                 action.status = Some(self.hover(crate::state::BrowserDropTarget::DrumRackPad {
@@ -373,6 +430,10 @@ impl BrowserState {
                 if self.drag_source.is_none() || self.hovers_drum_rack_pad(track_id) {
                     return action;
                 }
+                if let Some(status) = self.refuses_device_targets() {
+                    action.status = Some(status);
+                    return action;
+                }
                 action.status = Some(self.hover(crate::state::BrowserDropTarget::DrumRack {
                     track_id,
                     pad_index,
@@ -382,6 +443,10 @@ impl BrowserState {
                 // The panel's hover arrives after that of any card inside it,
                 // so the card under the cursor keeps the target.
                 if self.drag_source.is_none() || self.hovers_instrument_card(track_id) {
+                    return action;
+                }
+                if let Some(status) = self.refuses_device_targets() {
+                    action.status = Some(status);
                     return action;
                 }
                 action.status = Some(
