@@ -97,6 +97,9 @@ impl vibez_instruments::Instrument for Listener {
     }
 }
 
+/// `(on, pitch, sample)` per input event.
+type Inputs = Vec<(bool, u8, u64)>;
+
 struct Rig {
     engine: AudioEngine,
     commands: rtrb::Producer<EngineCommand>,
@@ -172,16 +175,22 @@ impl Rig {
         self.heard.lock().unwrap().clone()
     }
 
-    fn source_inputs(&mut self) -> Vec<(bool, u8, u64)> {
-        let mut inputs = Vec::new();
+    /// `(on, pitch, sample)` for the receiver's recorded source input and
+    /// for its heard instrument input.
+    fn inputs(&mut self) -> (Inputs, Inputs) {
+        let (mut source, mut heard) = (Vec::new(), Vec::new());
         while let Ok(event) = self.events.pop() {
-            if let EngineEvent::SourceNoteInput(input) = event {
-                if input.track_id == self.receiver {
-                    inputs.push((input.on, input.pitch, input.position.effective_at_samples));
+            match event {
+                EngineEvent::SourceNoteInput(input) if input.track_id == self.receiver => {
+                    source.push((input.on, input.pitch, input.position.effective_at_samples));
                 }
+                EngineEvent::InstrumentNoteInput(input) if input.track_id == self.receiver => {
+                    heard.push((input.on, input.pitch, input.effective_at_samples));
+                }
+                _ => {}
             }
         }
-        inputs
+        (source, heard)
     }
 }
 
@@ -204,19 +213,22 @@ fn the_receiver_plays_routed_notes_at_their_frames_on_either_render_path() {
 }
 
 #[test]
-fn routed_notes_play_while_the_transport_runs() {
-    let mut rig = Rig::new(true);
-    rig.commands.push(EngineCommand::Play).unwrap();
+fn routed_notes_play_while_the_transport_runs_on_either_render_path() {
+    for batch in [true, false] {
+        let mut rig = Rig::new(batch);
+        rig.commands.push(EngineCommand::Play).unwrap();
 
-    rig.play(vec![
-        vec![BlockNote::on(10, 60, 100)],
-        vec![BlockNote::off(44, 60)],
-    ]);
+        rig.play(vec![
+            vec![BlockNote::on(10, 60, 100)],
+            vec![BlockNote::off(44, 60)],
+        ]);
 
-    assert_eq!(
-        rig.heard(),
-        [(10, true, 60), (BLOCK as u64 + 44, false, 60)]
-    );
+        assert_eq!(
+            rig.heard(),
+            [(10, true, 60), (BLOCK as u64 + 44, false, 60)],
+            "batch {batch}"
+        );
+    }
 }
 
 #[test]
@@ -255,10 +267,10 @@ fn routed_notes_reach_recording_as_the_receivers_input_at_their_samples() {
         vec![BlockNote::off(44, 60)],
     ]);
 
-    assert_eq!(
-        rig.source_inputs(),
-        [(true, 60, 10), (false, 60, BLOCK as u64 + 44)]
-    );
+    let expected = [(true, 60, 10), (false, 60, BLOCK as u64 + 44)];
+    let (source, heard) = rig.inputs();
+    assert_eq!(source, expected);
+    assert_eq!(heard, expected);
 }
 
 /// Plays the same notes every block, without touching the allocator.
