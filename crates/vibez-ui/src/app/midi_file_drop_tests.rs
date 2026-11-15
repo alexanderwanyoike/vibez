@@ -490,3 +490,69 @@ fn app_drag_path(app: &App) -> PathBuf {
         _ => unreachable!("the test drags a local file"),
     }
 }
+
+#[tokio::test]
+async fn new_tracks_exist_in_the_engine_before_a_playing_section_refreshes() {
+    use vibez_engine::commands::EngineCommand;
+    let directory = tempfile::tempdir().unwrap();
+    let (mut app, track_id) = app_with_track(TrackKind::Midi);
+    let section = crate::domains::perform::Section::new(0);
+    let section_id = section.id;
+    Arc::make_mut(&mut app.state.perform.sections).insert(section);
+    app.state.view.workspace = crate::state::Workspace::Perform;
+    let _ = app.update(Message::Perform(
+        crate::domains::perform::PerformMsg::SelectSection(section_id),
+    ));
+    app.state.perform.playing_section = Some(section_id);
+    drop_on_lane(&mut app, track_id, 0.0, split_phrase(directory.path())).await;
+    let mut commands = record_engine(&mut app);
+
+    let _ = app.update(Message::ChooseMidiFileLayout(Some(
+        MidiFileLayout::TrackPerFileTrack,
+    )));
+
+    let sent = sent(&mut commands);
+    let refresh = sent
+        .iter()
+        .rposition(|command| matches!(command, EngineCommand::RefreshSection(_)))
+        .expect("the playing Section refreshes");
+    for track in new_tracks(&app, track_id) {
+        let added = sent
+            .iter()
+            .position(
+                |command| matches!(command, EngineCommand::AddTrack(info) if info.id == track.id),
+            )
+            .expect("the new track reaches the engine");
+        assert!(
+            added < refresh,
+            "{} is added before the refresh",
+            track.name
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_track_each_on_a_clip_slot_fills_that_row_and_selects_the_first_track_and_clip() {
+    let directory = tempfile::tempdir().unwrap();
+    let (mut app, track_id) = app_with_track(TrackKind::Midi);
+    app.state.perform.layout = vibez_project::PerformLayout::Clips;
+    drag(&mut app, split_phrase(directory.path()));
+    run_until_idle(&mut app, Message::ImportLauncherClip { track_id, row: 1 }).await;
+
+    let _ = app.update(Message::ChooseMidiFileLayout(Some(
+        MidiFileLayout::TrackPerFileTrack,
+    )));
+
+    let added: Vec<_> = new_tracks(&app, track_id).iter().map(|t| t.id).collect();
+    assert_eq!(added.len(), 2);
+    let first = app
+        .state
+        .perform
+        .clips
+        .at(added[0], 1)
+        .expect("first slot")
+        .id;
+    assert!(app.state.perform.clips.at(added[1], 1).is_some());
+    assert_eq!(app.state.arrangement.selected_track, Some(added[0]));
+    assert_eq!(app.state.perform.clip_editor.selected, Some(first));
+}
