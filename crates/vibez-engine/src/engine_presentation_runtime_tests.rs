@@ -26,6 +26,7 @@ fn entering_perform_rebases_the_heard_clock_before_launch_or_capture() {
             assignments: vec![],
             inactive_inputs: vec![],
         }],
+        midi_from: None,
     }];
     let mut routing = crate::routing::PreparedRouting::prepare_compensated(
         &model,

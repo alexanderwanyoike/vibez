@@ -256,6 +256,7 @@ impl AudioEngine {
                     is_bus: true,
                     effects: vec![],
                     sends: vec![],
+                    midi_from: None,
                 }],
                 crate::routing::MAX_BLOCK_FRAMES,
             )

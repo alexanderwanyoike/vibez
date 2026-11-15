@@ -84,6 +84,7 @@ fn teardown_extracts_engine_on_main_after_inflight_processing_and_before_late_ca
         is_bus: false,
         effects: vec![],
         sends: vec![],
+        midi_from: None,
     };
     channel.effects.push(RoutingEffect {
         id: effect,
@@ -96,6 +97,7 @@ fn teardown_extracts_engine_on_main_after_inflight_processing_and_before_late_ca
         is_bus: true,
         effects: vec![],
         sends: vec![],
+        midi_from: None,
     };
     commands
         .push(EngineCommand::SetRouting(

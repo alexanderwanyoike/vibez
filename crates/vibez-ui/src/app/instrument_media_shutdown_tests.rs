@@ -107,6 +107,7 @@ fn actual_app_shutdown_stops_engine_before_destroying_sample_guards_and_state_ca
                     is_bus: id.is_master(),
                     effects: vec![],
                     sends: vec![],
+                    midi_from: None,
                 }),
                 vibez_engine::routing::MAX_BLOCK_FRAMES,
             )

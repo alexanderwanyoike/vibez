@@ -48,6 +48,7 @@ fn channel(id: TrackId, effects: &[EffectId], bus: bool) -> RoutingChannel {
                 assignments: vec![],
             })
             .collect(),
+        midi_from: None,
     }
 }
 fn lane(target: AutomationTarget, points: &[(u64, f32)], spb: f64) -> AutomationLane {

@@ -166,6 +166,7 @@ mod tests {
                 is_bus: false,
                 effects: vec![],
                 sends: vec![],
+                midi_from: None,
             },
             RoutingChannel {
                 id: receiver,
@@ -187,12 +188,14 @@ mod tests {
                         tap: SourceTap::AfterEffects,
                     }],
                 }],
+                midi_from: None,
             },
             RoutingChannel {
                 id: TrackId::MASTER,
                 is_bus: true,
                 effects: vec![],
                 sends: vec![],
+                midi_from: None,
             },
         ];
         for frames in [1, 17, 63] {

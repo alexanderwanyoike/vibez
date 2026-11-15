@@ -151,6 +151,7 @@ fn prepared_source_and_live_growth_preserve_matching_storage_at_content_boundari
                 is_bus: id.is_master(),
                 sends: Vec::new(),
                 effects: Vec::new(),
+                midi_from: None,
             })
             .collect();
         commands
@@ -273,6 +274,7 @@ fn pending_audio() -> PendingAudio {
             is_bus: id.is_master(),
             sends: Vec::new(),
             effects: Vec::new(),
+            midi_from: None,
         })
         .collect();
     commands

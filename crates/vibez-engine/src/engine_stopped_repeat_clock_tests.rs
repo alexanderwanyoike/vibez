@@ -20,6 +20,7 @@ fn routing_channel(id: TrackId) -> RoutingChannel {
         is_bus: id.is_master(),
         effects: vec![],
         sends: vec![],
+        midi_from: None,
     }
 }
 

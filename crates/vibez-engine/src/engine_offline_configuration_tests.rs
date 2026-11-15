@@ -53,12 +53,14 @@ fn offline_rate_reuse_is_rejected_before_processing_and_retains_the_owner() {
                 assignments: vec![],
                 inactive_inputs: vec![],
             }],
+            midi_from: None,
         },
         RoutingChannel {
             id: TrackId::MASTER,
             is_bus: true,
             sends: vec![],
             effects: vec![],
+            midi_from: None,
         },
     ];
     let mut engine = AudioEngine::for_offline_routing(OfflineRoutingSetup {

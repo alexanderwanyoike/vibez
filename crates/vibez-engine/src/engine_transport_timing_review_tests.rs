@@ -64,12 +64,14 @@ fn stop_then_seek_preserves_a_musical_tail_with_zero_processing_latency() {
             assignments: vec![],
             inactive_inputs: vec![],
         }],
+        midi_from: None,
     };
     let master = RoutingChannel {
         id: TrackId::MASTER,
         is_bus: true,
         sends: vec![],
         effects: vec![],
+        midi_from: None,
     };
     commands
         .push(EngineCommand::SetRouting(
@@ -139,6 +141,7 @@ fn model(
                 inactive_inputs: vec![],
             })
             .collect(),
+            midi_from: None,
         })
         .collect()
 }

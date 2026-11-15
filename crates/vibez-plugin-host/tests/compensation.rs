@@ -44,6 +44,7 @@ fn channel(id: TrackId, effects: &[EffectId]) -> RoutingChannel {
                 assignments: vec![],
             })
             .collect(),
+        midi_from: None,
     }
 }
 

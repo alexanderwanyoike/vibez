@@ -49,6 +49,7 @@ fn setup(
         is_bus: false,
         effects: vec![],
         sends: vec![],
+        midi_from: None,
     };
     for _ in 0..effects {
         let effect = EffectId::new();
@@ -76,6 +77,7 @@ fn setup(
                 is_bus: true,
                 effects: vec![],
                 sends: vec![],
+                midi_from: None,
             },
         ],
         512,

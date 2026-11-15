@@ -256,12 +256,14 @@ fn faulted_packet_publication_and_snapshots_cannot_resurrect_playing_clips() {
             is_bus: false,
             sends: vec![],
             effects: vec![],
+            midi_from: None,
         },
         vibez_core::routing::RoutingChannel {
             id: TrackId::MASTER,
             is_bus: true,
             sends: vec![],
             effects: vec![],
+            midi_from: None,
         },
     ];
     engine.routing = crate::routing::PreparedRouting::prepare(&model, 8).unwrap();

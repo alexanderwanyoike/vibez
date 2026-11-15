@@ -47,12 +47,14 @@ fn fixture(kind: EffectType) -> (AudioEngine, Producer<EngineCommand>, TrackId, 
                     })
                     .collect(),
                 sends: vec![],
+                midi_from: None,
             },
             RoutingChannel {
                 id: TrackId::MASTER,
                 is_bus: true,
                 effects: vec![],
                 sends: vec![],
+                midi_from: None,
             },
         ],
         128,
@@ -300,6 +302,7 @@ fn return_and_master_taps_use_the_selected_insert_before_channel_gain() {
             is_bus: false,
             effects: vec![],
             sends: if master { vec![] } else { vec![selected] },
+            midi_from: None,
         }];
         if !master {
             channels.push(RoutingChannel {
@@ -307,6 +310,7 @@ fn return_and_master_taps_use_the_selected_insert_before_channel_gain() {
                 is_bus: true,
                 effects: effects(),
                 sends: vec![],
+                midi_from: None,
             });
         }
         channels.push(RoutingChannel {
@@ -314,6 +318,7 @@ fn return_and_master_taps_use_the_selected_insert_before_channel_gain() {
             is_bus: true,
             effects: if master { effects() } else { vec![] },
             sends: vec![],
+            midi_from: None,
         });
         commands
             .push(EngineCommand::SetRouting(

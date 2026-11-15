@@ -155,6 +155,7 @@ fn partial_packet_releases_tracks_atomically_at_one_source_timestamp_and_keeps_o
             is_bus: id.is_master(),
             sends: vec![],
             effects: vec![],
+            midi_from: None,
         })
         .collect();
     engine.routing = crate::routing::PreparedRouting::prepare(&channels, 8).unwrap();
@@ -515,12 +516,14 @@ fn in_segment_release_retains_the_actual_output_clock_prefix() {
             is_bus: false,
             sends: vec![],
             effects: vec![],
+            midi_from: None,
         },
         vibez_core::routing::RoutingChannel {
             id: TrackId::MASTER,
             is_bus: true,
             sends: vec![],
             effects: vec![],
+            midi_from: None,
         },
     ];
     engine.routing = crate::routing::PreparedRouting::prepare(&channels, 8).unwrap();
@@ -822,12 +825,14 @@ fn delayed_engine() -> (AudioEngine, Consumer<EngineEvent>, TrackId) {
                 assignments: vec![],
                 inactive_inputs: vec![],
             }],
+            midi_from: None,
         },
         RoutingChannel {
             id: TrackId::MASTER,
             is_bus: true,
             sends: vec![],
             effects: vec![],
+            midi_from: None,
         },
     ];
     let reports = [(

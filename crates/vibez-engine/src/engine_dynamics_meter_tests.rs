@@ -78,6 +78,7 @@ fn fixture(master: bool, bus: bool) -> Fixture {
         is_bus: false,
         effects: if !master && !bus { chain() } else { vec![] },
         sends: if bus { vec![selected] } else { vec![] },
+        midi_from: None,
     }];
     if bus {
         channels.push(RoutingChannel {
@@ -85,6 +86,7 @@ fn fixture(master: bool, bus: bool) -> Fixture {
             is_bus: true,
             effects: chain(),
             sends: vec![],
+            midi_from: None,
         });
     }
     channels.push(RoutingChannel {
@@ -92,6 +94,7 @@ fn fixture(master: bool, bus: bool) -> Fixture {
         is_bus: true,
         effects: if master { chain() } else { vec![] },
         sends: vec![],
+        midi_from: None,
     });
     commands
         .push(EngineCommand::SetRouting(

@@ -113,6 +113,8 @@ pub struct RoutingChannel {
     pub effects: Vec<RoutingEffect>,
     /// Declared connections are independent of their current DSP gain.
     pub sends: Vec<TrackId>,
+    /// The track whose played notes this channel's instrument also plays.
+    pub midi_from: Option<TrackId>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -368,6 +370,7 @@ mod tests {
                 assignments: vec![],
                 inactive_inputs: vec![],
             }],
+            midi_from: None,
         }
     }
 
@@ -432,6 +435,7 @@ mod tests {
             is_bus: true,
             effects: vec![],
             sends: vec![send],
+            midi_from: None,
         };
         assert_eq!(
             RoutingGraph::prepare(&[bus(a, b), bus(b, a)]).unwrap_err(),
@@ -460,12 +464,14 @@ mod tests {
                 is_bus: false,
                 effects: vec![],
                 sends,
+                midi_from: None,
             },
             RoutingChannel {
                 id: bus,
                 is_bus: true,
                 effects: vec![],
                 sends: vec![],
+                midi_from: None,
             },
         ])
         .unwrap();

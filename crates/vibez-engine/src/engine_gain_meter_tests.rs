@@ -51,12 +51,14 @@ fn monitored_gain_chain_reports_each_inserts_stereo_input_and_output() {
                     })
                     .collect(),
                 sends: vec![],
+                midi_from: None,
             },
             RoutingChannel {
                 id: TrackId::MASTER,
                 is_bus: true,
                 effects: vec![],
                 sends: vec![],
+                midi_from: None,
             },
         ],
         128,
@@ -168,6 +170,7 @@ fn return_and_master_gain_meters_observe_insert_levels_in_both_render_paths() {
                     is_bus: false,
                     effects: vec![],
                     sends: vec![return_id],
+                    midi_from: None,
                 },
                 RoutingChannel {
                     id: return_id,
@@ -179,6 +182,7 @@ fn return_and_master_gain_meters_observe_insert_levels_in_both_render_paths() {
                         inactive_inputs: vec![],
                     }],
                     sends: vec![],
+                    midi_from: None,
                 },
                 RoutingChannel {
                     id: TrackId::MASTER,
@@ -190,6 +194,7 @@ fn return_and_master_gain_meters_observe_insert_levels_in_both_render_paths() {
                         inactive_inputs: vec![],
                     }],
                     sends: vec![],
+                    midi_from: None,
                 },
             ],
             128,
@@ -510,12 +515,14 @@ fn gain_meter_fixture() -> (
                             inactive_inputs: vec![],
                         }],
                         sends: vec![],
+                        midi_from: None,
                     },
                     RoutingChannel {
                         id: TrackId::MASTER,
                         is_bus: true,
                         effects: vec![],
                         sends: vec![],
+                        midi_from: None,
                     },
                 ],
                 128,

@@ -62,6 +62,7 @@ fn setup_with_notes(notes: Vec<MidiNote>) -> Fixture {
             is_bus: id.is_master(),
             sends: Vec::new(),
             effects: Vec::new(),
+            midi_from: None,
         })
         .collect();
     commands

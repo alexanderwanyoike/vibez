@@ -34,6 +34,7 @@ fn channel(track: &ProjectTrack, is_bus: bool) -> RoutingChannel {
                 inactive_inputs: effect.inactive_sidechains.clone(),
             })
             .collect(),
+        midi_from: None,
     }
 }
 
