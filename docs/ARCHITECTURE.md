@@ -746,7 +746,11 @@ are handled in three stages:
    captures plugin state for saving. VST3 instruments receive the engine's
    timed note queue through a callback-lifetime `IEventList`; events are sorted
    by sample offset and preserve within-block note-on/note-off timing before
-   `IAudioProcessor::process` runs.
+   `IAudioProcessor::process` runs. Notes a plugin outputs (CLAP `try_push`,
+   or a callback-lifetime output `IEventList` for VST3) land in a
+   fixed-capacity `NoteOutput` that each process call clears; past capacity
+   they are dropped and counted. A hosted instrument exposes the last
+   render's notes, with frame offsets, through `Instrument::note_output`.
 
 Plugin editor windows use a platform backend: AppKit on macOS and the existing
 X11 backend elsewhere. The macOS backend owns an `NSWindow` and its content
