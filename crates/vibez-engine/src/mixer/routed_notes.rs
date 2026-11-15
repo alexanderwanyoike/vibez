@@ -9,9 +9,13 @@ use super::pitch_mask::pitches;
 /// its note-on, so the block never outgrows this.
 const BLOCK_CAPACITY: usize = 128 + NoteOutput::CAPACITY * 2;
 
-/// Which track, and which instrument on it, played this block's routed
-/// notes. `None` when no source rendered this block.
-pub(crate) type NoteSource = (vibez_core::id::TrackId, u64);
+/// The track, and which of its instruments, that played a block's routed notes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct NoteSource {
+    pub(crate) track: vibez_core::id::TrackId,
+    /// Changes whenever the track's instrument does.
+    pub(crate) instrument: u64,
+}
 
 #[derive(Debug)]
 pub(crate) struct RoutedNotes {
@@ -42,8 +46,9 @@ impl Default for RoutedNotes {
 
 impl RoutedNotes {
     /// Replaces the block's notes with `incoming` from `source`, in frame
-    /// order, after any pending release. A changed source releases what the
-    /// old one started, since it will never end those notes.
+    /// order, after any pending release. `source` is `None` when no source
+    /// rendered this block. A changed source releases what the old one
+    /// started, since it will never end those notes.
     pub(crate) fn admit(
         &mut self,
         source: Option<NoteSource>,
@@ -154,7 +159,10 @@ mod tests {
 
     fn source() -> Option<NoteSource> {
         thread_local! { static SOURCE: vibez_core::id::TrackId = vibez_core::id::TrackId::new(); }
-        Some((SOURCE.with(|id| *id), 0))
+        Some(NoteSource {
+            track: SOURCE.with(|id| *id),
+            instrument: 0,
+        })
     }
 
     fn admitted(routed: &mut RoutedNotes, incoming: &[BlockNote]) -> Vec<BlockNote> {
@@ -276,7 +284,17 @@ mod tests {
     #[test]
     fn a_changed_or_missing_source_ends_held_notes_at_the_next_block_start() {
         let other = vibez_core::id::TrackId::new();
-        for next in [Some((other, 0)), Some((source().unwrap().0, 1)), None] {
+        for next in [
+            Some(NoteSource {
+                track: other,
+                instrument: 0,
+            }),
+            Some(NoteSource {
+                instrument: 1,
+                ..source().unwrap()
+            }),
+            None,
+        ] {
             let mut routed = RoutedNotes::default();
             admitted(&mut routed, &[BlockNote::on(5, 60, 90)]);
 

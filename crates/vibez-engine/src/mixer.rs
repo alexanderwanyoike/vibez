@@ -191,12 +191,12 @@ pub struct EngineTrack {
     pub(crate) suppress_source_notes: bool,
     /// What this track's instrument played this block, for its MIDI From
     /// receivers, which render after it.
-    pub(crate) played_notes: vibez_core::note_output::NoteOutput,
+    played_notes: vibez_core::note_output::NoteOutput,
     /// Whether `played_notes` came from rendering this block.
-    pub(crate) played_this_block: bool,
+    played_this_block: bool,
     /// Counts instrument changes, so a receiver can tell that notes the old
     /// instrument started will never end.
-    pub(crate) note_epoch: u64,
+    note_epoch: u64,
     pub(crate) routed_notes: routed_notes::RoutedNotes,
 }
 
@@ -448,6 +448,39 @@ impl EngineTrack {
             &mut self.timed_note_ons,
             &mut self.timed_note_offs,
         );
+    }
+
+    /// A track that skips rendering this block must not pass on last block's notes.
+    pub(crate) fn forget_played_notes(&mut self) {
+        self.played_notes.clear();
+        self.played_this_block = false;
+    }
+
+    /// What a MIDI From receiver takes from this track this block.
+    pub(crate) fn played_note_source(
+        &self,
+    ) -> (
+        Option<routed_notes::NoteSource>,
+        &[vibez_core::note_output::BlockNote],
+    ) {
+        let source = self.played_this_block.then_some(routed_notes::NoteSource {
+            track: self.id,
+            instrument: self.note_epoch,
+        });
+        (source, self.played_notes.notes())
+    }
+
+    pub(crate) fn replace_instrument(
+        &mut self,
+        instrument: Box<dyn Instrument>,
+    ) -> Option<Box<dyn Instrument>> {
+        self.note_epoch += 1;
+        self.instrument.replace(instrument)
+    }
+
+    pub(crate) fn take_instrument(&mut self) -> Option<Box<dyn Instrument>> {
+        self.note_epoch += 1;
+        self.instrument.take()
     }
 
     pub(crate) fn keep_played_notes(&mut self) {

@@ -4,12 +4,9 @@ use super::*;
 use crate::routing::ChannelIndex;
 
 impl AudioEngine {
-    /// A track that skips rendering this block must not pass on last block's notes.
     pub(super) fn forget_played_notes(&mut self, channel_index: usize) {
         if let ChannelIndex::Track(track) = self.routing.channels[channel_index].binding {
-            let track = &mut self.tracks[track];
-            track.played_notes.clear();
-            track.played_this_block = false;
+            self.tracks[track].forget_played_notes();
         }
     }
 
@@ -46,12 +43,8 @@ impl AudioEngine {
             let (front, back) = self.tracks.split_at_mut(receiver);
             (&mut back[0], &front[source])
         };
-        let key = playing
-            .played_this_block
-            .then_some((playing.id, playing.note_epoch));
-        receiving
-            .routed_notes
-            .admit(key, playing.played_notes.notes(), frames);
+        let (source, notes) = playing.played_note_source();
+        receiving.routed_notes.admit(source, notes, frames);
     }
 
     pub(super) fn release_routed_notes_after_stop(&mut self) {
