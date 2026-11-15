@@ -103,11 +103,16 @@ mod tests {
     #[test]
     fn a_full_output_drops_and_counts_notes_without_growing() {
         let mut output = NoteOutput::default();
-        for _ in 0..NoteOutput::CAPACITY + 3 {
-            output.push(BlockNote::off(1, 60));
+        for frame in 0..NoteOutput::CAPACITY + 3 {
+            output.push(BlockNote::off(frame as u32, 60));
         }
 
         assert_eq!(output.notes().len(), NoteOutput::CAPACITY);
+        assert_eq!(output.notes()[0].frame, 0);
+        assert_eq!(
+            output.notes()[NoteOutput::CAPACITY - 1].frame as usize,
+            NoteOutput::CAPACITY - 1
+        );
         assert_eq!(output.dropped(), 3);
         output.clear();
         output.push(BlockNote::off(0, 60));
