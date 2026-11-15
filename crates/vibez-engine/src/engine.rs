@@ -820,6 +820,10 @@ mod tests;
 mod stuck_note_tests;
 
 #[cfg(test)]
+#[path = "engine_midi_from_tests.rs"]
+mod midi_from_tests;
+
+#[cfg(test)]
 #[path = "engine_transport_ring_tests.rs"]
 mod transport_ring_tests;
 

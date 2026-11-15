@@ -1,0 +1,262 @@
+//! MIDI From plays the notes one track's instrument outputs on another track's instrument, at their exact frames.
+
+use super::*;
+use graph_test_support::{graph_engine, routing_channel, routing_plan};
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
+use vibez_core::midi::InstrumentKind;
+use vibez_core::note_output::{BlockNote, NoteOutput};
+use vibez_core::routing::RoutingChannel;
+
+const BLOCK: usize = 256;
+
+/// Plays like a phrase plugin: each render outputs the next block of notes.
+struct NotePlayer {
+    script: Arc<Mutex<VecDeque<Vec<BlockNote>>>>,
+    output: NoteOutput,
+}
+
+/// `(absolute frame, on, pitch)` as the receiving instrument heard them.
+type Heard = Arc<Mutex<Vec<(u64, bool, u8)>>>;
+
+struct Listener {
+    heard: Heard,
+    rendered: u64,
+    batch: bool,
+}
+
+impl vibez_instruments::Instrument for NotePlayer {
+    fn instrument_kind(&self) -> InstrumentKind {
+        InstrumentKind::SubtractiveSynth
+    }
+    fn param_descriptors(&self) -> &'static [vibez_core::effect::ParamDescriptor] {
+        &[]
+    }
+    fn set_param(&mut self, _: usize, _: f32) -> bool {
+        false
+    }
+    fn get_param(&self, _: usize) -> f32 {
+        0.0
+    }
+    fn note_on(&mut self, _: u8, _: u8) {}
+    fn note_off(&mut self, _: u8) {}
+    fn render(&mut self, _: &mut [f32], _: usize) {
+        self.output.clear();
+        for note in self.script.lock().unwrap().pop_front().unwrap_or_default() {
+            self.output.push(note);
+        }
+    }
+    fn note_output(&self) -> Option<&NoteOutput> {
+        Some(&self.output)
+    }
+    fn reset(&mut self) {}
+    fn supports_batch_render(&self) -> bool {
+        true
+    }
+}
+
+impl vibez_instruments::Instrument for Listener {
+    fn instrument_kind(&self) -> InstrumentKind {
+        InstrumentKind::SubtractiveSynth
+    }
+    fn param_descriptors(&self) -> &'static [vibez_core::effect::ParamDescriptor] {
+        &[]
+    }
+    fn set_param(&mut self, _: usize, _: f32) -> bool {
+        false
+    }
+    fn get_param(&self, _: usize) -> f32 {
+        0.0
+    }
+    fn note_on(&mut self, pitch: u8, _: u8) {
+        self.heard
+            .lock()
+            .unwrap()
+            .push((self.rendered, true, pitch));
+    }
+    fn note_off(&mut self, pitch: u8) {
+        self.heard
+            .lock()
+            .unwrap()
+            .push((self.rendered, false, pitch));
+    }
+    fn note_on_at(&mut self, pitch: u8, _: u8, frame: u32) {
+        let at = self.rendered + u64::from(frame);
+        self.heard.lock().unwrap().push((at, true, pitch));
+    }
+    fn note_off_at(&mut self, pitch: u8, frame: u32) {
+        let at = self.rendered + u64::from(frame);
+        self.heard.lock().unwrap().push((at, false, pitch));
+    }
+    fn render(&mut self, buffer: &mut [f32], channels: usize) {
+        self.rendered += (buffer.len() / channels) as u64;
+    }
+    fn reset(&mut self) {}
+    fn supports_batch_render(&self) -> bool {
+        self.batch
+    }
+}
+
+struct Rig {
+    engine: AudioEngine,
+    commands: rtrb::Producer<EngineCommand>,
+    events: rtrb::Consumer<EngineEvent>,
+    script: Arc<Mutex<VecDeque<Vec<BlockNote>>>>,
+    heard: Heard,
+    source: TrackId,
+    receiver: TrackId,
+}
+
+impl Rig {
+    /// The receiver is listed first, so only MIDI From can order the source ahead.
+    fn channels(&self, routed: bool) -> Vec<RoutingChannel> {
+        let mut receiving = routing_channel(self.receiver);
+        receiving.midi_from = routed.then_some(self.source);
+        vec![
+            receiving,
+            routing_channel(self.source),
+            routing_channel(TrackId::MASTER),
+        ]
+    }
+
+    fn new(batch: bool) -> Self {
+        let (source, receiver) = (TrackId::new(), TrackId::new());
+        let script = Arc::new(Mutex::new(VecDeque::new()));
+        let heard = Heard::default();
+        let mut rig = Self {
+            engine: AudioEngine::new().0,
+            commands: AudioEngine::new().1,
+            events: AudioEngine::new().2,
+            script: Arc::clone(&script),
+            heard: Arc::clone(&heard),
+            source,
+            receiver,
+        };
+        (rig.engine, rig.commands, rig.events) = graph_engine(&rig.channels(true));
+        for (track, instrument) in [
+            (
+                receiver,
+                Box::new(Listener {
+                    heard,
+                    rendered: 0,
+                    batch,
+                }) as Box<dyn vibez_instruments::Instrument>,
+            ),
+            (
+                source,
+                Box::new(NotePlayer {
+                    script,
+                    output: NoteOutput::default(),
+                }),
+            ),
+        ] {
+            rig.commands.push(EngineCommand::add_track(track)).unwrap();
+            rig.commands
+                .push(EngineCommand::SetInstrument {
+                    track_id: track,
+                    instrument,
+                })
+                .unwrap();
+        }
+        rig
+    }
+
+    fn play(&mut self, blocks: Vec<Vec<BlockNote>>) {
+        for block in blocks {
+            self.script.lock().unwrap().push_back(block);
+            self.engine.process(&mut [0.0; BLOCK * 2], 2);
+        }
+    }
+
+    fn heard(&self) -> Vec<(u64, bool, u8)> {
+        self.heard.lock().unwrap().clone()
+    }
+
+    fn source_inputs(&mut self) -> Vec<(bool, u8, u64)> {
+        let mut inputs = Vec::new();
+        while let Ok(event) = self.events.pop() {
+            if let EngineEvent::SourceNoteInput(input) = event {
+                if input.track_id == self.receiver {
+                    inputs.push((input.on, input.pitch, input.position.effective_at_samples));
+                }
+            }
+        }
+        inputs
+    }
+}
+
+#[test]
+fn the_receiver_plays_routed_notes_at_their_frames_on_either_render_path() {
+    for batch in [true, false] {
+        let mut rig = Rig::new(batch);
+
+        rig.play(vec![
+            vec![BlockNote::on(10, 60, 100)],
+            vec![BlockNote::off(44, 60)],
+        ]);
+
+        assert_eq!(
+            rig.heard(),
+            [(10, true, 60), (BLOCK as u64 + 44, false, 60)],
+            "batch {batch}"
+        );
+    }
+}
+
+#[test]
+fn routed_notes_play_while_the_transport_runs() {
+    let mut rig = Rig::new(true);
+    rig.commands.push(EngineCommand::Play).unwrap();
+
+    rig.play(vec![
+        vec![BlockNote::on(10, 60, 100)],
+        vec![BlockNote::off(44, 60)],
+    ]);
+
+    assert_eq!(
+        rig.heard(),
+        [(10, true, 60), (BLOCK as u64 + 44, false, 60)]
+    );
+}
+
+#[test]
+fn removing_the_route_mid_note_releases_it_at_the_next_block_start() {
+    let mut rig = Rig::new(true);
+    rig.play(vec![vec![BlockNote::on(10, 60, 100)]]);
+    let unrouted = routing_plan(&rig.channels(false));
+    rig.commands
+        .push(EngineCommand::SetRouting(unrouted))
+        .unwrap();
+
+    rig.play(vec![vec![BlockNote::off(44, 60)], vec![]]);
+
+    assert_eq!(rig.heard(), [(10, true, 60), (BLOCK as u64, false, 60)]);
+}
+
+#[test]
+fn stop_releases_a_routed_note_once() {
+    let mut rig = Rig::new(true);
+    rig.commands.push(EngineCommand::Play).unwrap();
+    rig.play(vec![vec![BlockNote::on(10, 60, 100)]]);
+    rig.commands.push(EngineCommand::Stop).unwrap();
+
+    rig.play(vec![vec![], vec![BlockNote::off(44, 60)]]);
+
+    assert_eq!(rig.heard(), [(10, true, 60), (BLOCK as u64, false, 60)]);
+}
+
+#[test]
+fn routed_notes_reach_recording_as_the_receivers_input_at_their_samples() {
+    let mut rig = Rig::new(true);
+    rig.commands.push(EngineCommand::Play).unwrap();
+
+    rig.play(vec![
+        vec![BlockNote::on(10, 60, 100)],
+        vec![BlockNote::off(44, 60)],
+    ]);
+
+    assert_eq!(
+        rig.source_inputs(),
+        [(true, 60, 10), (false, 60, BLOCK as u64 + 44)]
+    );
+}
