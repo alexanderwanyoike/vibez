@@ -62,3 +62,18 @@ fn a_receiver_bounce_needs_its_sources_plugin() {
 
     assert!(error.contains("Missing library"));
 }
+
+#[test]
+fn a_bounce_follows_a_chain_of_midi_from_sources() {
+    let (mut request, first) = routed_request();
+    let mut chained = bare_track("Pad");
+    chained.kind = TrackKind::Midi;
+    chained.midi_from = vibez_core::midi_from::MidiFrom::new(chained.id, request.tracks[0].id);
+    request.mode = BounceMode::Track(chained.id);
+    request.tracks.push(chained);
+
+    let ids = potential_dependency_ids(&request);
+
+    assert!(ids.contains(&request.tracks[0].id));
+    assert!(ids.contains(&first));
+}
