@@ -49,6 +49,9 @@ impl Default for NoteOutput {
 impl NoteOutput {
     /// Room for a dense arpeggio or drum fill in one block.
     pub const CAPACITY: usize = 1024;
+    /// One release per MIDI pitch, so a block flooded with note-ons cannot
+    /// strand the notes already sounding.
+    const NOTE_OFF_RESERVE: usize = 128;
 
     pub fn clear(&mut self) {
         self.notes.clear();
@@ -56,11 +59,16 @@ impl NoteOutput {
 
     /// False when the note was dropped.
     pub fn push(&mut self, note: BlockNote) -> bool {
-        if self.notes.len() < Self::CAPACITY {
-            self.notes.push(note);
+        let limit = if note.on {
+            Self::CAPACITY - Self::NOTE_OFF_RESERVE
         } else {
+            Self::CAPACITY
+        };
+        if self.notes.len() >= limit {
             self.dropped += 1;
+            return false;
         }
+        self.notes.push(note);
         true
     }
 
