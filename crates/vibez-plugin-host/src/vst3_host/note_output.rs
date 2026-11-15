@@ -28,7 +28,8 @@ impl<'a> Vst3NoteOutput<'a> {
         (self as *mut Self).cast()
     }
 
-    fn add(&mut self, event: &VstEvent) {
+    /// False when the note was dropped.
+    fn add(&mut self, event: &VstEvent) -> bool {
         let frame = u32::try_from(event.sampleOffset).unwrap_or(0);
         // SAFETY: the type tag selects the union field the plugin wrote.
         let note = if u32::from(event.r#type) == kNoteOnEvent {
@@ -40,9 +41,7 @@ impl<'a> Vst3NoteOutput<'a> {
         } else {
             None
         };
-        if let Some(note) = note {
-            self.notes.push(note);
-        }
+        note.is_none_or(|note| self.notes.push(note))
     }
 }
 
@@ -69,13 +68,14 @@ unsafe extern "system" fn get(
     }
 }
 
-/// Every event is accepted: notes are kept or counted as dropped, and other
-/// output (CC, sysex) is not used yet.
+/// Events other than notes (CC, sysex) are accepted and unused.
 unsafe extern "system" fn add(this: *mut std::ffi::c_void, event: *mut VstEvent) -> i32 {
-    if !event.is_null() {
-        unsafe { (*this.cast::<Vst3NoteOutput<'_>>()).add(&*event) };
+    let added = !event.is_null() && unsafe { (*this.cast::<Vst3NoteOutput<'_>>()).add(&*event) };
+    if added {
+        0
+    } else {
+        1
     }
-    0
 }
 
 static NOTE_OUTPUT_VTBL: EventListVtbl = EventListVtbl {
