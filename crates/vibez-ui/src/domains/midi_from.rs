@@ -24,6 +24,31 @@ pub fn sources(tracks: &[ProjectTrack], receiver: TrackId) -> Vec<TrackId> {
         .collect()
 }
 
+/// One entry in a MIDI track's MIDI From picker.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MidiFromChoice {
+    pub source: Option<TrackId>,
+    pub label: String,
+}
+
+impl std::fmt::Display for MidiFromChoice {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.label)
+    }
+}
+
+/// The picker's entries for `receiver`, and the one it shows as chosen.
+pub fn choices(
+    _tracks: &[ProjectTrack],
+    _receiver: &ProjectTrack,
+) -> (Vec<MidiFromChoice>, MidiFromChoice) {
+    let none = MidiFromChoice {
+        source: None,
+        label: String::new(),
+    };
+    (Vec::new(), none)
+}
+
 /// The MIDI From `receiver` would have after choosing `source`, or `None`
 /// when that is no change or `source` is not one of its [`sources`].
 pub fn change(
@@ -216,6 +241,39 @@ mod tests {
         chain[1].midi_from = MidiFrom::new(second.id, first.id);
         drop_impossible(&mut chain);
         assert_eq!(chain[1].midi_from, MidiFrom::new(second.id, first.id));
+    }
+
+    #[test]
+    fn the_picker_offers_no_input_then_each_source_and_shows_the_current_choice() {
+        let (rebeater, arp, lead) = (
+            plugin_track("Rebeater"),
+            plugin_track("Arp"),
+            plugin_track("Lead"),
+        );
+        let mut tracks = project(vec![rebeater.clone(), arp.clone(), lead.clone()]);
+
+        let (entries, chosen) = choices(&tracks.tracks, &tracks.tracks[2]);
+        let labels: Vec<_> = entries.iter().map(ToString::to_string).collect();
+        assert_eq!(labels, ["No Input", "MF \u{b7} Rebeater", "MF \u{b7} Arp"]);
+        assert_eq!(chosen.source, None);
+        assert_eq!(entries[2].source, Some(arp.id));
+
+        set(&mut tracks, lead.id, Some(arp.id));
+        let (_, chosen) = choices(&tracks.tracks, &tracks.tracks[2]);
+        assert_eq!(chosen.label, "MF \u{b7} Arp");
+    }
+
+    #[test]
+    fn a_choice_that_is_no_longer_offered_still_shows() {
+        let (rebeater, lead) = (plugin_track("Rebeater"), plugin_track("Lead"));
+        let mut tracks = project(vec![rebeater.clone(), lead.clone()]);
+        set(&mut tracks, lead.id, Some(rebeater.id));
+        tracks.tracks[0].plugin_instrument_ref = None;
+
+        let (entries, chosen) = choices(&tracks.tracks, &tracks.tracks[1]);
+
+        assert_eq!(chosen.label, "MF \u{b7} Rebeater");
+        assert!(entries.contains(&chosen));
     }
 
     #[test]

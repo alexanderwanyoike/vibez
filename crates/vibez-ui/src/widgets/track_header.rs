@@ -60,6 +60,10 @@ fn shows_audio_input(track: &ProjectTrack) -> bool {
     track.kind == TrackKind::Audio
 }
 
+fn shows_midi_from(_track: &ProjectTrack) -> bool {
+    false
+}
+
 impl TrackHeaderFlags {
     /// Whether the quiet add action is shown and clickable.
     fn shows_actions(self) -> bool {
@@ -547,6 +551,15 @@ mod tests {
         assert!(hovered.shows_automation_toggle());
         assert!(!automation_open.shows_actions());
         assert!(automation_open.shows_automation_toggle());
+    }
+
+    #[test]
+    fn only_a_midi_header_shows_midi_from() {
+        let mut midi = audio_track();
+        midi.kind = TrackKind::Midi;
+
+        assert!(shows_midi_from(&midi));
+        assert!(!shows_midi_from(&audio_track()));
     }
 
     #[test]
