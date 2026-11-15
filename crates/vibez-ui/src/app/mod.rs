@@ -192,6 +192,9 @@ mod instrument_devices;
 mod keyboard;
 mod local_watcher;
 mod menu_lifecycle;
+mod midi_from;
+#[cfg(test)]
+mod midi_from_tests;
 mod param_entry;
 mod phaser_devices;
 mod reverb_devices;

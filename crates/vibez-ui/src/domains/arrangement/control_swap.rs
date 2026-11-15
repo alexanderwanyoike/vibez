@@ -30,6 +30,7 @@ pub fn swap_changed_controls(
         name: _,
         audio_input_route: _,
         input_monitoring: _,
+        midi_from: _,
         peak_l: _,
         peak_r: _,
         kind: _,

@@ -102,6 +102,30 @@ fn removing_a_resample_source_resets_dependent_audio_track_routes() {
 }
 
 #[test]
+fn removing_a_midi_from_source_clears_the_tracks_that_took_from_it() {
+    let mut a = arrangement_with_tracks(2);
+    let source = a.tracks[0].id;
+    let receiver = a.tracks[1].id;
+    a.tracks[1].midi_from = vibez_core::midi_from::MidiFrom::new(receiver, source);
+    let mut engine = RecordingEngine::default();
+
+    a.update(
+        ArrangementMsg::RemoveTrack(source),
+        &mut engine,
+        ArrangementCtx::default(),
+    );
+
+    assert_eq!(
+        a.tracks
+            .iter()
+            .find(|track| track.id == receiver)
+            .unwrap()
+            .midi_from,
+        None,
+    );
+}
+
+#[test]
 fn remove_bus_clears_sends_and_their_automation_lanes() {
     let mut a = arrangement_with_tracks(1);
     let track_id = a.tracks[0].id;

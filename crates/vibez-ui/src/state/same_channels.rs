@@ -38,6 +38,7 @@ fn same_track(track: &ProjectTrack, other: &ProjectTrack) -> bool {
         solo: _,
         audio_input_route,
         input_monitoring,
+        midi_from: _,
         swing_offset: _,
         peak_l: _,
         peak_r: _,

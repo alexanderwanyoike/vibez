@@ -167,6 +167,8 @@ pub enum Message {
     // Track controls
     ToggleAudioTrackArm(TrackId),
     SetAudioTrackInputRoute(TrackId, AudioInputRoute),
+    /// Set or clear the track a MIDI track takes its played notes from.
+    SetMidiFrom(TrackId, Option<TrackId>),
     SetAudioTrackMonitoring(TrackId, InputMonitoring),
     ToggleAudioRecording,
     AudioRecordingFinalized(Result<AudioRecordingOutcome, String>),
