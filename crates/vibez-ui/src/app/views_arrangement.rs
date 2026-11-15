@@ -225,16 +225,7 @@ impl App {
             .state
             .browser
             .drag_preview_beats(self.state.transport.bpm);
-        let browser_drag_detail = self.state.browser.drag_label.as_ref().map(|label| {
-            let mode = match self.state.browser.audition_mode {
-                crate::state::AuditionMode::Raw => "RAW",
-                crate::state::AuditionMode::Warp => "WARP",
-            };
-            match browser_drag_duration {
-                Some(beats) => format!("{label} · {mode} · {beats:.2} beats"),
-                None => format!("{label} · {mode}"),
-            }
-        });
+        let browser_drag_detail = self.state.browser.drag_detail(self.state.transport.bpm);
 
         // Track rows: header widgets + clip canvas
         // Real vertical layout of the column, so a rubber-band drag can map
