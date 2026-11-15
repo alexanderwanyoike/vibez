@@ -106,6 +106,7 @@ fn thirty_two_retired_generations_never_block_note_off_stop_or_ui_reaping() {
                         is_bus: id.is_master(),
                         effects: vec![],
                         sends: vec![],
+                        midi_from: None,
                     }),
                     vibez_engine::routing::MAX_BLOCK_FRAMES,
                 )

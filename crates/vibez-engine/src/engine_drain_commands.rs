@@ -979,7 +979,7 @@ impl AudioEngine {
                     };
                     let (source, event) =
                         EngineEvent::repeated_pair(track_id, trigger, recording, recording.into());
-                    if !presentation_queue::emit_repeated(
+                    if !presentation_queue::emit_pair(
                         source,
                         event,
                         &mut self.event_tx,

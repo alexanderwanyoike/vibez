@@ -57,6 +57,7 @@ fn missing_track_or_clip_returns_complete_prepared_note_value_without_callback_h
                 is_bus: id.is_master(),
                 sends: Vec::new(),
                 effects: Vec::new(),
+                midi_from: None,
             })
             .collect();
         commands

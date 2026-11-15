@@ -466,6 +466,7 @@ mod clip_event_timing_tests {
             is_bus: id == TrackId::MASTER,
             effects: vec![],
             sends: vec![],
+            midi_from: None,
         }
     }
 

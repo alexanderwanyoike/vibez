@@ -214,9 +214,12 @@ impl AudioEngine {
             }
             match node.stage {
                 NodeStage::Source => {
+                    self.forget_played_notes(channel_index);
                     if self.is_device_recovering(node.channel, None) {
+                        self.release_routed_notes(channel_index);
                         continue;
                     }
+                    self.admit_routed_notes(channel_index, frames as u32);
                     let prepared = self.routing.as_mut();
                     let Some(track) =
                         binding.get_mut(&mut self.tracks, &mut self.buses, &mut self.master)
@@ -269,89 +272,55 @@ impl AudioEngine {
                     let presentation = &prepared.presentation;
                     let performing = self.clock_domain == ClockDomain::Perform || idle;
                     let mut presentation_overflow = false;
+                    let clock = super::live_note_clock::LiveNoteClock {
+                        arrange: block.pos,
+                        local: pos,
+                        perform: block.repeat_pos,
+                        section,
+                        presentation,
+                        omitted,
+                        path,
+                        performing,
+                        continuous_sample,
+                    };
+                    for &note in track.routed_notes.notes() {
+                        let sample = block.repeat_pos + u64::from(note.frame);
+                        let (source, event) = EngineEvent::input_pair(
+                            id,
+                            note,
+                            clock.source(sample, sample),
+                            clock.heard(sample, sample),
+                        );
+                        presentation_overflow = presentation_overflow
+                            || !presentation_queue::emit_pair(
+                                source,
+                                event,
+                                events,
+                                scheduled,
+                                continuous_sample,
+                                clock.due(sample),
+                                self.output_position,
+                            );
+                    }
                     let mut repeated = |trigger: crate::note_repeat::NoteRepeatTrigger| {
                         if presentation_overflow {
                             return;
                         }
-                        let context_for = |sample: u64| {
-                            let relative =
-                                sample as i128 - block.repeat_pos as i128 - omitted as i128;
-                            if relative < 0 {
-                                u32::try_from(-relative)
-                                    .ok()
-                                    .and_then(|delay| presentation.before_block(delay))
-                            } else {
-                                let delta = relative as u64;
-                                Some(crate::compensation_clock::PresentationPosition {
-                                    arrange: block.pos.saturating_add(delta),
-                                    perform: block.repeat_pos.saturating_add(delta),
-                                    section_id: section.map(|active| active.section_id),
-                                    section: section.map(|active| {
-                                        section_record::section_sample_for_performance(
-                                            pos,
-                                            block.repeat_pos,
-                                            sample.saturating_sub(omitted as u64),
-                                            active.length_samples,
-                                        )
-                                    }),
-                                    ..Default::default()
-                                })
-                            }
-                        };
-                        let effective_context = context_for(trigger.effective_at_samples);
-                        let canonical_context = context_for(trigger.canonical_at_samples);
-                        let recording = crate::events::SourceRecordingPosition::from_trigger(
+                        let (effective, canonical) =
+                            (trigger.effective_at_samples, trigger.canonical_at_samples);
+                        let (source, event) = EngineEvent::repeated_pair(
+                            id,
                             trigger,
-                            section.map(|active| crate::events::SourceSectionClock {
-                                id: active.section_id,
-                                local_sample: pos,
-                                performance_sample: block.repeat_pos,
-                                length: active.length_samples,
-                            }),
+                            clock.source(effective, canonical),
+                            clock.heard(effective, canonical),
                         );
-                        let notice = crate::events::RepeatNoticePosition {
-                            effective_at_samples: effective_context.map_or_else(
-                                || trigger.effective_at_samples.saturating_sub(omitted as u64),
-                                |context| {
-                                    if performing {
-                                        context.perform
-                                    } else {
-                                        context.arrange
-                                    }
-                                },
-                            ),
-                            canonical_at_samples: canonical_context.map_or_else(
-                                || trigger.canonical_at_samples.saturating_sub(omitted as u64),
-                                |context| {
-                                    if performing {
-                                        context.perform
-                                    } else {
-                                        context.arrange
-                                    }
-                                },
-                            ),
-                            section_id: effective_context.and_then(|context| context.section_id),
-                            section_position_samples: effective_context
-                                .and_then(|context| context.section),
-                            canonical_section_position_samples: canonical_context
-                                .and_then(|context| context.section),
-                        };
-                        let (source, event) =
-                            EngineEvent::repeated_pair(id, trigger, recording, notice);
-                        let due = continuous_sample
-                            .saturating_add(
-                                trigger
-                                    .effective_at_samples
-                                    .saturating_sub(block.repeat_pos),
-                            )
-                            .saturating_add(path as u64);
-                        presentation_overflow = !presentation_queue::emit_repeated(
+                        presentation_overflow = !presentation_queue::emit_pair(
                             source,
                             event,
                             events,
                             scheduled,
                             continuous_sample,
-                            due,
+                            clock.due(effective),
                             self.output_position,
                         );
                     };
@@ -393,6 +362,7 @@ impl AudioEngine {
                         }
                     }
                     std::mem::swap(&mut track.mix_buffer, &mut prepared.nodes[index].samples);
+                    track.keep_played_notes();
                     let activity = track.take_note_activity();
                     if presentation_overflow {
                         self.fail_presentation();

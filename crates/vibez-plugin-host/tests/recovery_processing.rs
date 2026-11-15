@@ -33,6 +33,7 @@ fn channel(id: TrackId, effect: Option<EffectId>) -> RoutingChannel {
                 inactive_inputs: vec![],
             })
             .collect(),
+        midi_from: None,
     }
 }
 

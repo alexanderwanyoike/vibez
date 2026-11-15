@@ -94,6 +94,7 @@ pub(super) fn actual_dependencies(
                     })
                     .collect()
             },
+            midi_from: None,
         })
         .collect();
     if !graph_channels.iter().any(|channel| channel.id.is_master()) {
@@ -102,6 +103,7 @@ pub(super) fn actual_dependencies(
             is_bus: true,
             sends: vec![],
             effects: vec![],
+            midi_from: None,
         });
     }
     RenderDependencies {

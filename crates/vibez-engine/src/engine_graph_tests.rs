@@ -11,6 +11,7 @@ fn channel(id: TrackId) -> RoutingChannel {
         is_bus: false,
         effects: vec![],
         sends: vec![],
+        midi_from: None,
     }
 }
 

@@ -91,6 +91,7 @@ mod tests {
                     tap: SourceTap::AfterEffects,
                 }],
             }],
+            midi_from: None,
         }
     }
 
@@ -144,6 +145,7 @@ mod tests {
             is_bus: true,
             effects: vec![],
             sends: vec![],
+            midi_from: None,
         };
         let previous = vec![first.clone(), active_receiver.clone()];
         assert!(RoutingGraph::prepare(&previous).is_ok());

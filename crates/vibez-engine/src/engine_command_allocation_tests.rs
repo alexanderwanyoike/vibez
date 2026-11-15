@@ -1049,6 +1049,7 @@ fn public_add_clip_at_exhausted_capacity_preserves_content_without_callback_heap
             is_bus: id.is_master(),
             sends: Vec::new(),
             effects: Vec::new(),
+            midi_from: None,
         })
         .collect();
     commands
@@ -1234,6 +1235,7 @@ fn public_add_clip_to_missing_track_returns_unique_payload_without_callback_heap
             is_bus: id.is_master(),
             sends: Vec::new(),
             effects: Vec::new(),
+            midi_from: None,
         })
         .collect();
     commands

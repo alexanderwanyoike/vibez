@@ -86,12 +86,14 @@ fn plan(
                     inactive_inputs: vec![],
                 })
                 .collect(),
+            midi_from: None,
         },
         RoutingChannel {
             id: TrackId::MASTER,
             is_bus: true,
             sends: vec![],
             effects: vec![],
+            midi_from: None,
         },
     ];
     crate::routing::PreparedRouting::prepare_compensated(&channels, 32, &[], &[], generation)

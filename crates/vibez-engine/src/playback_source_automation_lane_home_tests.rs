@@ -89,6 +89,7 @@ fn queued_section_with_colliding_lane_id_keeps_arrange_growth_and_perform_owners
         is_bus: id.is_master(),
         sends: vec![],
         effects: vec![],
+        midi_from: None,
     });
     let mut routing = crate::routing::PreparedRouting::prepare(&channels, 8).unwrap();
     routing

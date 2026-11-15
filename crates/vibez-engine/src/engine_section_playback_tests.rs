@@ -664,12 +664,14 @@ fn section_refresh_fixture(delay: u32) -> SectionRefreshFixture {
                 assignments: vec![],
                 inactive_inputs: vec![],
             }],
+            midi_from: None,
         },
         RoutingChannel {
             id: TrackId::MASTER,
             is_bus: true,
             effects: vec![],
             sends: vec![],
+            midi_from: None,
         },
     ];
     let reports = [(

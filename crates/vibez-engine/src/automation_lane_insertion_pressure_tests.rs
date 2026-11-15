@@ -60,6 +60,7 @@ impl Fixture {
             is_bus: id.is_master(),
             sends: vec![],
             effects: vec![],
+            midi_from: None,
         });
         let mut routing = crate::routing::PreparedRouting::prepare(&model, 64).unwrap();
         routing

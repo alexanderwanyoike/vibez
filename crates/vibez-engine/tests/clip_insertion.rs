@@ -101,6 +101,7 @@ fn native_consumer_fulfills_clip_growth_requests_across_capacity_boundaries() {
                 is_bus: id.is_master(),
                 sends: Vec::new(),
                 effects: Vec::new(),
+                midi_from: None,
             })
             .collect();
         commands
