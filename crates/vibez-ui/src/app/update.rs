@@ -788,6 +788,8 @@ impl App {
             | Message::EscapePressed
             | Message::DropSampleOnArrangement { .. }
             | Message::DropSampleOnEmptyArrangement
+            | Message::MidiFileRead { .. }
+            | Message::ChooseMidiFileLayout(..)
             | Message::DropSampleOnDrumPad { .. }
             | Message::DropSampleOnSampler { .. }
             | Message::DropSampleOnDrumRack { .. }

@@ -14,20 +14,42 @@ use crate::state::{ArrangementTimeline, AuditionMode, UiClip};
 use super::App;
 
 impl App {
+    /// Fills an empty slot with a new Clip holding `timeline` and opens it in
+    /// the Clip editor.
+    pub(super) fn add_launcher_clip(
+        &mut self,
+        id: ClipId,
+        track_id: TrackId,
+        row: u32,
+        timeline: ArrangementTimeline,
+    ) {
+        Arc::make_mut(&mut self.state.perform.clips)
+            .clips
+            .push(LauncherClip {
+                id,
+                track_id,
+                row,
+                timeline: Arc::new(timeline),
+                launch: Default::default(),
+            });
+        self.state.perform.select_launcher_clip(id);
+        self.state.view.detail_panel_tab = crate::state::DetailPanelTab::Clip;
+        self.state.arrangement.selected_track = Some(track_id);
+    }
+
     pub(super) fn add_audio_launcher_clip(
         &mut self,
         track_id: TrackId,
         row: u32,
         payload: PreparedBrowserImport,
     ) -> Task<Message> {
-        if self.state.perform.layout != PerformLayout::Clips
+        if !self.state.perform.launcher_slot_is_free(track_id, row)
             || self
                 .state
                 .find_track(track_id)
                 .is_none_or(|track| track.kind.is_midi())
-            || self.state.perform.clips.at(track_id, row).is_some()
         {
-            self.state.status_text = "Clip slot is no longer available".into();
+            self.state.status_text = crate::domains::perform::LAUNCHER_SLOT_GONE.into();
             return Task::none();
         }
         let PreparedBrowserImport {
@@ -65,19 +87,8 @@ impl App {
         };
         let mut timeline = ArrangementTimeline::default();
         timeline.ensure(track_id).clips.push(clip);
-        Arc::make_mut(&mut self.state.perform.clips)
-            .clips
-            .push(LauncherClip {
-                id,
-                track_id,
-                row,
-                timeline: Arc::new(timeline),
-                launch: Default::default(),
-            });
-        self.state.perform.select_launcher_clip(id);
-        self.state.view.detail_panel_tab = crate::state::DetailPanelTab::Clip;
-        self.state.arrangement.selected_track = Some(track_id);
-        self.state.status_text = format!("Added {name} to Clip row {}", row + 1);
+        self.add_launcher_clip(id, track_id, row, timeline);
+        self.state.status_text = LauncherClip::added_status(&name, row);
         self.mark_project_dirty();
         self.schedule_auto_detect_clip_transients(TimelineLocation::LauncherClip(id), track_id, id)
     }

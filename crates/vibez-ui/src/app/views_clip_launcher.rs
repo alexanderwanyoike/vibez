@@ -676,19 +676,17 @@ impl App {
                         border: iced::Border::default(),
                         ..Default::default()
                     });
-                    let cell: Element<'_, Message> = if !track.kind.is_midi()
-                        && slot.is_none()
-                        && self.state.browser.drag_source.is_some()
-                    {
-                        mouse_area(slot_cell)
-                            .on_release(Message::ImportLauncherClip {
-                                track_id: track.id,
-                                row: slot_row,
-                            })
-                            .into()
-                    } else {
-                        slot_cell.into()
-                    };
+                    let cell: Element<'_, Message> =
+                        if slot.is_none() && self.state.browser.drag_lands_on(track.kind) {
+                            mouse_area(slot_cell)
+                                .on_release(Message::ImportLauncherClip {
+                                    track_id: track.id,
+                                    row: slot_row,
+                                })
+                                .into()
+                        } else {
+                            slot_cell.into()
+                        };
                     let play: Element<'_, Message> = if let Some(clip) = slot {
                         let triggered = self.state.perform.clip_is_triggered(clip);
                         self.view_clip_cell_action(

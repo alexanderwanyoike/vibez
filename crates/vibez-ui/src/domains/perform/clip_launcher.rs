@@ -51,6 +51,11 @@ impl<'a> SlotPart<'a> {
 }
 
 impl LauncherClip {
+    /// What the status bar says when `name` fills a slot in `row`.
+    pub fn added_status(name: &str, row: u32) -> String {
+        format!("Added {name} to Clip row {}", row + 1)
+    }
+
     pub fn part(&self) -> Option<SlotPart<'_>> {
         SlotPart::at(&self.timeline, self.track_id)
     }
@@ -328,7 +333,16 @@ impl ClipMsg {
     }
 }
 
+/// What a drop says when its Clip slot filled, or the layout changed, while
+/// its media was prepared.
+pub const LAUNCHER_SLOT_GONE: &str = "Clip slot is no longer available";
+
 impl PerformState {
+    /// Whether a new Clip may go in `track_id`'s slot in `row`.
+    pub fn launcher_slot_is_free(&self, track_id: TrackId, row: u32) -> bool {
+        self.layout == PerformLayout::Clips && self.clips.at(track_id, row).is_none()
+    }
+
     pub fn toggle_clip_request(&self, id: ClipId) -> Option<ClipLaunchRequest> {
         let clip = self.clips.by_id(id)?;
         Some(if self.clip_is_triggered(clip) {

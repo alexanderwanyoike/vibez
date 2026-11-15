@@ -5473,6 +5473,7 @@ dependencies = [
  "dirs 5.0.1",
  "iced",
  "iced_runtime",
+ "midly",
  "notify",
  "objc2 0.6.3",
  "objc2-app-kit 0.3.2",

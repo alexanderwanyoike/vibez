@@ -87,6 +87,20 @@ pub enum BrowserMsg {
     SetDropboxAppKey(String),
 }
 
+impl BrowserMsg {
+    /// Whether this hovers an instrument or device target, which take
+    /// samples only.
+    fn hovers_a_device_target(&self) -> bool {
+        matches!(
+            self,
+            Self::DragHoverSampler { .. }
+                | Self::DragHoverDrumRackPad { .. }
+                | Self::DragHoverDrumRack { .. }
+                | Self::DragHoverDevicePanel { .. }
+        )
+    }
+}
+
 /// Cross-domain effects requested by a browser update.
 #[derive(Debug, Default, PartialEq)]
 pub struct BrowserAction {
@@ -103,18 +117,67 @@ pub struct BrowserAction {
     pub scan_root: Option<(PathBuf, u64)>,
 }
 
+/// What a drag carries, which decides the tracks it lands on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DragMedia {
+    Audio,
+    Midi,
+}
+
+impl DragMedia {
+    pub fn of(source: &MediaSourceRef) -> Self {
+        match source {
+            MediaSourceRef::LocalFile { path }
+                if vibez_core::midi_file::is_midi_file_path(path) =>
+            {
+                Self::Midi
+            }
+            _ => Self::Audio,
+        }
+    }
+
+    /// Whether a lane of `kind` takes this media.
+    pub fn lands_on(self, kind: vibez_core::midi::TrackKind) -> bool {
+        kind.is_midi() == (self == Self::Midi)
+    }
+
+    /// The media's name as a sentence starts it.
+    fn title(self) -> &'static str {
+        match self {
+            Self::Audio => "Audio",
+            Self::Midi => "MIDI",
+        }
+    }
+
+    fn noun(self) -> &'static str {
+        match self {
+            Self::Audio => "audio",
+            Self::Midi => "MIDI",
+        }
+    }
+
+    /// What a lane of the other kind says when it turns this media away.
+    fn refused_lane_status(self) -> String {
+        match self {
+            Self::Audio => "Audio can't go on a MIDI lane".into(),
+            Self::Midi => "MIDI can't go on an audio lane".into(),
+        }
+    }
+}
+
 impl crate::state::BrowserDropTarget {
-    /// What a release here does, as the status bar says it.
-    pub fn status(&self) -> String {
+    /// What a release of `media` here does, as the status bar says it.
+    pub fn status(&self, media: DragMedia) -> String {
         use crate::state::BrowserDropTarget as Target;
+        let kind = media.noun();
         match self {
             Target::ArrangementLane {
                 beat,
                 compatible: true,
                 ..
-            } => format!("Audio lane at beat {beat:.2}"),
-            Target::ArrangementLane { .. } => "Audio can't go on a MIDI lane".into(),
-            Target::EmptyArrangement { beat } => format!("New audio track at beat {beat:.2}"),
+            } => format!("{} lane at beat {beat:.2}", media.title()),
+            Target::ArrangementLane { .. } => media.refused_lane_status(),
+            Target::EmptyArrangement { beat } => format!("New {kind} track at beat {beat:.2}"),
             Target::Sampler { .. } => DevicePanelDrop::LoadIntoExisting.hover_status(),
             Target::DrumRackPad { pad_index, .. } => {
                 format!("Load into Drum Rack pad {}", pad_index + 1)
@@ -151,6 +214,32 @@ impl crate::state::BrowserDropTarget {
 }
 
 impl BrowserState {
+    /// What the drag in flight carries.
+    pub fn drag_media(&self) -> Option<DragMedia> {
+        self.drag_source.as_ref().map(DragMedia::of)
+    }
+
+    /// Whether a lane of `kind` takes the drag in flight.
+    pub fn drag_lands_on(&self, kind: vibez_core::midi::TrackKind) -> bool {
+        self.drag_media().is_some_and(|media| media.lands_on(kind))
+    }
+
+    /// Why a lane of `kind` turns the drag in flight away, if it does.
+    pub fn lane_refusal(&self, kind: vibez_core::midi::TrackKind) -> Option<String> {
+        let media = self.drag_media()?;
+        (!media.lands_on(kind)).then(|| media.refused_lane_status())
+    }
+
+    /// Instrument and device targets take samples, never MIDI files; a MIDI
+    /// drag passing over one says where it can go instead.
+    fn refuses_device_targets(&mut self) -> Option<String> {
+        if self.drag_media() != Some(DragMedia::Midi) {
+            return None;
+        }
+        self.drag_target = None;
+        Some(crate::domains::midi_file_import::MIDI_FILE_TARGETS.into())
+    }
+
     /// Whether a release would take the audio, for the ghost's dot; with no
     /// target under the cursor there is nothing to judge.
     pub fn drag_accepted(&self) -> Option<bool> {
@@ -161,7 +250,9 @@ impl BrowserState {
 
     /// The zone to mark where a release would land.
     pub fn drop_zone(&self) -> Option<crate::domains::drop_zone::DropZone> {
-        self.drag_target.as_ref()?.drop_zone()
+        self.drag_target
+            .as_ref()?
+            .drop_zone(self.drag_media().unwrap_or(DragMedia::Audio))
     }
 
     /// The zone `track_id`'s lane marks while a drag hovers it.
@@ -195,7 +286,7 @@ impl BrowserState {
 
     /// Makes `target` the drop target and returns its status.
     fn hover(&mut self, target: crate::state::BrowserDropTarget) -> String {
-        let status = target.status();
+        let status = target.status(self.drag_media().unwrap_or(DragMedia::Audio));
         self.drag_target = Some(target);
         status
     }
@@ -209,7 +300,11 @@ impl BrowserState {
 
     fn moving_status(&self) -> String {
         let label = self.drag_label.as_deref().unwrap_or("media");
-        format!("Moving {label} - choose an audio lane, empty Arrange, or a MIDI track's devices")
+        let targets = match self.drag_media() {
+            Some(DragMedia::Midi) => "a MIDI lane, empty Arrange, or a MIDI track's Clip slot",
+            _ => "an audio lane, empty Arrange, or a MIDI track's devices",
+        };
+        format!("Moving {label} - choose {targets}")
     }
 
     fn hovers_drum_rack_pad(&self, track_id: TrackId) -> bool {
@@ -233,6 +328,12 @@ impl BrowserState {
 
     pub fn update(&mut self, msg: BrowserMsg) -> BrowserAction {
         let mut action = BrowserAction::default();
+        if msg.hovers_a_device_target() {
+            if let Some(status) = self.refuses_device_targets() {
+                action.status = Some(status);
+                return action;
+            }
+        }
         match msg {
             BrowserMsg::SetKeyboardFocus(focused) => self.keyboard_focus = focused && self.open,
             BrowserMsg::ToggleSampleBrowser => {
@@ -286,7 +387,8 @@ impl BrowserState {
                     .saturating_add(crate::state::BROWSER_RESULTS_PAGE_SIZE);
             }
             BrowserMsg::SelectSampleBrowserEntry(source) => {
-                if self.select_source(source.clone()) {
+                if self.select_source(source.clone()) && DragMedia::of(&source) == DragMedia::Audio
+                {
                     action.load_waveform = Some(source);
                 }
             }
@@ -586,6 +688,10 @@ impl BrowserState {
         action
     }
 }
+
+#[cfg(test)]
+#[path = "browser_midi_drag_tests.rs"]
+mod midi_drag_tests;
 
 #[cfg(test)]
 #[path = "browser_tests.rs"]

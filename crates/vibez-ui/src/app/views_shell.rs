@@ -152,21 +152,11 @@ impl App {
             .on_release(Message::Browser(BrowserMsg::EndDragSample))
             .into();
         let base_layout: Element<'_, Message> =
-            if let Some(label) = self.state.browser.drag_label.as_ref() {
-                let mode = match self.state.browser.audition_mode {
-                    crate::state::AuditionMode::Raw => "RAW",
-                    crate::state::AuditionMode::Warp => "WARP",
-                };
-                let length = self
-                    .state
-                    .browser
-                    .drag_preview_beats(self.state.transport.bpm)
-                    .map(|beats| format!(" · {beats:.2} beats"))
-                    .unwrap_or_default();
+            if let Some(title) = self.state.browser.drag_detail(self.state.transport.bpm) {
                 let valid = self.state.browser.drag_accepted();
                 let ghost = canvas(crate::widgets::browser_drag_ghost::BrowserDragGhost {
                     cursor: iced::Point::new(self.state.view.cursor_x, self.state.view.cursor_y),
-                    title: format!("{label} · {mode}{length}"),
+                    title,
                     valid,
                 })
                 .width(Length::Fill)
@@ -193,6 +183,8 @@ impl App {
             stack![base_layout, self.view_transient_analysis_overlay()].into()
         } else if self.state.view.drum_rack_slice_dialog.is_some() {
             stack![base_layout, self.view_drum_rack_slice_overlay()].into()
+        } else if let Some(choice) = &self.state.view.midi_file_layout_choice {
+            stack![base_layout, self.view_midi_file_layout_overlay(choice)].into()
         } else if self.state.settings_open {
             stack![base_layout, self.view_settings_modal()].into()
         } else if self.state.about_open {

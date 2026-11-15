@@ -560,6 +560,23 @@ impl BrowserState {
         self.drag_target = None;
     }
 
+    /// The drag's name, how it imports and its musical length, as the lane
+    /// it hovers previews it.
+    pub fn drag_detail(&self, project_bpm: f64) -> Option<String> {
+        let label = self.drag_label.as_ref()?;
+        if self.drag_media() == Some(crate::domains::browser::DragMedia::Midi) {
+            return Some(format!("{label} · MIDI"));
+        }
+        let mode = match self.audition_mode {
+            AuditionMode::Raw => "RAW",
+            AuditionMode::Warp => "WARP",
+        };
+        Some(match self.drag_preview_beats(project_bpm) {
+            Some(beats) => format!("{label} · {mode} · {beats:.2} beats"),
+            None => format!("{label} · {mode}"),
+        })
+    }
+
     pub fn drag_preview_beats(&self, project_bpm: f64) -> Option<f64> {
         let source = self.drag_source.as_ref()?;
         if self.waveform_source.as_ref()? != source {

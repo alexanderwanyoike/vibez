@@ -141,6 +141,9 @@ pub struct ViewState {
     pub clip_grid: GridConfig,
     pub context_menu: Option<ContextMenu>,
     pub drum_rack_slice_dialog: Option<DrumRackSliceDialog>,
+    /// A dropped multi-track MIDI file waiting for the producer to choose
+    /// how it lands.
+    pub midi_file_layout_choice: Option<crate::domains::midi_file_import::MidiFileLayoutChoice>,
     pub transient_analysis_dialog: Option<TransientAnalysisDialog>,
     pub edit_menu_open: bool,
     pub cursor_x: f32, // globally tracked for popup positioning and pane drags
@@ -180,6 +183,7 @@ impl Default for ViewState {
             clip_grid: GridConfig::default(),
             context_menu: None,
             drum_rack_slice_dialog: None,
+            midi_file_layout_choice: None,
             transient_analysis_dialog: None,
             edit_menu_open: false,
             cursor_x: 0.0,

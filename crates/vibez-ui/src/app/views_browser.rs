@@ -351,7 +351,13 @@ impl App {
                 &metadata_detail,
                 entry.file_size,
             );
-            let compact_detail = format!("BPM {bpm} · {length} · {source_detail}");
+            let midi = crate::domains::browser::DragMedia::of(&entry.source)
+                == crate::domains::browser::DragMedia::Midi;
+            let compact_detail = if midi {
+                source_detail.clone()
+            } else {
+                format!("BPM {bpm} · {length} · {source_detail}")
+            };
             // mouse_area returns early if its child captures the event, so
             // iced Button underneath would swallow press events. Use a
             // plain container as the click target instead.
@@ -396,9 +402,19 @@ impl App {
                 .into()
             };
             let entry_body = container(
-                row![browser_result_icon(false, selected), table_cells]
-                    .spacing(9)
-                    .align_y(iced::Alignment::Center),
+                row![
+                    browser_result_icon(
+                        if midi {
+                            crate::icons::MUSIC
+                        } else {
+                            browser_result_glyph(false)
+                        },
+                        selected
+                    ),
+                    table_cells
+                ]
+                .spacing(9)
+                .align_y(iced::Alignment::Center),
             )
             .padding([6, 8])
             .width(Length::Fill);
@@ -537,9 +553,12 @@ impl App {
 
         button(
             container(
-                row![browser_result_icon(true, false), cells]
-                    .spacing(9)
-                    .align_y(iced::Alignment::Center),
+                row![
+                    browser_result_icon(browser_result_glyph(true), false),
+                    cells
+                ]
+                .spacing(9)
+                .align_y(iced::Alignment::Center),
             )
             .padding([6, 8])
             .width(Length::Fill),

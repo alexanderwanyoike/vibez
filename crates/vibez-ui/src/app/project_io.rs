@@ -43,6 +43,7 @@ impl App {
         // Invalidate any Browser import still preparing (e.g. in its
         // WARP stage) so it cannot add a clip to the reset project.
         self.browser_import_request.cancel();
+        self.state.view.midi_file_layout_choice = None;
         self.section_residency_request.cancel();
         self.stop_browser_audition();
         self.input_bridge.end_recording();

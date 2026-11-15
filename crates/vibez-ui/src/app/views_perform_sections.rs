@@ -56,16 +56,7 @@ impl App {
             .state
             .browser
             .drag_preview_beats(self.state.transport.bpm);
-        let browser_drag_detail = self.state.browser.drag_label.as_ref().map(|label| {
-            let mode = match self.state.browser.audition_mode {
-                crate::state::AuditionMode::Raw => "RAW",
-                crate::state::AuditionMode::Warp => "WARP",
-            };
-            match browser_drag_duration {
-                Some(beats) => format!("{label} · {mode} · {beats:.2} beats"),
-                None => format!("{label} · {mode}"),
-            }
-        });
+        let browser_drag_detail = self.state.browser.drag_detail(self.state.transport.bpm);
 
         let timeline: Element<'_, Message> = if selected.is_none() {
             center(
@@ -351,6 +342,7 @@ impl App {
                         _ => None,
                     })
                     .collect();
+                let refusal = self.state.browser.lane_refusal(track.kind);
                 let mut clip_canvas = TrackClipCanvas::from_track(
                     track,
                     content,
@@ -385,6 +377,7 @@ impl App {
                 .with_snap_targets(snap_targets.clone())
                 .with_clip_drag(editor.clip_drag.as_ref().map(|drag| drag.preview.clone()))
                 .with_drop_zone(self.state.browser.lane_drop_zone(track.id))
+                .with_drop_refusal(refusal.clone())
                 .with_vertical_track_scrolling();
                 if let Some(preview) = recording_preview.as_ref().filter(|preview| {
                     preview.target_id == section_id && preview.track_id == track.id
@@ -417,7 +410,7 @@ impl App {
                 clip_canvas = clip_canvas.with_playback_playhead(playback_playhead_beats);
                 let geometry = viewport.geometry();
                 let grid = self.state.view.arrange_grid;
-                let compatible = !track.kind.is_midi();
+                let compatible = refusal.is_none();
                 let focused_clip_canvas: Element<'_, Message> = Element::from(
                     canvas(clip_canvas)
                         .width(Length::Fill)

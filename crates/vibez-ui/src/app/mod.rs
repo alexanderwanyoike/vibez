@@ -245,8 +245,10 @@ mod views_control_bar_style;
 mod views_control_status;
 mod views_detail;
 mod views_devices;
+mod views_dialog;
 mod views_file_menu;
 mod views_grid_menu;
+mod views_midi_file_layout;
 mod views_mixer;
 mod views_overlays;
 mod views_perform;
@@ -271,8 +273,13 @@ mod window_policy;
 
 mod sample_retirement;
 
+mod midi_file_drop;
+
 #[cfg(test)]
 mod device_panel_drop_tests;
+
+#[cfg(test)]
+mod midi_file_drop_tests;
 
 #[cfg(test)]
 mod instrument_media_retirement_tests;
