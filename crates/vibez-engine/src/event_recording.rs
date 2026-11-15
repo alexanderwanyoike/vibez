@@ -4,8 +4,9 @@ use super::*;
 use crate::note_repeat::NoteRepeatTrigger;
 
 impl SourceRecordingPosition {
-    pub(crate) fn from_trigger(
-        trigger: NoteRepeatTrigger,
+    pub(crate) fn at(
+        effective_at_samples: u64,
+        canonical_at_samples: u64,
         section: Option<SourceSectionClock>,
     ) -> Self {
         let local = |sample| {
@@ -19,11 +20,11 @@ impl SourceRecordingPosition {
             })
         };
         Self {
-            effective_at_samples: trigger.effective_at_samples,
-            canonical_at_samples: trigger.canonical_at_samples,
+            effective_at_samples,
+            canonical_at_samples,
             section_id: section.map(|clock| clock.id),
-            section_position_samples: local(trigger.effective_at_samples),
-            canonical_section_position_samples: local(trigger.canonical_at_samples),
+            section_position_samples: local(effective_at_samples),
+            canonical_section_position_samples: local(canonical_at_samples),
         }
     }
 }

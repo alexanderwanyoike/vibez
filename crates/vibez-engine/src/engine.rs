@@ -882,6 +882,9 @@ mod processing;
 #[path = "engine_graph.rs"]
 mod graph_render;
 
+#[path = "engine_live_note_clock.rs"]
+mod live_note_clock;
+
 #[cfg(test)]
 #[path = "engine_compensation_tests.rs"]
 mod compensation_tests;

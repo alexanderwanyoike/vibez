@@ -159,7 +159,11 @@ fn shared_repeat_constructor_wraps_source_coordinates_without_changing_notice_co
         performance_sample: 100,
         length: 8,
     };
-    let source = SourceRecordingPosition::from_trigger(trigger, Some(section));
+    let source = SourceRecordingPosition::at(
+        trigger.effective_at_samples,
+        trigger.canonical_at_samples,
+        Some(section),
+    );
     assert_eq!(source.section_position_samples, Some(6));
     assert_eq!(source.canonical_section_position_samples, Some(2));
     let notice = RepeatNoticePosition {
@@ -201,8 +205,9 @@ fn shared_repeat_constructor_wraps_source_coordinates_without_changing_notice_co
             canonical_section_position_samples: Some(0)
         })
     );
-    let empty = SourceRecordingPosition::from_trigger(
-        trigger,
+    let empty = SourceRecordingPosition::at(
+        trigger.effective_at_samples,
+        trigger.canonical_at_samples,
         Some(SourceSectionClock {
             length: 0,
             ..section
@@ -211,7 +216,12 @@ fn shared_repeat_constructor_wraps_source_coordinates_without_changing_notice_co
     assert_eq!(empty.section_position_samples, Some(0));
     assert_eq!(empty.canonical_section_position_samples, Some(0));
     assert_eq!(
-        SourceRecordingPosition::from_trigger(trigger, None).section_id,
+        SourceRecordingPosition::at(
+            trigger.effective_at_samples,
+            trigger.canonical_at_samples,
+            None
+        )
+        .section_id,
         None
     );
 }
