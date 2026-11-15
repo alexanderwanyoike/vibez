@@ -248,6 +248,7 @@ mod views_devices;
 mod views_dialog;
 mod views_file_menu;
 mod views_grid_menu;
+mod views_midi_file_layout;
 mod views_mixer;
 mod views_overlays;
 mod views_perform;

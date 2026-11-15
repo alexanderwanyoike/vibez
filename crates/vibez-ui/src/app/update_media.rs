@@ -433,6 +433,10 @@ impl App {
         if self.state.view.drum_rack_slice_dialog.take().is_some() {
             return Task::none();
         }
+        if self.state.view.midi_file_layout_choice.is_some() {
+            self.on_choose_midi_file_layout(None);
+            return Task::none();
+        }
         if !self
             .state
             .active_timeline_editor()
