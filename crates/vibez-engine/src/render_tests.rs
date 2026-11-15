@@ -895,6 +895,9 @@ mod plugin_tests;
 #[path = "render_sidechain_tests.rs"]
 mod sidechain_tests;
 
+#[path = "render_midi_from_tests.rs"]
+mod midi_from_tests;
+
 #[path = "render_device_observation_tests.rs"]
 mod device_observation_tests;
 
