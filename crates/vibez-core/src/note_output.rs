@@ -54,12 +54,14 @@ impl NoteOutput {
         self.notes.clear();
     }
 
-    pub fn push(&mut self, note: BlockNote) {
+    /// False when the note was dropped.
+    pub fn push(&mut self, note: BlockNote) -> bool {
         if self.notes.len() < Self::CAPACITY {
             self.notes.push(note);
         } else {
             self.dropped += 1;
         }
+        true
     }
 
     pub fn notes(&self) -> &[BlockNote] {
@@ -103,5 +105,18 @@ mod tests {
         output.push(BlockNote::off(0, 60));
         assert_eq!(output.notes(), &[BlockNote::off(0, 60)]);
         assert_eq!(output.dropped(), 3);
+    }
+
+    #[test]
+    fn note_ons_leave_room_to_release_every_pitch() {
+        let mut output = NoteOutput::default();
+        let accepted_ons = (0..NoteOutput::CAPACITY)
+            .filter(|_| output.push(BlockNote::on(0, 60, 100)))
+            .count();
+
+        assert_eq!(accepted_ons, NoteOutput::CAPACITY - 128);
+        assert!((0..128).all(|pitch| output.push(BlockNote::off(1, pitch))));
+        assert!(!output.push(BlockNote::off(1, 0)));
+        assert_eq!(output.dropped(), 128 + 1);
     }
 }
