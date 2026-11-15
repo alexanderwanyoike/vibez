@@ -71,3 +71,30 @@ async fn midi_from_reopens_with_the_project() {
     assert_eq!(midi_from(&reopened, receiver), Some(source));
     assert_eq!(midi_from(&reopened, source), None);
 }
+
+fn published_midi_from(app: &super::App, track: TrackId) -> Option<TrackId> {
+    app.state
+        .devices
+        .last_routing
+        .as_ref()
+        .and_then(|channels| channels.iter().find(|channel| channel.id == track))
+        .and_then(|channel| channel.midi_from)
+}
+
+#[test]
+fn set_undo_and_redo_each_publish_the_routing_to_the_engine() {
+    use crate::domains::project::ProjectMsg;
+    let (mut app, source, receiver) = routed_app();
+    let _ = app.update_and_refresh_clips(Message::SetMidiFrom(receiver, None));
+    let generation = app.state.devices.compensation_generation;
+
+    let _ = app.update_and_refresh_clips(Message::SetMidiFrom(receiver, None));
+    assert_eq!(app.state.devices.compensation_generation, generation);
+
+    let _ = app.update_and_refresh_clips(Message::SetMidiFrom(receiver, Some(source)));
+    assert_eq!(published_midi_from(&app, receiver), Some(source));
+    let _ = app.update_and_refresh_clips(Message::Project(ProjectMsg::Undo));
+    assert_eq!(published_midi_from(&app, receiver), None);
+    let _ = app.update_and_refresh_clips(Message::Project(ProjectMsg::Redo));
+    assert_eq!(published_midi_from(&app, receiver), Some(source));
+}
