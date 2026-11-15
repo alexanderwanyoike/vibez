@@ -1,10 +1,10 @@
 //! The VST3 output `IEventList`, collecting the notes a plugin outputs during one process call.
 
-use vibez_core::note_output::{BlockNote, NoteOutput};
+use vibez_core::note_output::NoteOutput;
 use vst3::Steinberg::Vst::Event as VstEvent;
 use vst3::Steinberg::Vst::Event_::EventTypes_::{kNoteOffEvent, kNoteOnEvent};
 
-use super::abi::{pc_add_ref, pc_query_interface, pc_release, vst_event, EventListVtbl, NoteEvent};
+use super::abi::{pc_add_ref, pc_query_interface, pc_release, vst_event, EventListVtbl};
 use crate::output_note;
 
 /// Lives on the stack for one `process` call; the plugin must not keep it.
@@ -46,15 +46,6 @@ impl<'a> Vst3NoteOutput<'a> {
     }
 }
 
-fn host_event(note: &BlockNote) -> VstEvent {
-    vst_event(&NoteEvent {
-        is_on: note.on,
-        pitch: note.pitch,
-        velocity: note.velocity,
-        frame_offset: note.frame,
-    })
-}
-
 unsafe extern "system" fn count(this: *mut std::ffi::c_void) -> i32 {
     let list = unsafe { &*this.cast::<Vst3NoteOutput<'_>>() };
     list.notes.notes().len() as i32
@@ -71,7 +62,7 @@ unsafe extern "system" fn get(
         .and_then(|index| list.notes.notes().get(index));
     match note {
         Some(note) if !event.is_null() => {
-            unsafe { *event = host_event(note) };
+            unsafe { *event = vst_event(note) };
             0
         }
         _ => 1,

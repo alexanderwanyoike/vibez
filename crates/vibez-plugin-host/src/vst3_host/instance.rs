@@ -50,7 +50,7 @@ pub struct Vst3PluginInstance {
     processing_failed: bool,
     configuration_failed: bool,
     recovery_attempts: u8,
-    note_events: Vec<NoteEvent>,
+    note_events: Vec<vibez_core::note_output::BlockNote>,
     note_output: vibez_core::note_output::NoteOutput,
     sample_rate: f64,
     latency_samples: u32,
@@ -663,7 +663,7 @@ impl PluginInstance for Vst3PluginInstance {
         // mask correct. VST3 requires chronological input; at one offset,
         // release before retrigger. Unstable sorting allocates no scratch buffer.
         self.note_events
-            .sort_unstable_by_key(|event| (event.frame_offset, event.is_on));
+            .sort_unstable_by_key(|event| (event.frame, event.on));
         let mut live_events = LiveEventList::new(&self.note_events);
         let mut note_output =
             super::note_output::Vst3NoteOutput::new(&mut self.note_output, frames as u32);
@@ -723,48 +723,36 @@ impl PluginInstance for Vst3PluginInstance {
         if self.note_events.len() == self.note_events.capacity() {
             return;
         }
-        self.note_events.push(NoteEvent {
-            is_on: true,
-            pitch,
-            velocity,
-            frame_offset: 0,
-        });
+        self.note_events
+            .push(vibez_core::note_output::BlockNote::on(0, pitch, velocity));
     }
 
     fn note_off(&mut self, pitch: u8) {
         if self.note_events.len() == self.note_events.capacity() {
             return;
         }
-        self.note_events.push(NoteEvent {
-            is_on: false,
-            pitch,
-            velocity: 0,
-            frame_offset: 0,
-        });
+        self.note_events
+            .push(vibez_core::note_output::BlockNote::off(0, pitch));
     }
 
     fn note_on_at(&mut self, pitch: u8, velocity: u8, frame_offset: u32) {
         if self.note_events.len() == self.note_events.capacity() {
             return;
         }
-        self.note_events.push(NoteEvent {
-            is_on: true,
-            pitch,
-            velocity,
-            frame_offset,
-        });
+        self.note_events
+            .push(vibez_core::note_output::BlockNote::on(
+                frame_offset,
+                pitch,
+                velocity,
+            ));
     }
 
     fn note_off_at(&mut self, pitch: u8, frame_offset: u32) {
         if self.note_events.len() == self.note_events.capacity() {
             return;
         }
-        self.note_events.push(NoteEvent {
-            is_on: false,
-            pitch,
-            velocity: 0,
-            frame_offset,
-        });
+        self.note_events
+            .push(vibez_core::note_output::BlockNote::off(frame_offset, pitch));
     }
 
     fn note_output(&self) -> Option<&vibez_core::note_output::NoteOutput> {

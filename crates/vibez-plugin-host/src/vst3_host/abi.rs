@@ -1,6 +1,7 @@
 //! VST3 process layouts, event adapters and parameter ABI objects.
 
 use vibez_core::effect::ParamDescriptor;
+use vibez_core::note_output::BlockNote;
 use vst3::Steinberg::Vst::{
     Event as VstEvent, Event__type0 as VstEventData, NoteOffEvent, NoteOnEvent,
 };
@@ -291,14 +292,6 @@ pub(super) fn char16_to_string(chars: &[u16]) -> String {
     String::from_utf16_lossy(&units)
 }
 
-#[allow(dead_code)]
-pub(super) struct NoteEvent {
-    pub(super) is_on: bool,
-    pub(super) pitch: u8,
-    pub(super) velocity: u8,
-    pub(super) frame_offset: u32,
-}
-
 // ── Live IEventList (input) ──
 // Stack-allocated for each process() call. The VST3 processor reads this
 // COM object synchronously and must not retain it after process() returns.
@@ -321,11 +314,11 @@ pub(super) struct EventListVtbl {
 #[repr(C)]
 pub(super) struct LiveEventList<'a> {
     pub(super) vtbl: *const EventListVtbl,
-    pub(super) events: &'a [NoteEvent],
+    pub(super) events: &'a [BlockNote],
 }
 
 impl<'a> LiveEventList<'a> {
-    pub(super) fn new(events: &'a [NoteEvent]) -> Self {
+    pub(super) fn new(events: &'a [BlockNote]) -> Self {
         Self {
             vtbl: &LIVE_EVENT_LIST_VTBL,
             events,
@@ -345,9 +338,9 @@ impl<'a> LiveEventList<'a> {
     }
 }
 
-pub(super) fn vst_event(event: &NoteEvent) -> VstEvent {
-    let sample_offset = event.frame_offset.min(i32::MAX as u32) as i32;
-    if event.is_on {
+pub(super) fn vst_event(event: &BlockNote) -> VstEvent {
+    let sample_offset = event.frame.min(i32::MAX as u32) as i32;
+    if event.on {
         VstEvent {
             busIndex: 0,
             sampleOffset: sample_offset,
@@ -512,20 +505,10 @@ mod tests {
     #[test]
     fn live_event_list_exposes_timed_clip_notes_to_vst3() {
         let mut events = vec![
-            super::NoteEvent {
-                is_on: false,
-                pitch: 64,
-                velocity: 0,
-                frame_offset: 91,
-            },
-            super::NoteEvent {
-                is_on: true,
-                pitch: 64,
-                velocity: 96,
-                frame_offset: 17,
-            },
+            super::BlockNote::off(91, 64),
+            super::BlockNote::on(17, 64, 96),
         ];
-        events.sort_unstable_by_key(|event| (event.frame_offset, event.is_on));
+        events.sort_unstable_by_key(|event| (event.frame, event.on));
         let mut list = super::LiveEventList::new(&events);
 
         assert_eq!(list.event_count(), 2);
