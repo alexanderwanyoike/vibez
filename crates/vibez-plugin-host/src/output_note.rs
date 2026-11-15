@@ -5,16 +5,37 @@ use vibez_core::note_output::BlockNote;
 /// Room for a dense arpeggio or drum fill in one block; more is dropped and counted.
 pub(crate) const NOTE_OUTPUT_CAPACITY: usize = 1024;
 
-pub(crate) fn note_on(_frame: u32, _frames: u32, _key: i32, _velocity: f64) -> Option<BlockNote> {
-    None
+/// `key` and `velocity` (0..=1) arrive as the plugin wrote them, so a key
+/// outside MIDI or a frame past the block is the plugin's error to absorb.
+pub(crate) fn note_on(frame: u32, frames: u32, key: i32, velocity: f64) -> Option<BlockNote> {
+    let velocity = (velocity.clamp(0.0, 1.0) * 127.0).round().max(1.0) as u8;
+    Some(BlockNote::on(within(frame, frames), pitch(key)?, velocity))
 }
 
-pub(crate) fn note_off(_frame: u32, _frames: u32, _key: i32) -> Option<BlockNote> {
-    None
+pub(crate) fn note_off(frame: u32, frames: u32, key: i32) -> Option<BlockNote> {
+    Some(BlockNote::off(within(frame, frames), pitch(key)?))
 }
 
-pub(crate) fn midi(_frame: u32, _frames: u32, _data: [u8; 3]) -> Option<BlockNote> {
-    None
+/// Raw MIDI 1.0 note messages on any channel; a note-on at velocity 0 is a note-off.
+pub(crate) fn midi(frame: u32, frames: u32, data: [u8; 3]) -> Option<BlockNote> {
+    match (data[0] & 0xF0, data[2]) {
+        (0x90, 0) | (0x80, _) => note_off(frame, frames, i32::from(data[1])),
+        (0x90, velocity) => note_on(
+            frame,
+            frames,
+            i32::from(data[1]),
+            f64::from(velocity) / 127.0,
+        ),
+        _ => None,
+    }
+}
+
+fn pitch(key: i32) -> Option<u8> {
+    u8::try_from(key).ok().filter(|pitch| *pitch < 128)
+}
+
+fn within(frame: u32, frames: u32) -> u32 {
+    frame.min(frames.saturating_sub(1))
 }
 
 #[cfg(test)]
