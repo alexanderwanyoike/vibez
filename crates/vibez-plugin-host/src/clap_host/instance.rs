@@ -232,9 +232,7 @@ impl ClapPluginInstance {
             param_events_storage: Vec::with_capacity(2048),
             event_headers: Vec::with_capacity(4096),
             note_events: Vec::with_capacity(2048),
-            note_output: vibez_core::note_output::NoteOutput::with_capacity(
-                crate::output_note::NOTE_OUTPUT_CAPACITY,
-            ),
+            note_output: vibez_core::note_output::NoteOutput::default(),
             sample_rate,
             latency_samples: 0,
             audio_context: None,

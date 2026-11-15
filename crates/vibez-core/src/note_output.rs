@@ -37,20 +37,25 @@ pub struct NoteOutput {
     dropped: u64,
 }
 
-impl NoteOutput {
-    pub fn with_capacity(capacity: usize) -> Self {
+impl Default for NoteOutput {
+    fn default() -> Self {
         Self {
-            notes: Vec::with_capacity(capacity),
+            notes: Vec::with_capacity(Self::CAPACITY),
             dropped: 0,
         }
     }
+}
+
+impl NoteOutput {
+    /// Room for a dense arpeggio or drum fill in one block.
+    pub const CAPACITY: usize = 1024;
 
     pub fn clear(&mut self) {
         self.notes.clear();
     }
 
     pub fn push(&mut self, note: BlockNote) {
-        if self.notes.len() < self.notes.capacity() {
+        if self.notes.len() < Self::CAPACITY {
             self.notes.push(note);
         } else {
             self.dropped += 1;
@@ -73,7 +78,7 @@ mod tests {
 
     #[test]
     fn keeps_notes_in_push_order_until_cleared() {
-        let mut output = NoteOutput::with_capacity(4);
+        let mut output = NoteOutput::default();
         output.push(BlockNote::on(3, 60, 100));
         output.push(BlockNote::off(9, 60));
 
@@ -87,13 +92,12 @@ mod tests {
 
     #[test]
     fn a_full_output_drops_and_counts_notes_without_growing() {
-        let mut output = NoteOutput::with_capacity(2);
-        for frame in 0..5 {
-            output.push(BlockNote::on(frame, 60, 100));
+        let mut output = NoteOutput::default();
+        for _ in 0..NoteOutput::CAPACITY + 3 {
+            output.push(BlockNote::off(1, 60));
         }
 
-        assert_eq!(output.notes().len(), 2);
-        assert_eq!(output.notes()[1].frame, 1);
+        assert_eq!(output.notes().len(), NoteOutput::CAPACITY);
         assert_eq!(output.dropped(), 3);
         output.clear();
         output.push(BlockNote::off(0, 60));

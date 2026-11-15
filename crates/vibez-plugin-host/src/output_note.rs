@@ -2,9 +2,6 @@
 
 use vibez_core::note_output::BlockNote;
 
-/// Room for a dense arpeggio or drum fill in one block; more is dropped and counted.
-pub(crate) const NOTE_OUTPUT_CAPACITY: usize = 1024;
-
 /// `key` and `velocity` (0..=1) arrive as the plugin wrote them, so a key
 /// outside MIDI or a frame past the block is the plugin's error to absorb.
 pub(crate) fn note_on(frame: u32, frames: u32, key: i32, velocity: f64) -> Option<BlockNote> {

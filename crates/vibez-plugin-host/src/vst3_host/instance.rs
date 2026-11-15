@@ -397,9 +397,7 @@ impl Vst3PluginInstance {
             configuration_failed: false,
             recovery_attempts: 0,
             note_events: Vec::with_capacity(2048),
-            note_output: vibez_core::note_output::NoteOutput::with_capacity(
-                crate::output_note::NOTE_OUTPUT_CAPACITY,
-            ),
+            note_output: vibez_core::note_output::NoteOutput::default(),
             sample_rate,
             latency_samples: 0,
             audio_context: None,
