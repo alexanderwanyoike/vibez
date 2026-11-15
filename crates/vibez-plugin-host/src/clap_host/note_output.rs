@@ -29,24 +29,24 @@ impl<'a> ClapNoteOutput<'a> {
     }
 
     /// # Safety
-    /// `event` points to a whole event of at least `header.size` bytes, as
-    /// CLAP guarantees for `try_push`.
+    /// `event` is valid for `header.size` bytes, as CLAP guarantees for
+    /// `try_push`, but need not be aligned.
     unsafe fn push(&mut self, event: *const clap_event_header) -> bool {
-        let header = &*event;
+        let header = event.read_unaligned();
         if header.space_id != CLAP_CORE_EVENT_SPACE_ID {
             return true;
         }
         let note = match header.type_ {
-            CLAP_EVENT_NOTE_ON | CLAP_EVENT_NOTE_OFF if fits::<clap_event_note>(header) => {
-                let note = &*event.cast::<clap_event_note>();
+            CLAP_EVENT_NOTE_ON | CLAP_EVENT_NOTE_OFF if fits::<clap_event_note>(&header) => {
+                let note = event.cast::<clap_event_note>().read_unaligned();
                 if header.type_ == CLAP_EVENT_NOTE_ON {
                     output_note::note_on(header.time, self.frames, note.key.into(), note.velocity)
                 } else {
                     output_note::note_off(header.time, self.frames, note.key.into())
                 }
             }
-            CLAP_EVENT_MIDI if fits::<clap_event_midi>(header) => {
-                let midi = &*event.cast::<clap_event_midi>();
+            CLAP_EVENT_MIDI if fits::<clap_event_midi>(&header) => {
+                let midi = event.cast::<clap_event_midi>().read_unaligned();
                 output_note::midi(header.time, self.frames, midi.data)
             }
             _ => None,
