@@ -396,9 +396,12 @@ impl App {
                 .into()
             };
             let entry_body = container(
-                row![browser_result_icon(false, selected), table_cells]
-                    .spacing(9)
-                    .align_y(iced::Alignment::Center),
+                row![
+                    browser_result_icon(browser_result_glyph(false), selected),
+                    table_cells
+                ]
+                .spacing(9)
+                .align_y(iced::Alignment::Center),
             )
             .padding([6, 8])
             .width(Length::Fill);
@@ -537,9 +540,12 @@ impl App {
 
         button(
             container(
-                row![browser_result_icon(true, false), cells]
-                    .spacing(9)
-                    .align_y(iced::Alignment::Center),
+                row![
+                    browser_result_icon(browser_result_glyph(true), false),
+                    cells
+                ]
+                .spacing(9)
+                .align_y(iced::Alignment::Center),
             )
             .padding([6, 8])
             .width(Length::Fill),
