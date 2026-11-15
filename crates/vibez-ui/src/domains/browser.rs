@@ -199,7 +199,7 @@ impl crate::state::BrowserDropTarget {
                 format!("Load into selected Drum Rack pad {}", pad_index + 1)
             }
             Target::DevicePanel { drop, .. } => drop.hover_status(),
-            Target::ClipSlot { .. } => todo!(),
+            Target::ClipSlot { row, .. } => format!("Clip slot in row {}", row + 1),
         }
     }
 
@@ -246,12 +246,53 @@ impl BrowserState {
 
     /// Whether the drag in flight is a file from another app.
     pub fn drags_from_desktop(&self) -> bool {
-        todo!()
+        self.desktop_drop.is_some()
     }
 
     /// Whether a desktop drop waits for the pointer to report a target.
     pub fn desktop_drop_waits_for_target(&self) -> bool {
-        todo!()
+        self.desktop_drop == Some(crate::state::DesktopDrop::Dropped)
+    }
+
+    /// Makes a file another app drags over the window the drag in flight;
+    /// only the first of several files is taken.
+    fn hover_desktop_file(&mut self, path: PathBuf) -> Option<String> {
+        if self.drag_source.is_some() {
+            return None;
+        }
+        let name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.display().to_string());
+        if !vibez_core::audio_format::is_supported_audio_path(&path)
+            && !vibez_core::midi_file::is_midi_file_path(&path)
+        {
+            return Some(format!("Vibez can't import {name}"));
+        }
+        self.cancel_pending_drag();
+        self.drag_source = Some(MediaSourceRef::LocalFile { path });
+        self.drag_label = Some(name);
+        self.drag_target = None;
+        self.desktop_drop = Some(crate::state::DesktopDrop::Hovering);
+        Some(self.moving_status())
+    }
+
+    /// The target the dropped file goes to, once the pointer is over one.
+    fn drop_desktop_file(
+        &mut self,
+        path: &std::path::Path,
+    ) -> Option<crate::state::BrowserDropTarget> {
+        let dragged = matches!(
+            &self.drag_source,
+            Some(MediaSourceRef::LocalFile { path: dragged }) if dragged == path
+        );
+        if !dragged || self.desktop_drop != Some(crate::state::DesktopDrop::Hovering) {
+            return None;
+        }
+        if self.drag_target.is_none() {
+            self.desktop_drop = Some(crate::state::DesktopDrop::Dropped);
+        }
+        self.drag_target.clone()
     }
 
     /// Instrument and device targets take samples, never MIDI files; a MIDI
@@ -506,11 +547,28 @@ impl BrowserState {
                     action.status = self.clear_drag_target();
                 }
             }
-            BrowserMsg::DragHoverClipSlot { .. }
-            | BrowserMsg::DesktopFileHovered(_)
-            | BrowserMsg::DesktopFileDropped(_)
-            | BrowserMsg::DesktopDragLeft
-            | BrowserMsg::DesktopDropMissed => todo!(),
+            BrowserMsg::DragHoverClipSlot { track_id, row } => {
+                if self.drag_source.is_none() {
+                    return action;
+                }
+                action.status =
+                    Some(self.hover(crate::state::BrowserDropTarget::ClipSlot { track_id, row }));
+            }
+            BrowserMsg::DesktopFileHovered(path) => action.status = self.hover_desktop_file(path),
+            BrowserMsg::DesktopFileDropped(path) => action.release = self.drop_desktop_file(&path),
+            BrowserMsg::DesktopDragLeft => {
+                if self.drags_from_desktop() {
+                    self.cancel_media_drag();
+                    action.status = Some("Drag cancelled".into());
+                }
+            }
+            BrowserMsg::DesktopDropMissed => {
+                if self.desktop_drop_waits_for_target() {
+                    let name = self.drag_label.clone().unwrap_or_default();
+                    self.cancel_media_drag();
+                    action.status = Some(format!("Nothing here takes {name}"));
+                }
+            }
             BrowserMsg::ClearDragTarget => {
                 action.status = self.clear_drag_target();
             }
@@ -713,6 +771,11 @@ impl BrowserState {
             BrowserMsg::SetDropboxAppKey(key) => {
                 self.remote.app_key_input = key;
             }
+        }
+        // A file dropped before the pointer reached a target goes to the first
+        // target the pointer then reports.
+        if self.desktop_drop_waits_for_target() && action.release.is_none() {
+            action.release = self.drag_target.clone();
         }
         action
     }

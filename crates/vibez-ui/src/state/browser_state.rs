@@ -571,6 +571,7 @@ impl BrowserState {
         self.drag_source = None;
         self.drag_label = None;
         self.drag_target = None;
+        self.desktop_drop = None;
     }
 
     /// The drag's name, how it imports and its musical length, as the lane
