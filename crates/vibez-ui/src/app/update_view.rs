@@ -102,7 +102,7 @@ impl App {
         if matches!(msg, ViewMsg::CursorMoved(..))
             && self.state.browser.desktop_drop_waits_for_target()
         {
-            let action = self.state.browser.update(BrowserMsg::DesktopDropMissed);
+            let action = self.state.browser.update(BrowserMsg::DesktopPointerMoved);
             let _ = self.apply_browser_action(action);
         }
         if matches!(&msg, ViewMsg::ToggleEditMenu) {

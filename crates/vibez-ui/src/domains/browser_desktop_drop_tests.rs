@@ -106,7 +106,7 @@ fn a_waiting_drop_the_pointer_settles_away_from_every_target_is_cancelled() {
     let mut browser = hovering("Rebeater P3.mid");
     browser.update(BrowserMsg::DesktopFileDropped(path("Rebeater P3.mid")));
 
-    let action = browser.update(BrowserMsg::DesktopDropMissed);
+    let action = browser.update(BrowserMsg::DesktopPointerMoved);
 
     assert_eq!(browser.drag_source, None);
     assert!(!browser.drags_from_desktop());
@@ -119,12 +119,12 @@ fn a_waiting_drop_the_pointer_settles_away_from_every_target_is_cancelled() {
 #[test]
 fn a_miss_before_the_drop_or_after_a_target_was_found_changes_nothing() {
     let mut browser = hovering("kick.wav");
-    browser.update(BrowserMsg::DesktopDropMissed);
+    browser.update(BrowserMsg::DesktopPointerMoved);
     assert!(browser.drag_source.is_some());
 
     browser.update(lane(TrackId::new()));
     browser.update(BrowserMsg::DesktopFileDropped(path("kick.wav")));
-    let action = browser.update(BrowserMsg::DesktopDropMissed);
+    let action = browser.update(BrowserMsg::DesktopPointerMoved);
     assert_eq!(action, BrowserAction::default());
 }
 
@@ -179,4 +179,49 @@ fn an_empty_clip_slot_is_a_drop_target() {
     );
     assert_eq!(action.status.as_deref(), Some("Clip slot in row 3"));
     assert_eq!(browser.drag_accepted(), Some(true));
+}
+
+#[test]
+fn a_drop_after_the_pointer_found_no_target_is_cancelled() {
+    let mut browser = hovering("Rebeater P3.mid");
+    browser.update(BrowserMsg::DesktopPointerMoved);
+
+    let action = browser.update(BrowserMsg::DesktopFileDropped(path("Rebeater P3.mid")));
+
+    assert_eq!(action.release, None);
+    assert_eq!(browser.drag_source, None);
+    assert_eq!(
+        action.status.as_deref(),
+        Some("Nothing here takes Rebeater P3.mid")
+    );
+}
+
+#[test]
+fn a_new_file_replaces_a_drop_still_waiting_for_a_target() {
+    let mut browser = hovering("Rebeater P3.mid");
+    browser.update(BrowserMsg::DesktopFileDropped(path("Rebeater P3.mid")));
+
+    browser.update(BrowserMsg::DesktopFileHovered(path("kick.wav")));
+
+    assert_eq!(browser.drag_label.as_deref(), Some("kick.wav"));
+    assert!(!browser.desktop_drop_waits_for_target());
+}
+
+#[test]
+fn a_lane_of_the_other_kind_cancels_the_drop_with_its_reason() {
+    let mut browser = hovering("Rebeater P3.mid");
+    browser.update(BrowserMsg::DragHoverTrack {
+        track_id: TrackId::new(),
+        beat: 0.0,
+        compatible: false,
+    });
+
+    let action = browser.update(BrowserMsg::DesktopFileDropped(path("Rebeater P3.mid")));
+
+    assert_eq!(action.release, None);
+    assert_eq!(browser.drag_source, None);
+    assert_eq!(
+        action.status.as_deref(),
+        Some("MIDI can't go on an audio lane")
+    );
 }

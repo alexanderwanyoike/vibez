@@ -73,7 +73,7 @@ pub enum BrowserMsg {
     /// The file from another app left the window, or its drag was cancelled.
     DesktopDragLeft,
     /// The pointer moved after a desktop drop and found no target.
-    DesktopDropMissed,
+    DesktopPointerMoved,
     ClearDragTarget,
     /// The cursor left `target`; another target it entered meanwhile stays.
     LeaveDragTarget(crate::state::BrowserDropTarget),
@@ -562,7 +562,7 @@ impl BrowserState {
                     action.status = Some("Drag cancelled".into());
                 }
             }
-            BrowserMsg::DesktopDropMissed => {
+            BrowserMsg::DesktopPointerMoved => {
                 if self.desktop_drop_waits_for_target() {
                     let name = self.drag_label.clone().unwrap_or_default();
                     self.cancel_media_drag();
