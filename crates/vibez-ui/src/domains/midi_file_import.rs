@@ -112,6 +112,13 @@ impl MidiFileImport {
     }
 }
 
+/// A dropped file that offers layouts, held until the producer picks one.
+#[derive(Debug, Clone)]
+pub struct MidiFileLayoutChoice {
+    pub import: MidiFileImport,
+    pub target: crate::message::BrowserImportTarget,
+}
+
 #[cfg(test)]
 #[path = "midi_file_import_tests.rs"]
 mod tests;

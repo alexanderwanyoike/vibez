@@ -342,6 +342,9 @@ pub enum Message {
         position_samples: u64,
     },
     DropSampleOnEmptyArrangement,
+    /// The producer's answer to how a multi-track MIDI file lands; `None`
+    /// cancels the drop.
+    ChooseMidiFileLayout(Option<crate::domains::midi_file_import::MidiFileLayout>),
     DropSampleOnDrumPad {
         track_id: TrackId,
         pad_index: usize,
