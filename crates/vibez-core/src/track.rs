@@ -389,6 +389,9 @@ pub struct TrackInfo {
     /// Post-fader send amounts into buses: `(bus id, 0..1)`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sends: Vec<(TrackId, f32)>,
+    /// Another track whose played notes this MIDI track also plays.
+    #[serde(default)]
+    pub midi_from: Option<crate::midi_from::MidiFrom>,
 }
 
 impl TrackInfo {
@@ -411,6 +414,7 @@ impl TrackInfo {
             plugin_instrument: None,
             automation: Vec::new(),
             sends: Vec::new(),
+            midi_from: None,
         }
     }
 }
@@ -650,6 +654,22 @@ mod tests {
             decoded.audio_input_route,
             AudioInputRoute::Resample { track_id: source }
         );
+    }
+
+    #[test]
+    fn midi_from_roundtrips_and_old_or_unrouted_tracks_have_none() {
+        let mut track = TrackInfo::new("Lead");
+        track.midi_from = crate::midi_from::MidiFrom::new(track.id, TrackId::new());
+        let decoded: TrackInfo =
+            serde_json::from_str(&serde_json::to_string(&track).unwrap()).unwrap();
+        assert_eq!(decoded.midi_from, track.midi_from);
+
+        let unrouted = serde_json::to_value(TrackInfo::new("Bass")).unwrap();
+        assert!(unrouted.get("midi_from").is_none());
+        let mut legacy = serde_json::to_value(track).unwrap();
+        legacy.as_object_mut().unwrap().remove("midi_from");
+        let decoded: TrackInfo = serde_json::from_value(legacy).unwrap();
+        assert_eq!(decoded.midi_from, None);
     }
 
     fn test_clip(position: u64, duration: u64) -> ClipInfo {

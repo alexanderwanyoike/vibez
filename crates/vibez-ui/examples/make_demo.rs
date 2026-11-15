@@ -34,6 +34,7 @@ fn track(name: &str, kind: InstrumentKind, color_index: u8) -> TrackInfo {
         plugin_instrument: None,
         automation: Vec::new(),
         sends: Vec::new(),
+        midi_from: None,
     }
 }
 
