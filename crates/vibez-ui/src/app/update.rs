@@ -225,6 +225,15 @@ impl App {
         if self.reject_invalid_send_edit(&message) {
             return Task::none();
         }
+        // A desktop drag gets no button events, so a click-made drop while one
+        // seems to hover means winit reported a hover after the drag ended.
+        if super::update_policy::drops_dragged_media(&message)
+            && self.state.browser.drags_from_desktop()
+        {
+            self.state.browser.cancel_media_drag();
+            self.state.status_text = "Drag cancelled".into();
+            return Task::none();
+        }
         let owns_project_transaction = self.begin_project_track_deletion_transaction(&message);
         self.invalidate_device_preset_load(&message);
         let deferred_arrangement_project_edit = matches!(

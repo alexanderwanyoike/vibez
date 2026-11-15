@@ -273,6 +273,8 @@ mod window_policy;
 
 mod sample_retirement;
 
+mod desktop_drop;
+
 mod midi_file_drop;
 
 #[cfg(test)]
@@ -280,6 +282,9 @@ mod device_panel_drop_tests;
 
 #[cfg(test)]
 mod midi_file_drop_tests;
+
+#[cfg(test)]
+mod desktop_drop_tests;
 
 #[cfg(test)]
 mod instrument_media_retirement_tests;
@@ -786,6 +791,7 @@ impl App {
                 iced::Event::Window(iced::window::Event::CloseRequested) => {
                     Some(Message::WindowCloseRequested)
                 }
+                iced::Event::Window(event) => desktop_drop::desktop_drop_message(&event),
                 _ => None,
             }),
         ])

@@ -108,6 +108,11 @@ pub enum BrowserDropTarget {
         track_id: TrackId,
         pad_index: usize,
     },
+    /// An empty Clip slot of a track that takes the drag.
+    ClipSlot {
+        track_id: TrackId,
+        row: u32,
+    },
     /// A device panel outside any instrument card, and what a drop there does.
     DevicePanel {
         track_id: TrackId,
