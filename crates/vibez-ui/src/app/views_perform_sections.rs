@@ -52,11 +52,6 @@ impl App {
         } else {
             58.0
         };
-        let browser_drag_duration = self
-            .state
-            .browser
-            .drag_preview_beats(self.state.transport.bpm);
-        let browser_drag_detail = self.state.browser.drag_detail(self.state.transport.bpm);
 
         let timeline: Element<'_, Message> = if selected.is_none() {
             center(
@@ -367,8 +362,6 @@ impl App {
                     editor.selection_end_beats,
                     editor.time_selection_track,
                     self.state.browser.drag_source.is_some(),
-                    browser_drag_duration,
-                    browser_drag_detail.clone(),
                 )
                 .with_marquee(
                     row_spans.clone(),

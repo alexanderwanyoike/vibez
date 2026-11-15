@@ -1,16 +1,16 @@
-//! The drop zone a Browser drag shows over the device it would land on.
+//! The drop zone a Browser drag shows over the lane or device it would land on.
 
 use crate::domains::browser::DragMedia;
 use crate::domains::device_panel_drop::DevicePanelDrop;
 use crate::state::BrowserDropTarget;
 
-/// What a release in the zone does to the device, for its icon.
+/// What a release in the zone does, for its icon.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DropAction {
     Add,
     Replace,
     Load,
-    /// The target will not take the audio.
+    /// The target will not take what is dragged.
     Refuse,
 }
 
@@ -31,13 +31,12 @@ pub struct DropZone {
 }
 
 impl BrowserDropTarget {
-    /// The zone to mark under the cursor, or `None` on a lane that takes the
-    /// audio, which previews the Clip it would place instead.
+    /// The zone to mark under the cursor.
     pub fn drop_zone(&self, media: DragMedia) -> Option<DropZone> {
         let action = match self {
             Self::ArrangementLane {
                 compatible: true, ..
-            } => return None,
+            } => DropAction::Add,
             Self::ArrangementLane { .. } => DropAction::Refuse,
             Self::EmptyArrangement { .. } => DropAction::Add,
             Self::DrumRackPad { .. } | Self::DrumRack { .. } => {
@@ -135,13 +134,22 @@ mod tests {
     }
 
     #[test]
-    fn a_lane_that_takes_the_audio_marks_the_drop_itself() {
+    fn a_lane_that_takes_the_drag_marks_a_dashed_zone_as_a_device_does() {
         let target = BrowserDropTarget::ArrangementLane {
             track_id: TrackId::new(),
             beat: 1.0,
             compatible: true,
         };
-        assert_eq!(target.drop_zone(DragMedia::Audio), None);
+        for media in [DragMedia::Audio, DragMedia::Midi] {
+            assert_eq!(
+                target.drop_zone(media),
+                Some(DropZone {
+                    action: DropAction::Add,
+                    label: Some(target.status(media)),
+                }),
+                "{media:?}"
+            );
+        }
     }
 
     #[test]

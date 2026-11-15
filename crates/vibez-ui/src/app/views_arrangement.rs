@@ -221,11 +221,6 @@ impl App {
             .iter()
             .map(|t| t.id)
             .collect();
-        let browser_drag_duration = self
-            .state
-            .browser
-            .drag_preview_beats(self.state.transport.bpm);
-        let browser_drag_detail = self.state.browser.drag_detail(self.state.transport.bpm);
 
         // Track rows: header widgets + clip canvas
         // Real vertical layout of the column, so a rubber-band drag can map
@@ -334,8 +329,6 @@ impl App {
                 timeline.selection_end_beats,
                 timeline.time_selection_track,
                 browser_drag_active,
-                browser_drag_duration,
-                browser_drag_detail.clone(),
             )
             .with_marquee(
                 row_spans.clone(),
