@@ -698,7 +698,11 @@ notes play one instrument, so a note-off from either ends a pitch both hold.
 Each admitted
 note is also reported as the receiver's `SourceNoteInput` and
 `InstrumentNoteInput` at its exact sample, so Section Record, Clip Record and
-Capture record it like played input. The source keeps sounding its own
+Capture record it like played input. A Project Track saves its MIDI From as
+an optional `midi_from` value (absent from older projects); choosing one is a
+single undo step, only plugin-instrument MIDI Tracks that would not form a
+loop are offered, removing the source Track clears it, and a Bounce of the
+receiver renders the source's instrument first. The source keeps sounding its own
 instrument, its mute silences only its audio, and the receiver plays routed
 notes whether or not it is the record target.
 
