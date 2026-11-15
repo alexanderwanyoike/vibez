@@ -628,6 +628,7 @@ impl PluginInstance for ClapPluginInstance {
             }
             self.processing_failed = true;
             buffer.fill(0.0);
+            self.note_output.clear();
         } else {
             crate::audio_ports::copy_process_output(&self.output_ports, buffer, channels, frames);
         }

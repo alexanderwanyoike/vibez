@@ -713,6 +713,7 @@ impl PluginInstance for Vst3PluginInstance {
             }
             self.processing_failed = true;
             buffer.fill(0.0);
+            self.note_output.clear();
         }
         self.note_events.clear();
     }
