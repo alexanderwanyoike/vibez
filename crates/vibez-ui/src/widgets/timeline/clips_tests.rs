@@ -61,8 +61,6 @@ fn track_canvas_at(
         0.0,
         None,
         false,
-        None,
-        None,
     )
 }
 

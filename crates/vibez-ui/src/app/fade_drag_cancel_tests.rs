@@ -112,8 +112,6 @@ impl Lane {
             0.0,
             None,
             false,
-            None,
-            None,
         )
     }
 

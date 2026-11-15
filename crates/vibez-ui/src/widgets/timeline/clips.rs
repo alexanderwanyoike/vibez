@@ -111,10 +111,6 @@ pub struct TrackClipCanvas {
     pub sample_drop_active: bool,
     /// Why this lane turns the Browser drag away, which a release reports.
     pub sample_drop_refusal: Option<String>,
-    /// Musical length shown by the placement preview. RAW derives this at the
-    /// project tempo; WARP retains the source's confirmed musical length.
-    pub sample_drop_duration_beats: Option<f64>,
-    pub sample_drop_detail: Option<String>,
     /// Clip edges and markers on every lane that drags and clicks lock onto.
     pub snap_targets: Arc<SnapTargets>,
     /// The Clip drag in flight on this lane's timeline, whichever lane it
@@ -123,9 +119,6 @@ pub struct TrackClipCanvas {
     /// The zone a Browser drag hovering this lane marks, where the lane will
     /// not take the audio.
     pub drop_zone: Option<crate::domains::drop_zone::DropZone>,
-    /// The track name this canvas was constructed with. Drawn on the drop
-    /// indicator so the user can verify which lane will receive the drop.
-    pub track_name: String,
 }
 
 impl TrackClipCanvas {
@@ -154,8 +147,6 @@ impl TrackClipCanvas {
         selection_end_beats: f64,
         time_selection_track: Option<TrackId>,
         sample_drop_active: bool,
-        sample_drop_duration_beats: Option<f64>,
-        sample_drop_detail: Option<String>,
     ) -> Self {
         let timing = lane_timing::start();
         let geometry = TimelineGeometry::from_zoom(zoom_level, scroll_offset_beats);
@@ -278,12 +269,9 @@ impl TrackClipCanvas {
             time_selection_track,
             sample_drop_active,
             sample_drop_refusal: None,
-            sample_drop_duration_beats,
-            sample_drop_detail,
             snap_targets: Arc::default(),
             clip_drag: None,
             drop_zone: None,
-            track_name: track.name.clone(),
         };
         lane_timing::finish(timing, lane_timing::Phase::Build);
         lane
