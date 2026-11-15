@@ -29,7 +29,7 @@ pub(super) struct ParamChangesVtbl {
     ) -> *mut std::ffi::c_void,
 }
 
-unsafe extern "system" fn pc_query_interface(
+pub(super) unsafe extern "system" fn pc_query_interface(
     this: *mut std::ffi::c_void,
     _iid: *const u8,
     obj: *mut *mut std::ffi::c_void,
@@ -39,10 +39,10 @@ unsafe extern "system" fn pc_query_interface(
     unsafe { *obj = this };
     0
 }
-unsafe extern "system" fn pc_add_ref(_this: *mut std::ffi::c_void) -> u32 {
+pub(super) unsafe extern "system" fn pc_add_ref(_this: *mut std::ffi::c_void) -> u32 {
     1
 }
-unsafe extern "system" fn pc_release(_this: *mut std::ffi::c_void) -> u32 {
+pub(super) unsafe extern "system" fn pc_release(_this: *mut std::ffi::c_void) -> u32 {
     1
 }
 unsafe extern "system" fn pc_count(_this: *mut std::ffi::c_void) -> i32 {
