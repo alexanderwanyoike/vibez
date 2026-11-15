@@ -1,4 +1,4 @@
-//! Resolving a MIDI drop's target against the project and wording the result.
+//! How a MIDI drop lands, checked against the project as it stands.
 
 use std::sync::Arc;
 
