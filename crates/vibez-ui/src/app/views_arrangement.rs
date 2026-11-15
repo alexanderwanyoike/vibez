@@ -307,6 +307,7 @@ impl App {
             );
 
             // Clip canvas for this track
+            let refusal = self.state.browser.lane_refusal(track.kind);
             let mut clip_canvas_widget = TrackClipCanvas::from_track(
                 track,
                 content,
@@ -343,7 +344,7 @@ impl App {
             .with_snap_targets(snap_targets.clone())
             .with_clip_drag(timeline.clip_drag.as_ref().map(|drag| drag.preview.clone()))
             .with_drop_zone(self.state.browser.lane_drop_zone(track.id))
-            .with_drop_refusal(self.state.browser.lane_refusal(track.kind));
+            .with_drop_refusal(refusal.clone());
             if let Some(preview) = self.state.audio_recording.preview_for_track(track.id) {
                 let name = match preview.source {
                     crate::domains::audio_recording::AudioRecordingSource::HardwareInput => {
@@ -378,7 +379,7 @@ impl App {
                     });
             }
             let track_id = track.id;
-            let compatible = self.state.browser.drag_lands_on(track.kind);
+            let compatible = refusal.is_none();
             let grid = self.state.view.arrange_grid;
             let track_geometry = geometry;
             let mut clip_canvas_area = mouse_area(
