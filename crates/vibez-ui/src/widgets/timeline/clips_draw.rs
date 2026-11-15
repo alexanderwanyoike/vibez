@@ -114,19 +114,15 @@ impl TrackClipCanvas {
         &self,
         frame: &mut canvas::Frame,
         bounds: Rectangle,
-        cursor: mouse::Cursor,
+        _cursor: mouse::Cursor,
     ) {
         let w = bounds.width;
         let h = bounds.height;
         let geometry = self.geometry();
         let ppb = geometry.pixels_per_beat();
-        let drop_hover = self.drop_hover(bounds, cursor);
-        let drop_compatible = self.sample_drop_refusal.is_none();
 
         // Background
-        let bg_color = if drop_hover && drop_compatible {
-            theme::accent_dim()
-        } else if self.selected {
+        let bg_color = if self.selected {
             theme::blend(theme::track_bg(), theme::text(), SELECTED_LANE_LIFT)
         } else {
             theme::track_bg()
@@ -201,9 +197,7 @@ impl TrackClipCanvas {
     fn draw_live_layer(&self, frame: &mut canvas::Frame, bounds: Rectangle, cursor: mouse::Cursor) {
         let w = bounds.width;
         let h = bounds.height;
-        let geometry = self.geometry();
         let drop_hover = self.drop_hover(bounds, cursor);
-        let drop_compatible = self.sample_drop_refusal.is_none();
 
         self.draw_drag_origin(frame, h);
 
@@ -350,65 +344,7 @@ impl TrackClipCanvas {
                 .with_width(1.0),
         );
 
-        // Drop-target indicator: bold accent border + vertical bar at the
-        // cursor x + the track name overlaid so the user can verify which
-        // lane will receive the drop.
-        if drop_hover && drop_compatible {
-            let target_color = theme::accent();
-            let outline = canvas::Path::rectangle(
-                iced::Point::new(1.0, 1.0),
-                iced::Size::new(w - 2.0, h - 2.0),
-            );
-            frame.stroke(
-                &outline,
-                canvas::Stroke::default()
-                    .with_color(target_color)
-                    .with_width(2.0),
-            );
-            if let Some(local) = cursor.position_in(bounds) {
-                let beat = self.snapped_beat(self.x_to_beat(local.x).max(0.0));
-                let snapped_x = self.beat_to_x(beat);
-                if snapped_x >= 0.0 && snapped_x <= w {
-                    let drop_line = canvas::Path::line(
-                        iced::Point::new(snapped_x, 0.0),
-                        iced::Point::new(snapped_x, h),
-                    );
-                    frame.stroke(
-                        &drop_line,
-                        canvas::Stroke::default()
-                            .with_color(target_color)
-                            .with_width(2.0),
-                    );
-                }
-                if let Some(duration_beats) = self.sample_drop_duration_beats {
-                    let preview_width = geometry.width_for_beats(duration_beats);
-                    let visible_width = preview_width.min((w - snapped_x).max(0.0));
-                    if visible_width > 0.0 {
-                        frame.fill_rectangle(
-                            iced::Point::new(snapped_x, 2.0),
-                            iced::Size::new(visible_width, h - 4.0),
-                            theme::with_alpha(theme::accent(), 0.18),
-                        );
-                    }
-                }
-                frame.fill_text(canvas::Text {
-                    content: format!("Beat {beat:.2} · {}", self.track_name),
-                    position: iced::Point::new(8.0, 8.0),
-                    color: target_color,
-                    size: 13.0.into(),
-                    ..Default::default()
-                });
-                if let Some(detail) = self.sample_drop_detail.as_ref() {
-                    frame.fill_text(canvas::Text {
-                        content: detail.clone(),
-                        position: iced::Point::new(8.0, 28.0),
-                        color: theme::text(),
-                        size: 11.0.into(),
-                        ..Default::default()
-                    });
-                }
-            }
-        } else if let Some(zone) = self.drop_zone.as_ref().filter(|_| drop_hover) {
+        if let Some(zone) = self.drop_zone.as_ref().filter(|_| drop_hover) {
             use crate::widgets::drop_highlight::{draw_zone, CARD_ZONE_INSET, CARD_ZONE_RADIUS};
             let origin = bounds.position() + whole_pixel_offset(bounds.position());
             let area = Rectangle::new(

@@ -31,13 +31,12 @@ pub struct DropZone {
 }
 
 impl BrowserDropTarget {
-    /// The zone to mark under the cursor, or `None` on a lane that takes the
-    /// audio, which previews the Clip it would place instead.
+    /// The zone to mark under the cursor.
     pub fn drop_zone(&self, media: DragMedia) -> Option<DropZone> {
         let action = match self {
             Self::ArrangementLane {
                 compatible: true, ..
-            } => return None,
+            } => DropAction::Add,
             Self::ArrangementLane { .. } => DropAction::Refuse,
             Self::EmptyArrangement { .. } => DropAction::Add,
             Self::DrumRackPad { .. } | Self::DrumRack { .. } => {
