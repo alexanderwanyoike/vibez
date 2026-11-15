@@ -344,3 +344,80 @@ async fn importing_the_selected_midi_file_lands_on_the_selected_midi_track_at_th
     assert_eq!(clips[0].position_beats, 2.0);
     assert_eq!(app.state.project_tracks.tracks.len(), 1);
 }
+
+fn record_engine(app: &mut App) -> rtrb::Consumer<vibez_engine::commands::EngineCommand> {
+    let (producer, commands) = rtrb::RingBuffer::new(4096);
+    app.cmd_tx = crate::domains::EngineCommandQueue::new(
+        producer,
+        vibez_engine::transport_ring::transport_ring().0,
+    );
+    commands
+}
+
+fn sent(
+    commands: &mut rtrb::Consumer<vibez_engine::commands::EngineCommand>,
+) -> Vec<vibez_engine::commands::EngineCommand> {
+    std::iter::from_fn(|| commands.pop().ok()).collect()
+}
+
+#[tokio::test]
+async fn a_clip_on_an_existing_lane_reaches_the_engine_with_its_notes() {
+    use vibez_engine::commands::EngineCommand;
+    let directory = tempfile::tempdir().unwrap();
+    let (mut app, track_id) = app_with_track(TrackKind::Midi);
+    let mut commands = record_engine(&mut app);
+
+    drop_on_lane(&mut app, track_id, 0.0, drum_phrase(directory.path())).await;
+
+    assert!(sent(&mut commands).iter().any(|command| matches!(
+        command,
+        EngineCommand::AddNoteClip { track_id: lane, .. } if *lane == track_id
+    )));
+}
+
+#[tokio::test]
+async fn a_new_track_reaches_the_engine_with_its_drum_rack_and_clip() {
+    use vibez_engine::commands::EngineCommand;
+    let directory = tempfile::tempdir().unwrap();
+    let mut app = app();
+    let mut commands = record_engine(&mut app);
+    drag(&mut app, drum_phrase(directory.path()));
+
+    run_until_idle(&mut app, Message::DropSampleOnEmptyArrangement).await;
+
+    let track_id = app.state.project_tracks.tracks[0].id;
+    let sent = sent(&mut commands);
+    let position = |wanted: fn(&EngineCommand, TrackId) -> bool| {
+        sent.iter()
+            .position(|command| wanted(command, track_id))
+            .expect("command sent")
+    };
+    let added = position(|c, t| matches!(c, EngineCommand::AddTrack(info) if info.id == t));
+    let instrument = position(
+        |c, t| matches!(c, EngineCommand::SetInstrument { track_id, .. } if *track_id == t),
+    );
+    let clip =
+        position(|c, t| matches!(c, EngineCommand::AddNoteClip { track_id, .. } if *track_id == t));
+    assert!(added < instrument && added < clip);
+}
+
+#[tokio::test]
+async fn a_midi_file_dropped_on_a_section_lane_lands_in_that_section() {
+    let directory = tempfile::tempdir().unwrap();
+    let (mut app, track_id) = app_with_track(TrackKind::Midi);
+    let section = crate::domains::perform::Section::new(0);
+    let section_id = section.id;
+    Arc::make_mut(&mut app.state.perform.sections).insert(section);
+    app.state.view.workspace = crate::state::Workspace::Perform;
+    let _ = app.update(Message::Perform(
+        crate::domains::perform::PerformMsg::SelectSection(section_id),
+    ));
+
+    drop_on_lane(&mut app, track_id, 4.0, drum_phrase(directory.path())).await;
+
+    let section = app.state.perform.sections.by_id(section_id).unwrap();
+    let clips = &section.timeline.get(track_id).unwrap().note_clips;
+    assert_eq!(clips.len(), 1);
+    assert_eq!(clips[0].position_beats, 4.0);
+    assert!(note_clips(&app, track_id).is_empty());
+}
