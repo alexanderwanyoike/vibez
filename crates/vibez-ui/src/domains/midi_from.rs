@@ -3,19 +3,74 @@
 use vibez_core::id::TrackId;
 use vibez_core::midi_from::MidiFrom;
 
+use vibez_core::routing::{RoutingError, RoutingGraph};
+
+use crate::domains::sidechain::routing_channels;
 use crate::state::ProjectTracksState;
 
 /// Tracks whose plugin instrument could feed `receiver` without a MIDI From
-/// loop, in track order.
-pub fn sources(_tracks: &ProjectTracksState, _receiver: TrackId) -> Vec<TrackId> {
-    Vec::new()
+/// loop, in track order. Built-in instruments play no notes out.
+pub fn sources(tracks: &ProjectTracksState, receiver: TrackId) -> Vec<TrackId> {
+    if !tracks
+        .tracks
+        .iter()
+        .any(|track| track.id == receiver && track.kind.is_midi())
+    {
+        return Vec::new();
+    }
+    tracks
+        .tracks
+        .iter()
+        .filter(|track| {
+            track.id != receiver && track.kind.is_midi() && track.plugin_instrument_ref.is_some()
+        })
+        .filter(|track| !forms_loop(tracks, receiver, track.id))
+        .map(|track| track.id)
+        .collect()
 }
 
-/// Sets `receiver`'s MIDI From to `source`; false when that is no change or
-/// `source` is not one of its [`sources`].
-pub fn set(_tracks: &mut ProjectTracksState, _receiver: TrackId, _source: Option<TrackId>) -> bool {
-    let _ = MidiFrom::new;
-    false
+/// The MIDI From `receiver` would have after choosing `source`, or `None`
+/// when that is no change or `source` is not one of its [`sources`].
+pub fn change(
+    tracks: &ProjectTracksState,
+    receiver: TrackId,
+    source: Option<TrackId>,
+) -> Option<Option<MidiFrom>> {
+    let current = tracks
+        .tracks
+        .iter()
+        .find(|track| track.id == receiver)?
+        .midi_from;
+    let next = match source {
+        Some(source) if sources(tracks, receiver).contains(&source) => {
+            Some(MidiFrom::new(receiver, source)?)
+        }
+        Some(_) => return None,
+        None => None,
+    };
+    (next != current).then_some(next)
+}
+
+/// Applies [`change`]; false when there was nothing to apply.
+pub fn set(tracks: &mut ProjectTracksState, receiver: TrackId, source: Option<TrackId>) -> bool {
+    let Some(next) = change(tracks, receiver, source) else {
+        return false;
+    };
+    if let Some(track) = tracks.tracks.iter_mut().find(|track| track.id == receiver) {
+        track.midi_from = next;
+    }
+    true
+}
+
+fn forms_loop(tracks: &ProjectTracksState, receiver: TrackId, source: TrackId) -> bool {
+    let mut channels = routing_channels(&tracks.tracks, &tracks.master, &tracks.buses);
+    if let Some(channel) = channels.iter_mut().find(|channel| channel.id == receiver) {
+        channel.midi_from = Some(source);
+    }
+    matches!(
+        RoutingGraph::prepare(&channels),
+        Err(RoutingError::FeedbackLoop)
+    )
 }
 
 #[cfg(test)]
