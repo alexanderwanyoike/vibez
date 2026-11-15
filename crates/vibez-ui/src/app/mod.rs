@@ -245,6 +245,7 @@ mod views_control_bar_style;
 mod views_control_status;
 mod views_detail;
 mod views_devices;
+mod views_dialog;
 mod views_file_menu;
 mod views_grid_menu;
 mod views_mixer;
