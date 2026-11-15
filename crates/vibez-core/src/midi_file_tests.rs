@@ -319,3 +319,40 @@ fn midi_paths_are_recognised_by_extension_in_any_case() {
     assert!(!is_midi_file_path(Path::new("loop.wav")));
     assert!(!is_midi_file_path(Path::new("mid")));
 }
+
+#[test]
+fn events_after_end_of_track_are_not_read() {
+    let bytes = smf(
+        0,
+        96,
+        &[vec![
+            on(0, 0, 60, 100),
+            off(96, 0, 60),
+            end(288),
+            on(0, 0, 62, 100),
+            off(960, 0, 62),
+        ]],
+    );
+
+    let file = MidiFile::read(&bytes).unwrap();
+
+    assert_eq!(file.tracks[0].notes, vec![note(60, 100, 0.0, 1.0)]);
+    assert_eq!(file.length_beats, 4.0);
+}
+
+#[test]
+fn a_type_2_file_of_sequential_patterns_is_refused() {
+    let bytes = smf(
+        2,
+        96,
+        &[
+            vec![on(0, 0, 60, 100), off(96, 0, 60), end(0)],
+            vec![on(0, 0, 64, 100), off(96, 0, 64), end(0)],
+        ],
+    );
+
+    assert_eq!(
+        MidiFile::read(&bytes),
+        Err(MidiFileError::SequentialPatterns)
+    );
+}

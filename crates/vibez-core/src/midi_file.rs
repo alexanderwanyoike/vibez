@@ -34,6 +34,8 @@ pub enum MidiFileError {
     Malformed(String),
     /// Timed in SMPTE frames rather than beats.
     TimecodeTiming,
+    /// A type 2 file, whose tracks are independent patterns.
+    SequentialPatterns,
     NoNotes,
 }
 
@@ -42,6 +44,9 @@ impl std::fmt::Display for MidiFileError {
         match self {
             Self::Malformed(reason) => write!(f, "not a readable MIDI file ({reason})"),
             Self::TimecodeTiming => f.write_str("SMPTE-timed MIDI files are not supported"),
+            Self::SequentialPatterns => {
+                f.write_str("type 2 MIDI files of separate patterns are not supported")
+            }
             Self::NoNotes => f.write_str("the MIDI file has no notes"),
         }
     }
