@@ -503,6 +503,20 @@ mod tests {
     }
 
     #[test]
+    fn a_query_without_an_out_pointer_is_refused() {
+        let mut list = super::LiveEventList::new(&[]);
+        let result = unsafe {
+            super::static_com_query_interface(
+                list.as_raw_mut(),
+                [0; 16].as_ptr(),
+                std::ptr::null_mut(),
+            )
+        };
+
+        assert_eq!(result, vst3::Steinberg::kInvalidArgument);
+    }
+
+    #[test]
     fn live_event_list_exposes_timed_clip_notes_to_vst3() {
         let mut events = vec![
             super::BlockNote::off(91, 64),
