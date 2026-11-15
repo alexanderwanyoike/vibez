@@ -223,11 +223,7 @@ pub fn apply_midi_take(
         start_beat: note.start_beat,
         duration_beats: note.duration_beats,
     }));
-    target.notes.sort_by(|a, b| {
-        a.start_beat
-            .total_cmp(&b.start_beat)
-            .then(a.pitch.cmp(&b.pitch))
-    });
+    MidiNote::sort(&mut target.notes);
 
     clip
 }

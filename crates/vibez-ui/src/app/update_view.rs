@@ -180,6 +180,12 @@ impl App {
             ViewMsg::CursorMoved(x, y) if self.state.browser.pending_drag.is_some() => {
                 Some(BrowserMsg::PendingDragMoved { x: *x, y: *y })
             }
+            // Pointer events reach this router after the widgets under the
+            // pointer reported any drop target, so a desktop drop the pointer
+            // left no target under can be told so.
+            ViewMsg::CursorMoved(..) if self.state.browser.drags_from_desktop() => {
+                Some(BrowserMsg::DesktopPointerMoved)
+            }
             ViewMsg::MouseReleased if self.state.browser.pending_drag.is_some() => {
                 Some(BrowserMsg::EndDragSample)
             }

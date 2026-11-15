@@ -250,7 +250,7 @@ pub(crate) fn scan_root_into(
             scan_root_into(root, &path, entries, folders, warnings)?;
             continue;
         }
-        if !file_type.is_file() || !is_supported_audio_file(&path) {
+        if !file_type.is_file() || !is_browsable_file(&path) {
             continue;
         }
         let relative_path = path
@@ -277,10 +277,14 @@ pub(crate) fn scan_root_into(
             name,
             root_path: root.clone(),
             relative_path,
-            format: vibez_core::audio_format::audio_format_for_path(&item.path())
-                .map(|format| format.label)
-                .unwrap_or("AUDIO")
-                .to_string(),
+            format: if vibez_core::midi_file::is_midi_file_path(&item.path()) {
+                "MIDI"
+            } else {
+                vibez_core::audio_format::audio_format_for_path(&item.path())
+                    .map(|format| format.label)
+                    .unwrap_or("AUDIO")
+            }
+            .to_string(),
             duration_seconds: None,
             channels: None,
             sample_rate: None,
@@ -323,8 +327,11 @@ pub(crate) fn path_contains_hidden_component(path: &std::path::Path) -> bool {
     })
 }
 
-pub(crate) fn is_supported_audio_file(path: &std::path::Path) -> bool {
+/// Audio the Browser auditions and imports, and MIDI files it drags onto
+/// MIDI tracks.
+pub(crate) fn is_browsable_file(path: &std::path::Path) -> bool {
     vibez_core::audio_format::is_supported_audio_path(path)
+        || vibez_core::midi_file::is_midi_file_path(path)
 }
 
 #[cfg(test)]
@@ -400,7 +407,7 @@ mod local_catalog_tests {
         }
         fs::write(root.join("upper.M4A"), []).unwrap();
         fs::write(root.join("raw.aac"), []).unwrap();
-        fs::write(root.join("notes.mid"), []).unwrap();
+        fs::write(root.join("notes.txt"), []).unwrap();
 
         let catalog = scan_sample_root(&root).unwrap();
 
@@ -416,7 +423,33 @@ mod local_catalog_tests {
         assert!(!catalog
             .entries
             .iter()
-            .any(|entry| entry.name == "notes.mid"));
+            .any(|entry| entry.name == "notes.txt"));
+    }
+
+    #[test]
+    fn local_catalog_lists_midi_files_beside_audio() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("Phrases");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("Rebeater P3.mid"), []).unwrap();
+        fs::write(root.join("Song.MIDI"), []).unwrap();
+        fs::write(root.join("kick.wav"), []).unwrap();
+
+        let catalog = scan_sample_root(&root).unwrap();
+
+        let formats: Vec<_> = catalog
+            .entries
+            .iter()
+            .map(|entry| (entry.name.as_str(), entry.format.as_str()))
+            .collect();
+        assert_eq!(
+            formats,
+            vec![
+                ("Rebeater P3.mid", "MIDI"),
+                ("Song.MIDI", "MIDI"),
+                ("kick.wav", "WAV"),
+            ]
+        );
     }
 
     #[test]

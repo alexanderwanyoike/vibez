@@ -341,7 +341,10 @@ fn independent_clip_wraps_retain_effect_fader_send_and_device_audio_context() {
                 1.0
             }
         };
-        let expected = (phase + 1) as f32 * gain * (1.0 + send);
+        // The probe hears the Perform clock, which no Clip wrap or relaunch resets.
+        let device_clock = physical - 521;
+        let expected = (device_clock + 1) as f32 * gain * (1.0 + send);
+        let tolerance = 2e-5 * expected.abs().max(1.0);
         let pan = if changed {
             1.0 - phase as f32 / 15.0
         } else {
@@ -349,12 +352,12 @@ fn independent_clip_wraps_retain_effect_fader_send_and_device_audio_context() {
         };
         let (left, right) = equal_power_pan(pan);
         assert!(
-            (values[0] - expected * left).abs() < 2e-5,
+            (values[0] - expected * left).abs() < tolerance,
             "frame {physical}: {values:?}, expected {}",
             expected * left
         );
         assert!(
-            (values[1] - expected * right).abs() < 2e-5,
+            (values[1] - expected * right).abs() < tolerance,
             "frame {physical}: values {values:?}, expected right {}, phase {phase}, changed {changed}", expected * right
         );
     }

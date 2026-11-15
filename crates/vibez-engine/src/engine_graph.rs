@@ -246,7 +246,12 @@ impl AudioEngine {
                     if let Some(instrument) = track.instrument.as_mut() {
                         instrument.set_audio_context(
                             vibez_core::audio_context::DeviceAudioContext {
-                                musical_sample: pos,
+                                musical_sample: device_musical_sample(
+                                    self.clip_performance,
+                                    pos,
+                                    block.repeat_pos,
+                                    0,
+                                ),
                                 continuous_sample,
                                 sample_rate: self.sample_rate,
                                 bpm: self.transport.bpm(),
@@ -572,7 +577,12 @@ impl AudioEngine {
                                 destination.bypass_state = Some(slot.bypass);
                                 slot.effect.set_audio_context(
                                     vibez_core::audio_context::DeviceAudioContext {
-                                        musical_sample: target_pos,
+                                        musical_sample: device_musical_sample(
+                                            self.clip_performance,
+                                            target_pos,
+                                            block.repeat_pos + offset as u64,
+                                            delay,
+                                        ),
                                         continuous_sample: continuous_sample + offset as u64,
                                         sample_rate: self.sample_rate,
                                         bpm: self.transport.bpm(),
@@ -802,4 +812,19 @@ fn automation_interval(sample_rate: u32) -> usize {
     (u64::from(sample_rate) * MAX_AUTOMATION_INTERVAL as u64)
         .div_ceil(48_000)
         .clamp(1, MAX_AUTOMATION_INTERVAL as u64) as usize
+}
+
+/// The song position a device hears; ARCHITECTURE.md explains why clip
+/// performance uses the Perform clock.
+fn device_musical_sample(
+    clip_performance: bool,
+    channel_position: u64,
+    perform_position: u64,
+    input_latency: u32,
+) -> u64 {
+    if clip_performance {
+        perform_position.saturating_sub(u64::from(input_latency))
+    } else {
+        channel_position
+    }
 }

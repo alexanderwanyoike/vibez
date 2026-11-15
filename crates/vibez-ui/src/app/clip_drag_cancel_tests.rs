@@ -109,8 +109,6 @@ impl Song {
             0.0,
             None,
             false,
-            None,
-            None,
         )
     }
 
