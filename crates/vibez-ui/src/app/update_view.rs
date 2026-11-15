@@ -96,6 +96,15 @@ impl App {
     }
 
     pub(super) fn route_view_message(&mut self, msg: ViewMsg) -> Task<Message> {
+        // Pointer events reach this router after the widgets under the
+        // pointer reported their drop target, so a desktop drop still
+        // waiting here has none.
+        if matches!(msg, ViewMsg::CursorMoved(..))
+            && self.state.browser.desktop_drop_waits_for_target()
+        {
+            let action = self.state.browser.update(BrowserMsg::DesktopDropMissed);
+            let _ = self.apply_browser_action(action);
+        }
         if matches!(&msg, ViewMsg::ToggleEditMenu) {
             self.state.project.file_menu_open = false;
         }
