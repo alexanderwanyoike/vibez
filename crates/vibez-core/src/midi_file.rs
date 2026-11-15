@@ -5,7 +5,7 @@ use std::path::Path;
 use crate::midi::MidiNote;
 
 /// Extensions a file must carry to be offered as a MIDI file.
-pub const MIDI_FILE_EXTENSIONS: &[&str] = &["mid", "midi"];
+const MIDI_FILE_EXTENSIONS: &[&str] = &["mid", "midi"];
 
 /// The General MIDI percussion channel (channel 10), zero-based.
 const DRUM_CHANNEL: u8 = 9;
@@ -15,7 +15,7 @@ const DRUM_CHANNEL: u8 = 9;
 pub struct MidiFile {
     /// The tracks that play notes, in file order.
     pub tracks: Vec<MidiFileTrack>,
-    /// Where the file ends: its last End of Track, never before a note ends.
+    /// The file's last End of Track, or its last note's end if that is later.
     pub length_beats: f64,
 }
 
@@ -79,7 +79,7 @@ impl MidiFile {
         let mut end_tick = 0;
         let mut tracks = Vec::new();
         for events in &smf.tracks {
-            let track = TrackReader::read(events);
+            let track = TickTrack::read(events);
             end_tick = end_tick.max(track.end_tick);
             if track.notes.is_empty() {
                 continue;
@@ -127,7 +127,7 @@ impl MidiFile {
         notes
     }
 
-    /// Every note sits on the General MIDI percussion channel.
+    /// Every track is on the drum channel.
     pub fn on_drum_channel(&self) -> bool {
         self.tracks.iter().all(|track| track.on_drum_channel)
     }
@@ -141,14 +141,15 @@ struct TickNote {
     end: u64,
 }
 
-/// One track's notes in ticks, paired from its note-on and note-off events.
-struct TrackReader {
+/// One track's name and notes in ticks, paired from its note-on and note-off
+/// events, and the tick it ends on.
+struct TickTrack {
     name: Option<String>,
     notes: Vec<TickNote>,
     end_tick: u64,
 }
 
-impl TrackReader {
+impl TickTrack {
     fn read(events: &[midly::TrackEvent<'_>]) -> Self {
         let mut reader = Self {
             name: None,
