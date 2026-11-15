@@ -190,15 +190,15 @@ fn devices_on_a_track_without_a_clip_follow_the_perform_clock() {
 
 #[test]
 fn a_bar_quantised_launch_starts_where_devices_hear_a_bar_line() {
-    let (mut engine, mut commands, mut events, [_, bare]) = perform_one_bar_clip();
+    let (mut engine, mut commands, mut events, [_, launched]) = perform_one_bar_clip();
     let mut heard = Vec::new();
     let mut started = None;
     for callback in 0..3 * BAR as usize / CALLBACK {
         if callback == 2 {
-            launch_one_bar(&mut commands, bare.track, 2, MusicalBoundary::OneBar);
+            launch_one_bar(&mut commands, launched.track, 2, MusicalBoundary::OneBar);
         }
         engine.process(&mut [0.0; CALLBACK * 2], 2);
-        heard.push(bare.instrument.last());
+        heard.push((launched.instrument.last(), launched.effect.last()));
         while let Ok(event) = events.pop() {
             if let EngineEvent::ClipTransitioned {
                 request_id: 2,
@@ -212,5 +212,5 @@ fn a_bar_quantised_launch_starts_where_devices_hear_a_bar_line() {
     }
     let started = started.expect("the queued Clip starts");
     assert_eq!(started, BAR);
-    assert_eq!(heard[started as usize / CALLBACK], started);
+    assert_eq!(heard[started as usize / CALLBACK], (started, started));
 }
