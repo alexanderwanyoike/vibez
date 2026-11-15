@@ -484,4 +484,53 @@ mod tests {
             1
         );
     }
+
+    fn midi_track(id: TrackId, midi_from: Option<TrackId>) -> RoutingChannel {
+        RoutingChannel {
+            id,
+            is_bus: false,
+            effects: vec![],
+            sends: vec![],
+            midi_from,
+        }
+    }
+
+    fn position(graph: &RoutingGraph, channel: TrackId) -> usize {
+        let node = graph.index(channel, NodeStage::Source).unwrap();
+        graph.order.iter().position(|&index| index == node).unwrap()
+    }
+
+    #[test]
+    fn a_midi_from_source_renders_before_its_receiver_without_an_audio_edge() {
+        let (source, receiver) = (TrackId::new(), TrackId::new());
+        let plain =
+            RoutingGraph::prepare(&[midi_track(receiver, None), midi_track(source, None)]).unwrap();
+        let routed =
+            RoutingGraph::prepare(&[midi_track(receiver, Some(source)), midi_track(source, None)])
+                .unwrap();
+
+        assert!(position(&routed, source) < position(&routed, receiver));
+        assert_eq!(routed.edges, plain.edges);
+    }
+
+    #[test]
+    fn a_midi_from_loop_is_a_feedback_loop() {
+        let (first, second) = (TrackId::new(), TrackId::new());
+
+        assert_eq!(
+            RoutingGraph::prepare(&[
+                midi_track(first, Some(second)),
+                midi_track(second, Some(first)),
+            ])
+            .unwrap_err(),
+            RoutingError::FeedbackLoop
+        );
+    }
+
+    #[test]
+    fn a_midi_from_source_outside_the_project_is_ignored() {
+        let track = TrackId::new();
+
+        assert!(RoutingGraph::prepare(&[midi_track(track, Some(TrackId::new()))]).is_ok());
+    }
 }
