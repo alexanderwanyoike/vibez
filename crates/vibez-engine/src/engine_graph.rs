@@ -814,18 +814,16 @@ fn automation_interval(sample_rate: u32) -> usize {
         .clamp(1, MAX_AUTOMATION_INTERVAL as u64) as usize
 }
 
-/// A Clip's own position restarts at every loop and is 0 on a track without
-/// a Clip, so in clip performance devices hear the launcher clock instead,
-/// the grid launch quantisation uses. Clip content and Clip automation keep
-/// the channel clock.
+/// The song position a device hears; ARCHITECTURE.md explains why clip
+/// performance uses the Perform clock.
 fn device_musical_sample(
     clip_performance: bool,
     channel_position: u64,
-    launcher_position: u64,
+    perform_position: u64,
     input_latency: u32,
 ) -> u64 {
     if clip_performance {
-        launcher_position.saturating_sub(u64::from(input_latency))
+        perform_position.saturating_sub(u64::from(input_latency))
     } else {
         channel_position
     }

@@ -1,4 +1,4 @@
-//! Devices hear the launcher clock, not the Clip clock, during clip performance.
+//! Devices hear the Perform clock, not the Clip clock, during clip performance.
 
 use super::*;
 use crate::playback_source::PreparedClipPlayback;
@@ -151,7 +151,7 @@ fn heard_over_three_loops(
     (instrument, effect)
 }
 
-fn launcher_clock() -> Vec<u64> {
+fn perform_clock() -> Vec<u64> {
     (0..3 * BAR).step_by(CALLBACK).collect()
 }
 
@@ -160,15 +160,15 @@ fn devices_on_a_looping_clip_keep_counting_past_the_clip_length() {
     let (mut engine, mut events, [clipped, _]) = perform_one_bar_clip();
     let (instrument, effect) = heard_over_three_loops(&mut engine, &mut events, &clipped);
     assert!(engine.clip_performance);
-    assert_eq!(instrument, launcher_clock(), "instrument");
-    assert_eq!(effect, launcher_clock(), "effect");
+    assert_eq!(instrument, perform_clock(), "instrument");
+    assert_eq!(effect, perform_clock(), "effect");
 }
 
 #[test]
-fn devices_on_a_track_without_a_clip_follow_the_launcher_clock() {
+fn devices_on_a_track_without_a_clip_follow_the_perform_clock() {
     let (mut engine, mut events, [_, bare]) = perform_one_bar_clip();
     let (instrument, effect) = heard_over_three_loops(&mut engine, &mut events, &bare);
     assert!(engine.clip_performance);
-    assert_eq!(instrument, launcher_clock(), "instrument");
-    assert_eq!(effect, launcher_clock(), "effect");
+    assert_eq!(instrument, perform_clock(), "instrument");
+    assert_eq!(effect, perform_clock(), "effect");
 }

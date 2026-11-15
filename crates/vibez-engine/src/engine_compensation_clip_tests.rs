@@ -341,7 +341,7 @@ fn independent_clip_wraps_retain_effect_fader_send_and_device_audio_context() {
                 1.0
             }
         };
-        // The probe hears the launcher clock, which no Clip wrap or relaunch resets.
+        // The probe hears the Perform clock, which no Clip wrap or relaunch resets.
         let device_clock = physical - 521;
         let expected = (device_clock + 1) as f32 * gain * (1.0 + send);
         let tolerance = 2e-5 * expected.abs().max(1.0);
