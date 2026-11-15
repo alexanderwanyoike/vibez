@@ -1,6 +1,7 @@
 pub mod host_impl;
 pub mod instance;
 mod latency;
+mod note_output;
 pub mod scanner;
 
 pub(crate) fn module_path(path: &std::path::Path) -> Result<std::path::PathBuf, String> {

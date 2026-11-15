@@ -4,8 +4,8 @@ use std::ffi::CString;
 use std::path::Path;
 
 use clap_sys::events::{
-    clap_event_header, clap_event_note, clap_input_events, clap_output_events,
-    CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_NOTE_OFF, CLAP_EVENT_NOTE_ON,
+    clap_event_header, clap_event_note, clap_input_events, CLAP_CORE_EVENT_SPACE_ID,
+    CLAP_EVENT_NOTE_OFF, CLAP_EVENT_NOTE_ON,
 };
 use clap_sys::ext::params::{clap_plugin_params, CLAP_EXT_PARAMS};
 use clap_sys::plugin::clap_plugin;
@@ -40,6 +40,7 @@ pub struct ClapPluginInstance {
     param_events_storage: Vec<clap_sys::events::clap_event_param_value>,
     event_headers: Vec<*const clap_event_header>,
     note_events: Vec<NoteEvent>,
+    note_output: vibez_core::note_output::NoteOutput,
     sample_rate: f64,
     latency_samples: u32,
     audio_context: Option<vibez_core::audio_context::DeviceAudioContext>,
@@ -239,6 +240,9 @@ impl ClapPluginInstance {
             param_events_storage: Vec::with_capacity(2048),
             event_headers: Vec::with_capacity(4096),
             note_events: Vec::with_capacity(2048),
+            note_output: vibez_core::note_output::NoteOutput::with_capacity(
+                crate::output_note::NOTE_OUTPUT_CAPACITY,
+            ),
             sample_rate,
             latency_samples: 0,
             audio_context: None,
@@ -492,6 +496,7 @@ impl PluginInstance for ClapPluginInstance {
         channels: usize,
         inputs: &[vibez_core::routing::ExternalInputBlock<'_>],
     ) {
+        self.note_output.clear();
         if !self.active || self.plugin_ptr.is_null() {
             buffer.fill(0.0);
             return;
@@ -602,10 +607,9 @@ impl PluginInstance for ClapPluginInstance {
             get: Some(input_events_get),
         };
 
-        let output_events_clap = clap_output_events {
-            ctx: std::ptr::null_mut(),
-            try_push: Some(output_events_try_push),
-        };
+        let mut note_output =
+            super::note_output::ClapNoteOutput::new(&mut self.note_output, frames as u32);
+        let output_events_clap = note_output.events();
 
         let transport = self.audio_context.map(crate::process_context::clap);
         let process = clap_process {
@@ -685,6 +689,10 @@ impl PluginInstance for ClapPluginInstance {
             velocity: 0,
             time: frame_offset,
         });
+    }
+
+    fn note_output(&self) -> Option<&vibez_core::note_output::NoteOutput> {
+        Some(&self.note_output)
     }
 
     fn reset(&mut self) {
@@ -809,14 +817,6 @@ unsafe extern "C" fn input_events_get(
     } else {
         std::ptr::null()
     }
-}
-
-unsafe extern "C" fn output_events_try_push(
-    _list: *const clap_output_events,
-    _event: *const clap_event_header,
-) -> bool {
-    // Silently accept output events (we don't process them yet)
-    true
 }
 
 #[cfg(test)]
