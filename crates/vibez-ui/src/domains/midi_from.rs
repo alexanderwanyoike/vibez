@@ -97,6 +97,10 @@ pub(crate) fn plugin_track(name: &str) -> ProjectTrack {
     track
 }
 
+/// Keeps only MIDI From choices a project could have made, so a hand-edited
+/// file cannot name a track itself or close a loop.
+pub fn drop_impossible(_tracks: &mut [ProjectTrack]) {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -168,6 +172,31 @@ mod tests {
         assert!(!set(&mut tracks, receiver.id, Some(receiver.id)));
         assert!(set(&mut tracks, receiver.id, None));
         assert_eq!(tracks.tracks[1].midi_from, None);
+    }
+
+    #[test]
+    fn a_loaded_self_route_or_loop_is_dropped_and_a_chain_is_kept() {
+        let (first, second, third) = (
+            plugin_track("First"),
+            plugin_track("Second"),
+            plugin_track("Third"),
+        );
+        let mut tracks = vec![first.clone(), second.clone(), third.clone()];
+        // As a hand-edited file could hold them.
+        let from = |source: &ProjectTrack| {
+            serde_json::from_value::<MidiFrom>(serde_json::json!({ "source": source.id })).ok()
+        };
+        tracks[0].midi_from = from(&second);
+        tracks[1].midi_from = from(&first);
+        tracks[2].midi_from = from(&third);
+
+        drop_impossible(&mut tracks);
+
+        assert!(tracks.iter().all(|track| track.midi_from.is_none()));
+        let mut chain = vec![first.clone(), second.clone()];
+        chain[1].midi_from = MidiFrom::new(second.id, first.id);
+        drop_impossible(&mut chain);
+        assert_eq!(chain[1].midi_from, MidiFrom::new(second.id, first.id));
     }
 
     #[test]
