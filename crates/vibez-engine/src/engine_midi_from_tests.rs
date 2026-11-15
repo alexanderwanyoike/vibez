@@ -343,3 +343,16 @@ fn a_routed_block_allocates_nothing() {
 
     assert_eq!(measured, (0, 0));
 }
+
+#[test]
+fn a_muted_source_still_plays_its_notes_on_the_receiver() {
+    let mut rig = Rig::new(true);
+    let source = rig.source;
+    rig.commands
+        .push(EngineCommand::SetTrackMute(source, true))
+        .unwrap();
+
+    rig.play(vec![vec![BlockNote::on(10, 60, 100)]]);
+
+    assert_eq!(rig.heard(), [(10, true, 60)]);
+}
