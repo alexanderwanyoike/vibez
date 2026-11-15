@@ -63,6 +63,17 @@ pub enum BrowserMsg {
         track_id: TrackId,
         drop: DevicePanelDrop,
     },
+    DragHoverClipSlot {
+        track_id: TrackId,
+        row: u32,
+    },
+    /// A file from another app entered the window.
+    DesktopFileHovered(PathBuf),
+    DesktopFileDropped(PathBuf),
+    /// The file from another app left the window, or its drag was cancelled.
+    DesktopDragLeft,
+    /// The pointer moved after a desktop drop and found no target.
+    DesktopDropMissed,
     ClearDragTarget,
     /// The cursor left `target`; another target it entered meanwhile stays.
     LeaveDragTarget(crate::state::BrowserDropTarget),
@@ -115,6 +126,8 @@ pub struct BrowserAction {
     pub debounce_root_scans: Vec<(PathBuf, u64)>,
     /// The newest debounce token for this root matured and may be scanned.
     pub scan_root: Option<(PathBuf, u64)>,
+    /// Release the drag here, as a button release over it would.
+    pub release: Option<crate::state::BrowserDropTarget>,
 }
 
 /// What a drag carries, which decides the tracks it lands on.
@@ -186,6 +199,7 @@ impl crate::state::BrowserDropTarget {
                 format!("Load into selected Drum Rack pad {}", pad_index + 1)
             }
             Target::DevicePanel { drop, .. } => drop.hover_status(),
+            Target::ClipSlot { .. } => todo!(),
         }
     }
 
@@ -228,6 +242,16 @@ impl BrowserState {
     pub fn lane_refusal(&self, kind: vibez_core::midi::TrackKind) -> Option<String> {
         let media = self.drag_media()?;
         (!media.lands_on(kind)).then(|| media.refused_lane_status())
+    }
+
+    /// Whether the drag in flight is a file from another app.
+    pub fn drags_from_desktop(&self) -> bool {
+        todo!()
+    }
+
+    /// Whether a desktop drop waits for the pointer to report a target.
+    pub fn desktop_drop_waits_for_target(&self) -> bool {
+        todo!()
     }
 
     /// Instrument and device targets take samples, never MIDI files; a MIDI
@@ -482,6 +506,11 @@ impl BrowserState {
                     action.status = self.clear_drag_target();
                 }
             }
+            BrowserMsg::DragHoverClipSlot { .. }
+            | BrowserMsg::DesktopFileHovered(_)
+            | BrowserMsg::DesktopFileDropped(_)
+            | BrowserMsg::DesktopDragLeft
+            | BrowserMsg::DesktopDropMissed => todo!(),
             BrowserMsg::ClearDragTarget => {
                 action.status = self.clear_drag_target();
             }
@@ -688,6 +717,10 @@ impl BrowserState {
         action
     }
 }
+
+#[cfg(test)]
+#[path = "browser_desktop_drop_tests.rs"]
+mod desktop_drop_tests;
 
 #[cfg(test)]
 #[path = "browser_midi_drag_tests.rs"]

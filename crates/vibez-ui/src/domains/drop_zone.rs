@@ -47,6 +47,7 @@ impl BrowserDropTarget {
                 })
             }
             Self::Sampler { .. } => DropAction::Load,
+            Self::ClipSlot { .. } => todo!(),
             Self::DevicePanel { drop, .. } => match drop {
                 DevicePanelDrop::AddSampler => DropAction::Add,
                 DevicePanelDrop::ReplaceWithSampler { .. } => DropAction::Replace,

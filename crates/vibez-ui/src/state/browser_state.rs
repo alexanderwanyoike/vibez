@@ -125,6 +125,18 @@ pub struct BrowserState {
     pub drag_source: Option<MediaSourceRef>,
     pub drag_label: Option<String>,
     pub drag_target: Option<BrowserDropTarget>,
+    /// Set while the drag in flight is a file from another app.
+    pub desktop_drop: Option<DesktopDrop>,
+}
+
+/// Where a file dragged in from another app is in its drop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesktopDrop {
+    /// Over the window; the pointer is the other app's until the drop.
+    Hovering,
+    /// Dropped before any target was under the pointer, so the next target
+    /// the pointer reports takes it.
+    Dropped,
 }
 
 impl Default for BrowserState {
@@ -173,6 +185,7 @@ impl Default for BrowserState {
             drag_source: None,
             drag_label: None,
             drag_target: None,
+            desktop_drop: None,
         }
     }
 }
