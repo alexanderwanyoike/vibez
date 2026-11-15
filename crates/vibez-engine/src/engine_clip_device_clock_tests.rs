@@ -77,7 +77,7 @@ struct DeviceProbes {
 
 /// One looping bar on `clipped`; `bare` plays no Clip.
 fn perform_one_bar_clip() -> (AudioEngine, rtrb::Consumer<EngineEvent>, [DeviceProbes; 2]) {
-    let (mut engine, mut commands, events) = AudioEngine::new();
+    let (engine, mut commands, events) = AudioEngine::new();
     let clipped = TrackId::new();
     let bare = TrackId::new();
     commands.push(EngineCommand::SetSampleRate(8)).unwrap();
