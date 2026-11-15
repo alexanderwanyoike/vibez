@@ -356,3 +356,47 @@ fn a_muted_source_still_plays_its_notes_on_the_receiver() {
 
     assert_eq!(rig.heard(), [(10, true, 60)]);
 }
+
+#[test]
+fn replacing_the_sources_instrument_mid_note_releases_it_at_the_next_block_start() {
+    let mut rig = Rig::new(true);
+    rig.play(vec![vec![BlockNote::on(10, 60, 100)]]);
+    rig.commands
+        .push(EngineCommand::SetInstrument {
+            track_id: rig.source,
+            instrument: Box::new(NotePlayer {
+                script: Arc::clone(&rig.script),
+                output: NoteOutput::default(),
+            }),
+        })
+        .unwrap();
+
+    rig.play(vec![vec![], vec![]]);
+
+    assert_eq!(rig.heard(), [(10, true, 60), (BLOCK as u64, false, 60)]);
+}
+
+#[test]
+fn removing_the_source_track_mid_note_releases_it_at_the_next_block_start() {
+    let mut rig = Rig::new(true);
+    rig.play(vec![vec![BlockNote::on(10, 60, 100)]]);
+    rig.commands
+        .push(EngineCommand::RemoveTrack(rig.source))
+        .unwrap();
+
+    rig.play(vec![vec![], vec![]]);
+
+    assert_eq!(rig.heard(), [(10, true, 60), (BLOCK as u64, false, 60)]);
+}
+
+#[test]
+fn a_stop_the_engine_makes_itself_releases_a_routed_note_once() {
+    let mut rig = Rig::new(true);
+    rig.commands.push(EngineCommand::Play).unwrap();
+    rig.play(vec![vec![BlockNote::on(10, 60, 100)]]);
+    rig.commands.push(EngineCommand::UnloadAudio).unwrap();
+
+    rig.play(vec![vec![], vec![BlockNote::off(44, 60)]]);
+
+    assert_eq!(rig.heard(), [(10, true, 60), (BLOCK as u64, false, 60)]);
+}
