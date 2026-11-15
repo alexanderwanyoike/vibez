@@ -1,9 +1,8 @@
 //! Typed audio-thread capture commands helpers.
 
 use super::*;
-use crate::events::{
-    InstrumentNoteInputEvent, PerformanceCaptureStartedEvent, SourceNoteInputEvent,
-};
+use crate::events::PerformanceCaptureStartedEvent;
+use vibez_core::note_output::BlockNote;
 
 impl AudioEngine {
     pub(super) fn command_start_performance_capture(
@@ -77,30 +76,7 @@ impl AudioEngine {
                 instrument.note_on(pitch, velocity);
             }
         }
-        let context = self.live_capture_context(track_id);
-        self.present_event(
-            EngineEvent::SourceNoteInput(SourceNoteInputEvent {
-                track_id,
-                pitch,
-                velocity,
-                on: true,
-                position: self.source_recording_position(),
-            }),
-            allowance,
-        );
-        self.present_event_after(
-            EngineEvent::InstrumentNoteInput(InstrumentNoteInputEvent {
-                track_id,
-                pitch,
-                velocity,
-                on: true,
-                effective_at_samples: context.perform,
-                section_id: context.section_id,
-                section_position_samples: context.section,
-            }),
-            self.live_path_latency(track_id),
-            allowance,
-        );
+        self.present_live_input(track_id, BlockNote::on(0, pitch, velocity), allowance);
     }
 
     pub(super) fn command_external_note_off(
@@ -114,29 +90,31 @@ impl AudioEngine {
                 instrument.note_off(pitch);
             }
         }
+        self.present_live_input(track_id, BlockNote::off(0, pitch), allowance);
+    }
+
+    /// A note played at the block start reaches recording now and is heard
+    /// after the track's live path.
+    fn present_live_input(
+        &mut self,
+        track_id: vibez_core::id::TrackId,
+        note: BlockNote,
+        allowance: &mut RetirementAllowance,
+    ) {
         let context = self.live_capture_context(track_id);
-        self.present_event(
-            EngineEvent::SourceNoteInput(SourceNoteInputEvent {
-                track_id,
-                pitch,
-                velocity: 0,
-                on: false,
-                position: self.source_recording_position(),
-            }),
-            allowance,
-        );
-        self.present_event_after(
-            EngineEvent::InstrumentNoteInput(InstrumentNoteInputEvent {
-                track_id,
-                pitch,
-                velocity: 0,
-                on: false,
+        let (source, heard) = EngineEvent::input_pair(
+            track_id,
+            note,
+            self.source_recording_position(),
+            crate::events::HeardNotePosition {
                 effective_at_samples: context.perform,
+                canonical_at_samples: context.perform,
                 section_id: context.section_id,
                 section_position_samples: context.section,
-            }),
-            self.live_path_latency(track_id),
-            allowance,
+                canonical_section_position_samples: context.section,
+            },
         );
+        self.present_event(source, allowance);
+        self.present_event_after(heard, self.live_path_latency(track_id), allowance);
     }
 }
