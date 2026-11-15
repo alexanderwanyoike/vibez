@@ -326,3 +326,21 @@ async fn escape_cancels_a_multi_track_file_waiting_for_its_layout() {
     assert!(note_clips(&app, track_id).is_empty());
     assert!(app.state.project.history.undo.is_empty());
 }
+
+#[tokio::test]
+async fn importing_the_selected_midi_file_lands_on_the_selected_midi_track_at_the_playhead() {
+    let directory = tempfile::tempdir().unwrap();
+    let (mut app, track_id) = app_with_track(TrackKind::Midi);
+    app.state.arrangement.selected_track = Some(track_id);
+    app.state.browser.selected_source = Some(MediaSourceRef::LocalFile {
+        path: drum_phrase(directory.path()),
+    });
+    app.state.transport.position_samples = app.state.transport.beats_to_samples(2.0);
+
+    run_until_idle(&mut app, Message::ImportSelectedBrowserSampleToArrangement).await;
+
+    let clips = note_clips(&app, track_id);
+    assert_eq!(clips.len(), 1);
+    assert_eq!(clips[0].position_beats, 2.0);
+    assert_eq!(app.state.project_tracks.tracks.len(), 1);
+}
