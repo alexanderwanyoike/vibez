@@ -7,7 +7,9 @@ impl ProjectTracksState {
     /// Mixer values, send levels and built-in device values may differ, since
     /// undo sends them as control commands. Meter readings and reported
     /// latencies change while the song plays, descriptors and GUI flags
-    /// follow from the device itself, and names and colours are only drawn.
+    /// follow from the device itself, names and colours are only drawn, and
+    /// MIDI From reaches the engine through the routing sync after any
+    /// Project Track change.
     pub fn same_channel_layout(&self, other: &Self) -> bool {
         let Self {
             reduced_latency_monitoring,
@@ -38,6 +40,7 @@ fn same_track(track: &ProjectTrack, other: &ProjectTrack) -> bool {
         solo: _,
         audio_input_route,
         input_monitoring,
+        midi_from: _,
         swing_offset: _,
         peak_l: _,
         peak_r: _,

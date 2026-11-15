@@ -513,6 +513,7 @@ impl App {
             track.solo = track_info.solo;
             track.audio_input_route = track_info.audio_input_route;
             track.input_monitoring = track_info.input_monitoring;
+            track.midi_from = track_info.midi_from;
             track.swing_offset = track_info.swing_offset;
             let automation = super::project_sections::legacy_automation_for_track(
                 &loaded.project,
@@ -693,6 +694,9 @@ impl App {
                 .max(project_tracks.tracks.len() as u32 + 2);
             project_tracks.tracks.push(track);
         }
+        crate::domains::midi_from::drop_impossible(
+            &mut Arc::make_mut(&mut self.state.project_tracks).tracks,
+        );
 
         // Master bus: gain + effect chain from the file, then the
         // channel-EQ backfill for projects saved before the master

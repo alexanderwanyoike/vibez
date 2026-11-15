@@ -54,6 +54,9 @@ impl ArrangementState {
                 track.audio_input_route = AudioInputRoute::default();
                 track.input_monitoring = InputMonitoring::Off;
             }
+            if track.midi_from.map(vibez_core::midi_from::MidiFrom::source) == Some(track_id) {
+                track.midi_from = None;
+            }
         }
         Arc::make_mut(&mut self.timeline).remove(track_id);
         self.selected_channels.retain(|id| *id != track_id);

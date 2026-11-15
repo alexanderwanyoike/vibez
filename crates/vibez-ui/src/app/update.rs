@@ -958,6 +958,7 @@ impl App {
             Message::SetAudioTrackInputRoute(track_id, route) => {
                 return self.set_audio_track_input_route(track_id, route);
             }
+            Message::SetMidiFrom(track_id, source) => self.set_midi_from(track_id, source),
             Message::SetAudioTrackMonitoring(track_id, monitoring) => {
                 return self.set_audio_track_monitoring(track_id, monitoring);
             }
