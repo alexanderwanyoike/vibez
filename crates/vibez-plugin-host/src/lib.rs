@@ -20,6 +20,7 @@ pub mod format;
 pub mod gui;
 pub mod info;
 pub mod instance;
+mod output_note;
 pub mod paths;
 mod process_context;
 pub mod scan_helper;
