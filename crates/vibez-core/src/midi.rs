@@ -32,6 +32,15 @@ impl MidiNote {
     pub fn end_beat(&self) -> f64 {
         self.start_beat + self.duration_beats
     }
+
+    /// Orders notes by start, then pitch, as Clips store them.
+    pub fn sort(notes: &mut [MidiNote]) {
+        notes.sort_by(|a, b| {
+            a.start_beat
+                .total_cmp(&b.start_beat)
+                .then(a.pitch.cmp(&b.pitch))
+        });
+    }
 }
 
 /// The furthest beat a note Clip's content reaches, 4096 bars, so a loop or
