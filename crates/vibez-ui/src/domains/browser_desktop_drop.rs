@@ -82,4 +82,10 @@ impl BrowserState {
         self.cancel_media_drag();
         action.status = Some(format!("Nothing here takes {name}"));
     }
+
+    /// Ends the desktop phase of a drop being released on its target, so the
+    /// release is not taken for a click.
+    pub fn end_desktop_drop(&mut self) {
+        self.desktop_drop = None;
+    }
 }

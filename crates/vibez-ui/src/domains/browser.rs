@@ -211,6 +211,7 @@ impl crate::state::BrowserDropTarget {
             (Target::DevicePanel { track_id, .. }, Target::DevicePanel { track_id: left, .. }) => {
                 track_id == left
             }
+            (Target::EmptyArrangement { .. }, Target::EmptyArrangement { .. }) => true,
             _ => self == other,
         }
     }

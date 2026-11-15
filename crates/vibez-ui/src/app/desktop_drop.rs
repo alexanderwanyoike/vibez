@@ -50,6 +50,7 @@ impl App {
                 Message::ImportLauncherClip { track_id, row }
             }
         };
+        self.state.browser.end_desktop_drop();
         self.update(message)
     }
 }
