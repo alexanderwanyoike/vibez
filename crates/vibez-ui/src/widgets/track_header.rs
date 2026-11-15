@@ -586,6 +586,8 @@ mod tests {
         midi.kind = TrackKind::Midi;
 
         assert!(shows_midi_from(&midi));
+        midi.kind = TrackKind::Instrument(vibez_core::midi::InstrumentKind::SubtractiveSynth);
+        assert!(shows_midi_from(&midi));
         assert!(!shows_midi_from(&audio_track()));
     }
 

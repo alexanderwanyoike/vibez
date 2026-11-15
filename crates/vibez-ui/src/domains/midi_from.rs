@@ -290,6 +290,17 @@ mod tests {
     }
 
     #[test]
+    fn a_source_that_is_gone_shows_as_a_missing_track() {
+        let mut lead = plugin_track("Lead");
+        lead.midi_from = MidiFrom::new(lead.id, TrackId::new());
+
+        let (entries, chosen) = choices(std::slice::from_ref(&lead), &lead);
+
+        assert_eq!(chosen.label, "MF \u{b7} Missing Track");
+        assert!(entries.contains(&chosen));
+    }
+
+    #[test]
     fn the_routing_model_carries_a_tracks_midi_from() {
         let (source, receiver) = (plugin_track("Rebeater"), plugin_track("Lead"));
         let mut tracks = project(vec![source.clone(), receiver.clone()]);
