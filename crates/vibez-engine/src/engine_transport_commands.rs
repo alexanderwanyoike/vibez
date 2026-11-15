@@ -21,6 +21,7 @@ impl AudioEngine {
         self.transport.set_audio_length(self.arrangement_end());
         for track in &mut self.tracks {
             track.flush_notes();
+            track.routed_notes.release();
         }
         self.stopped_note_repeat_anchor = self
             .has_active_note_repeats()
