@@ -99,7 +99,21 @@ pub(crate) fn plugin_track(name: &str) -> ProjectTrack {
 
 /// Keeps only MIDI From choices a project could have made, so a hand-edited
 /// file cannot name a track itself or close a loop.
-pub fn drop_impossible(_tracks: &mut [ProjectTrack]) {}
+pub fn drop_impossible(tracks: &mut [ProjectTrack]) {
+    let looped: Vec<bool> = tracks
+        .iter()
+        .map(|track| {
+            track
+                .midi_from
+                .is_some_and(|midi_from| forms_loop(tracks, track.id, midi_from.source()))
+        })
+        .collect();
+    for (track, looped) in tracks.iter_mut().zip(looped) {
+        if looped {
+            track.midi_from = None;
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

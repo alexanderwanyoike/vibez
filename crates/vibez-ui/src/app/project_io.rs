@@ -7,7 +7,6 @@ use vibez_core::effect::EffectType;
 
 use vibez_core::id::{EffectId, TrackId};
 use vibez_core::midi::TrackKind;
-use vibez_core::midi_from::MidiFrom;
 use vibez_core::track::{InstrumentStateInfo, MediaSourceRef, TrackInfo};
 use vibez_engine::commands::EngineCommand;
 use vibez_plugin_host::gui::PluginGuiKey;
@@ -513,9 +512,7 @@ impl App {
             track.solo = track_info.solo;
             track.audio_input_route = track_info.audio_input_route;
             track.input_monitoring = track_info.input_monitoring;
-            track.midi_from = track_info
-                .midi_from
-                .and_then(|midi_from| MidiFrom::new(track_info.id, midi_from.source()));
+            track.midi_from = track_info.midi_from;
             track.swing_offset = track_info.swing_offset;
             let automation = super::project_sections::legacy_automation_for_track(
                 &loaded.project,
@@ -696,6 +693,9 @@ impl App {
                 .max(project_tracks.tracks.len() as u32 + 2);
             project_tracks.tracks.push(track);
         }
+        crate::domains::midi_from::drop_impossible(
+            &mut Arc::make_mut(&mut self.state.project_tracks).tracks,
+        );
 
         // Master bus: gain + effect chain from the file, then the
         // channel-EQ backfill for projects saved before the master
