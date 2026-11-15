@@ -64,3 +64,55 @@ unsafe extern "C" fn try_push(
     }
     true
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn note(type_: u16, size: u32) -> clap_event_note {
+        clap_event_note {
+            header: clap_event_header {
+                size,
+                time: 3,
+                space_id: CLAP_CORE_EVENT_SPACE_ID,
+                type_,
+                flags: 0,
+            },
+            note_id: -1,
+            port_index: 0,
+            channel: 0,
+            key: 60,
+            velocity: 1.0,
+        }
+    }
+
+    fn push(output: &mut NoteOutput, event: &clap_event_note) -> bool {
+        let mut list = ClapNoteOutput::new(output, 64);
+        let events = list.events();
+        unsafe { (events.try_push.unwrap())(&events, (event as *const clap_event_note).cast()) }
+    }
+
+    #[test]
+    fn an_event_smaller_than_its_type_is_ignored() {
+        let mut output = NoteOutput::default();
+        let header_only = std::mem::size_of::<clap_event_header>() as u32;
+
+        push(&mut output, &note(CLAP_EVENT_NOTE_ON, header_only));
+
+        assert!(output.notes().is_empty());
+    }
+
+    #[test]
+    fn a_dropped_note_is_refused_to_the_plugin() {
+        let mut output = NoteOutput::default();
+        let on = note(
+            CLAP_EVENT_NOTE_ON,
+            std::mem::size_of::<clap_event_note>() as u32,
+        );
+        let accepted = (0..NoteOutput::CAPACITY)
+            .filter(|_| push(&mut output, &on))
+            .count();
+
+        assert_eq!(accepted, output.notes().len());
+    }
+}
