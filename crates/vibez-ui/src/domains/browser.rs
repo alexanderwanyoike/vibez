@@ -72,7 +72,8 @@ pub enum BrowserMsg {
     DesktopFileDropped(PathBuf),
     /// The file from another app left the window, or its drag was cancelled.
     DesktopDragLeft,
-    /// The pointer moved after a desktop drop and found no target.
+    /// The pointer moved while a file from another app is dragged, after the
+    /// widgets under it reported any target.
     DesktopPointerMoved,
     ClearDragTarget,
     /// The cursor left `target`; another target it entered meanwhile stays.
