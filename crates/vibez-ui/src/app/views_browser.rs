@@ -351,7 +351,12 @@ impl App {
                 &metadata_detail,
                 entry.file_size,
             );
-            let compact_detail = format!("BPM {bpm} · {length} · {source_detail}");
+            let midi = vibez_core::midi_file::is_midi_file_path(&entry.relative_path);
+            let compact_detail = if midi {
+                source_detail.clone()
+            } else {
+                format!("BPM {bpm} · {length} · {source_detail}")
+            };
             // mouse_area returns early if its child captures the event, so
             // iced Button underneath would swallow press events. Use a
             // plain container as the click target instead.
@@ -397,7 +402,14 @@ impl App {
             };
             let entry_body = container(
                 row![
-                    browser_result_icon(browser_result_glyph(false), selected),
+                    browser_result_icon(
+                        if midi {
+                            crate::icons::MUSIC
+                        } else {
+                            browser_result_glyph(false)
+                        },
+                        selected
+                    ),
                     table_cells
                 ]
                 .spacing(9)

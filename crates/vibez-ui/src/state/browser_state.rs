@@ -564,6 +564,9 @@ impl BrowserState {
     /// it hovers previews it.
     pub fn drag_detail(&self, project_bpm: f64) -> Option<String> {
         let label = self.drag_label.as_ref()?;
+        if self.drag_media() == Some(crate::domains::browser::DragMedia::Midi) {
+            return Some(format!("{label} · MIDI"));
+        }
         let mode = match self.audition_mode {
             AuditionMode::Raw => "RAW",
             AuditionMode::Warp => "WARP",
