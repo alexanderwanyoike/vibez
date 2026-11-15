@@ -72,6 +72,9 @@ impl MidiFile {
             midly::Timing::Metrical(ticks) => f64::from(ticks.as_int().max(1)),
             midly::Timing::Timecode(..) => return Err(MidiFileError::TimecodeTiming),
         };
+        if smf.header.format == midly::Format::Sequential {
+            return Err(MidiFileError::SequentialPatterns);
+        }
         let beats = |tick: u64| tick as f64 / ticks_per_beat;
         let mut end_tick = 0;
         let mut tracks = Vec::new();
@@ -193,6 +196,9 @@ impl TrackReader {
                         _ => {}
                     }
                 }
+                // midly reads on to the end of the chunk; whatever follows
+                // End of Track is not part of the track.
+                midly::TrackEventKind::Meta(midly::MetaMessage::EndOfTrack) => break,
                 midly::TrackEventKind::Meta(midly::MetaMessage::TrackName(name)) => {
                     reader.name = Some(String::from_utf8_lossy(name).trim().to_string())
                         .filter(|name| !name.is_empty());
@@ -200,7 +206,6 @@ impl TrackReader {
                 _ => {}
             }
         }
-        // End of Track is the last event, so the final tick is where it sits.
         reader.end_tick = tick;
         for index in sounding {
             reader.notes[index].end = tick;
