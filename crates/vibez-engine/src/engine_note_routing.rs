@@ -47,9 +47,11 @@ impl AudioEngine {
         receiving.routed_notes.admit(source, notes, frames);
     }
 
+    /// Catches stops the engine makes itself (song end, faults, unload),
+    /// which no Stop command announces.
     pub(super) fn release_routed_notes_after_stop(&mut self) {
         let playing = self.transport.is_playing();
-        if std::mem::replace(&mut self.routed_notes_playing, playing) && !playing {
+        if std::mem::replace(&mut self.transport_was_playing, playing) && !playing {
             for track in &mut self.tracks {
                 track.routed_notes.release();
             }

@@ -142,7 +142,7 @@ pub struct AudioEngine {
     stopped_note_repeat_anchor: Option<u64>,
     /// Whether the transport was playing at the last callback, so any stop,
     /// commanded or not, releases routed notes once.
-    routed_notes_playing: bool,
+    transport_was_playing: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -328,7 +328,7 @@ impl AudioEngine {
             clip_record: None,
             clock_domain: ClockDomain::Arrange,
             stopped_note_repeat_anchor: None,
-            routed_notes_playing: false,
+            transport_was_playing: false,
         };
 
         (engine, cmd_tx, event_rx)

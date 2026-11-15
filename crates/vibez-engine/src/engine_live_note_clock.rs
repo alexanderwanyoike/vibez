@@ -32,12 +32,12 @@ impl LiveNoteClock<'_> {
         )
     }
 
-    pub(super) fn notice(&self, effective: u64, canonical: u64) -> HeardNotePosition {
+    pub(super) fn heard(&self, effective: u64, canonical: u64) -> HeardNotePosition {
         let effective_context = self.context(effective);
         let canonical_context = self.context(canonical);
         HeardNotePosition {
-            effective_at_samples: self.heard(effective, effective_context),
-            canonical_at_samples: self.heard(canonical, canonical_context),
+            effective_at_samples: self.heard_sample(effective, effective_context),
+            canonical_at_samples: self.heard_sample(canonical, canonical_context),
             section_id: effective_context.and_then(|context| context.section_id),
             section_position_samples: effective_context.and_then(|context| context.section),
             canonical_section_position_samples: canonical_context
@@ -52,7 +52,7 @@ impl LiveNoteClock<'_> {
             .saturating_add(self.path as u64)
     }
 
-    fn heard(&self, sample: u64, context: Option<PresentationPosition>) -> u64 {
+    fn heard_sample(&self, sample: u64, context: Option<PresentationPosition>) -> u64 {
         context.map_or_else(
             || sample.saturating_sub(self.omitted as u64),
             |context| {

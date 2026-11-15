@@ -284,7 +284,7 @@ impl AudioEngine {
                             id,
                             note,
                             clock.source(sample, sample),
-                            clock.notice(sample, sample),
+                            clock.heard(sample, sample),
                         );
                         presentation_overflow = presentation_overflow
                             || !presentation_queue::emit_pair(
@@ -307,7 +307,7 @@ impl AudioEngine {
                             id,
                             trigger,
                             clock.source(effective, canonical),
-                            clock.notice(effective, canonical),
+                            clock.heard(effective, canonical),
                         );
                         presentation_overflow = !presentation_queue::emit_pair(
                             source,

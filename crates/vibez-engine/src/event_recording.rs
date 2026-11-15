@@ -46,7 +46,7 @@ impl EngineEvent {
         track_id: TrackId,
         note: vibez_core::note_output::BlockNote,
         source: SourceRecordingPosition,
-        notice: HeardNotePosition,
+        heard: HeardNotePosition,
     ) -> (Self, Self) {
         (
             Self::SourceNoteInput(SourceNoteInputEvent {
@@ -61,9 +61,9 @@ impl EngineEvent {
                 pitch: note.pitch,
                 velocity: note.velocity,
                 on: note.on,
-                effective_at_samples: notice.effective_at_samples,
-                section_id: notice.section_id,
-                section_position_samples: notice.section_position_samples,
+                effective_at_samples: heard.effective_at_samples,
+                section_id: heard.section_id,
+                section_position_samples: heard.section_position_samples,
             }),
         )
     }
@@ -72,9 +72,9 @@ impl EngineEvent {
         track_id: TrackId,
         trigger: NoteRepeatTrigger,
         source: SourceRecordingPosition,
-        notice: HeardNotePosition,
+        heard: HeardNotePosition,
     ) -> (Self, Self) {
-        // Notice coordinates are supplied independently: presentation mapping
+        // Heard coordinates are supplied independently: presentation mapping
         // must never move the Source take behind its own recording boundary.
         (
             Self::SourceNoteRepeated(SourceNoteRepeatedEvent {
@@ -89,11 +89,11 @@ impl EngineEvent {
                 pitch: trigger.pitch,
                 velocity: trigger.velocity,
                 rate: trigger.rate,
-                effective_at_samples: notice.effective_at_samples,
-                canonical_at_samples: notice.canonical_at_samples,
-                section_id: notice.section_id,
-                section_position_samples: notice.section_position_samples,
-                canonical_section_position_samples: notice.canonical_section_position_samples,
+                effective_at_samples: heard.effective_at_samples,
+                canonical_at_samples: heard.canonical_at_samples,
+                section_id: heard.section_id,
+                section_position_samples: heard.section_position_samples,
+                canonical_section_position_samples: heard.canonical_section_position_samples,
             }),
         )
     }
