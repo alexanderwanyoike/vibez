@@ -28,41 +28,46 @@ impl<'a> ClapNoteOutput<'a> {
         }
     }
 
-    unsafe fn push(&mut self, header: &clap_event_header) {
+    /// # Safety
+    /// `event` points to a whole event of at least `header.size` bytes, as
+    /// CLAP guarantees for `try_push`.
+    unsafe fn push(&mut self, event: *const clap_event_header) -> bool {
+        let header = &*event;
         if header.space_id != CLAP_CORE_EVENT_SPACE_ID {
-            return;
+            return true;
         }
         let note = match header.type_ {
-            CLAP_EVENT_NOTE_ON => {
-                let event = &*(header as *const clap_event_header).cast::<clap_event_note>();
-                output_note::note_on(header.time, self.frames, event.key.into(), event.velocity)
+            CLAP_EVENT_NOTE_ON | CLAP_EVENT_NOTE_OFF if fits::<clap_event_note>(header) => {
+                let note = &*event.cast::<clap_event_note>();
+                if header.type_ == CLAP_EVENT_NOTE_ON {
+                    output_note::note_on(header.time, self.frames, note.key.into(), note.velocity)
+                } else {
+                    output_note::note_off(header.time, self.frames, note.key.into())
+                }
             }
-            CLAP_EVENT_NOTE_OFF => {
-                let event = &*(header as *const clap_event_header).cast::<clap_event_note>();
-                output_note::note_off(header.time, self.frames, event.key.into())
-            }
-            CLAP_EVENT_MIDI => {
-                let event = &*(header as *const clap_event_header).cast::<clap_event_midi>();
-                output_note::midi(header.time, self.frames, event.data)
+            CLAP_EVENT_MIDI if fits::<clap_event_midi>(header) => {
+                let midi = &*event.cast::<clap_event_midi>();
+                output_note::midi(header.time, self.frames, midi.data)
             }
             _ => None,
         };
-        if let Some(note) = note {
-            self.notes.push(note);
-        }
+        note.is_none_or(|note| self.notes.push(note))
     }
 }
 
-/// Every event is accepted: notes are kept or counted as dropped, and other
-/// output (parameter gestures, CC) is not used yet.
+fn fits<T>(header: &clap_event_header) -> bool {
+    header.size as usize >= std::mem::size_of::<T>()
+}
+
+/// Events other than notes (parameter gestures, CC) are accepted and unused.
 unsafe extern "C" fn try_push(
     list: *const clap_output_events,
     event: *const clap_event_header,
 ) -> bool {
-    if !list.is_null() && !event.is_null() {
-        (*(*list).ctx.cast::<ClapNoteOutput<'_>>()).push(&*event);
+    if list.is_null() || event.is_null() {
+        return false;
     }
-    true
+    (*(*list).ctx.cast::<ClapNoteOutput<'_>>()).push(event)
 }
 
 #[cfg(test)]
