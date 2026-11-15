@@ -1,4 +1,4 @@
-//! Imported note Clips added to their timeline lanes and sent to the engine.
+//! Imported note Clips joining their timeline lanes.
 
 use std::sync::Arc;
 
@@ -9,8 +9,8 @@ use crate::domains::EngineHandle;
 use crate::state::{TimelineEditorState, UiNoteClip};
 
 impl TimelineEditorState {
-    /// Adds each Clip to its lane, sized for the Clips already there, and
-    /// sends it to the engine; off Arrange the engine is a no-op.
+    /// Adds each Clip to its lane, its engine insertion sized for the Clips
+    /// already there.
     pub fn add_imported_note_clips(
         &mut self,
         engine: &mut impl EngineHandle,

@@ -172,8 +172,7 @@ impl App {
         self.state.status_text = landing.status(&import.name, &names);
     }
 
-    /// A new MIDI track named for the file; the engine learns of it when the
-    /// whole track replays.
+    /// A new MIDI track named for the file, with a Drum Rack for drums.
     fn add_imported_midi_track(&mut self, name: String, drum_rack: bool) -> TrackId {
         let project_tracks = Arc::make_mut(&mut self.state.project_tracks);
         let track_id = project_tracks
