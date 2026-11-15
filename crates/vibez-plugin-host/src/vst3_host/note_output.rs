@@ -86,3 +86,22 @@ static NOTE_OUTPUT_VTBL: EventListVtbl = EventListVtbl {
     get_event: get,
     add_event: add,
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vibez_core::note_output::BlockNote;
+
+    #[test]
+    fn a_dropped_note_is_refused_to_the_plugin() {
+        let mut output = NoteOutput::default();
+        let mut list = Vst3NoteOutput::new(&mut output, 64);
+        let raw = list.as_raw_mut();
+        let mut on = vst_event(&BlockNote::on(3, 60, 100));
+        let accepted = (0..NoteOutput::CAPACITY)
+            .filter(|_| unsafe { (NOTE_OUTPUT_VTBL.add_event)(raw, &mut on) } == 0)
+            .count();
+
+        assert_eq!(accepted, NoteOutput::CAPACITY - 128);
+    }
+}
