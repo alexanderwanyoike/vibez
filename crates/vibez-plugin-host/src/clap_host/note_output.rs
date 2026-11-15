@@ -118,6 +118,7 @@ mod tests {
             .filter(|_| push(&mut output, &on))
             .count();
 
+        assert!(accepted < NoteOutput::CAPACITY);
         assert_eq!(accepted, output.notes().len());
     }
 }

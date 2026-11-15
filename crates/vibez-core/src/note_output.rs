@@ -52,6 +52,7 @@ impl NoteOutput {
     /// One release per MIDI pitch, so a block flooded with note-ons cannot
     /// strand the notes already sounding.
     const NOTE_OFF_RESERVE: usize = 128;
+    const NOTE_ON_LIMIT: usize = Self::CAPACITY - Self::NOTE_OFF_RESERVE;
 
     pub fn clear(&mut self) {
         self.notes.clear();
@@ -60,7 +61,7 @@ impl NoteOutput {
     /// False when the note was dropped.
     pub fn push(&mut self, note: BlockNote) -> bool {
         let limit = if note.on {
-            Self::CAPACITY - Self::NOTE_OFF_RESERVE
+            Self::NOTE_ON_LIMIT
         } else {
             Self::CAPACITY
         };
@@ -127,9 +128,10 @@ mod tests {
             .filter(|_| output.push(BlockNote::on(0, 60, 100)))
             .count();
 
-        assert_eq!(accepted_ons, NoteOutput::CAPACITY - 128);
-        assert!((0..128).all(|pitch| output.push(BlockNote::off(1, pitch))));
+        assert_eq!(accepted_ons, NoteOutput::NOTE_ON_LIMIT);
+        assert!((0..NoteOutput::NOTE_OFF_RESERVE)
+            .all(|pitch| output.push(BlockNote::off(1, pitch as u8))));
         assert!(!output.push(BlockNote::off(1, 0)));
-        assert_eq!(output.dropped(), 128 + 1);
+        assert_eq!(output.dropped(), NoteOutput::NOTE_OFF_RESERVE as u64 + 1);
     }
 }

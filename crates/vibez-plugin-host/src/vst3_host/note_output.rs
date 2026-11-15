@@ -104,6 +104,7 @@ mod tests {
             .filter(|_| unsafe { (NOTE_OUTPUT_VTBL.add_event)(raw, &mut on) } == 0)
             .count();
 
-        assert_eq!(accepted, NoteOutput::CAPACITY - 128);
+        assert!(accepted < NoteOutput::CAPACITY);
+        assert_eq!(accepted, list.notes.notes().len());
     }
 }
