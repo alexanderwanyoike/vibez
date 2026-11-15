@@ -868,6 +868,10 @@ mod clip_launcher;
 #[path = "engine_clip_launcher_tests.rs"]
 mod clip_launcher_tests;
 
+#[cfg(test)]
+#[path = "engine_clip_device_clock_tests.rs"]
+mod clip_device_clock_tests;
+
 #[path = "engine_graph_layout.rs"]
 mod graph_layout;
 
