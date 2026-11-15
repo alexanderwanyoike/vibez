@@ -152,3 +152,26 @@ fn window_file_events_become_desktop_drag_messages() {
     ));
     assert!(desktop_drop::desktop_drop_message(&Event::Focused).is_none());
 }
+
+#[tokio::test]
+async fn a_click_while_a_desktop_drag_seems_to_hover_imports_nothing() {
+    // winit can report a hover after the drag already left or dropped, so
+    // the hover outlives the drag; a click is proof the drag is over.
+    let directory = tempfile::tempdir().unwrap();
+    let path = drum_phrase(directory.path());
+    let (mut app, track_id) = app_with_midi_track();
+    let _ = app.update(browser(BrowserMsg::DesktopFileHovered(path)));
+
+    run_until_idle(
+        &mut app,
+        Message::DropSampleOnArrangement {
+            track_id,
+            position_samples: 0,
+        },
+    )
+    .await;
+
+    assert!(note_clip_starts(&app, track_id).is_empty());
+    assert!(app.state.browser.drag_source.is_none());
+    assert!(!app.state.browser.drags_from_desktop());
+}

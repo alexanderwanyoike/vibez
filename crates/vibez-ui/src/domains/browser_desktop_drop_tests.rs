@@ -225,3 +225,15 @@ fn a_lane_of_the_other_kind_cancels_the_drop_with_its_reason() {
         Some("MIDI can't go on an audio lane")
     );
 }
+
+#[test]
+fn leaving_empty_arrange_clears_it_wherever_the_pointer_was() {
+    let mut browser = hovering("kick.wav");
+    browser.update(BrowserMsg::DragHoverEmptyArrangement { beat: 7.0 });
+
+    browser.update(BrowserMsg::LeaveDragTarget(
+        BrowserDropTarget::EmptyArrangement { beat: 0.0 },
+    ));
+
+    assert_eq!(browser.drag_target, None);
+}
