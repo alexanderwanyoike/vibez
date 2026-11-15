@@ -2,17 +2,11 @@
 
 mod support;
 
+use support::{state, FAIL_NEXT_PROCESS};
 use vibez_plugin_host::PluginInstance;
 
 #[global_allocator]
 static ALLOCATOR: support::allocation::AllocationCounter = support::allocation::AllocationCounter;
-
-fn state(actual: u32, reported: u32, flags: u32) -> Vec<u8> {
-    [actual, reported, flags]
-        .into_iter()
-        .flat_map(u32::to_le_bytes)
-        .collect()
-}
 
 fn load(
     fixture: &support::Fixture,
@@ -291,7 +285,7 @@ fn actual_dsp_failure_remains_fatal_across_exclusive_worker_change_until_reactiv
     let fixture = support::Fixture::new();
     for format in ["clap", "vst3"] {
         let audit = audit(&fixture, format);
-        let mut plugin = load(&fixture, format, &state(0, 0, 1 << 24), true).unwrap();
+        let mut plugin = load(&fixture, format, &state(0, 0, FAIL_NEXT_PROCESS), true).unwrap();
         let mut output = [1.0; 128];
         assert_eq!(
             support::allocation::count_allocations(|| plugin.process_audio(&mut output, 2)),
@@ -327,7 +321,7 @@ fn actual_dsp_failure_remains_fatal_across_exclusive_worker_change_until_reactiv
 fn transient_start_and_process_failures_have_two_main_recoveries_then_require_reload() {
     let fixture = support::Fixture::new();
     for format in ["clap", "vst3"] {
-        for flag in [1 << 18, 1 << 24] {
+        for flag in [1 << 18, FAIL_NEXT_PROCESS] {
             let mut plugin = load(&fixture, format, &state(0, 0, flag), true).unwrap();
             for attempt in 0..=2 {
                 let mut output = [1.0; 128];
@@ -354,7 +348,7 @@ fn transient_start_and_process_failures_have_two_main_recoveries_then_require_re
                 assert_eq!(plugin.take_processing_error(), None);
                 if attempt < 2 {
                     plugin.stop_for_reconfiguration();
-                    if flag == 1 << 24 {
+                    if flag == FAIL_NEXT_PROCESS {
                         plugin.load_state(&state(0, 0, flag));
                     }
                     plugin.reconfigure_on_main_thread().unwrap();
