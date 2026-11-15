@@ -7,6 +7,10 @@ use vibez_instruments::Instrument;
 /// its note-on, so the block never outgrows this.
 const BLOCK_CAPACITY: usize = 128 + NoteOutput::CAPACITY * 2;
 
+/// Which track, and which instrument on it, played this block's routed
+/// notes. `None` when no source rendered this block.
+pub(crate) type NoteSource = (vibez_core::id::TrackId, u64);
+
 #[derive(Debug)]
 pub(crate) struct RoutedNotes {
     incoming: Vec<BlockNote>,
@@ -29,7 +33,12 @@ impl Default for RoutedNotes {
 impl RoutedNotes {
     /// Replaces the block's notes with `incoming`, in frame order, after any
     /// pending release.
-    pub(crate) fn admit(&mut self, incoming: &[BlockNote]) {
+    pub(crate) fn admit(
+        &mut self,
+        _source: Option<NoteSource>,
+        incoming: &[BlockNote],
+        _frames: u32,
+    ) {
         self.block.clear();
         if std::mem::take(&mut self.release_pending) {
             for pitch in Self::pitches(std::mem::take(&mut self.sounding)) {
@@ -107,13 +116,20 @@ impl RoutedNotes {
 mod tests {
     use super::*;
 
+    const FRAMES: u32 = 64;
+
+    fn source() -> Option<NoteSource> {
+        thread_local! { static SOURCE: vibez_core::id::TrackId = vibez_core::id::TrackId::new(); }
+        Some((SOURCE.with(|id| *id), 0))
+    }
+
     fn admitted(routed: &mut RoutedNotes, incoming: &[BlockNote]) -> Vec<BlockNote> {
-        routed.admit(incoming);
+        routed.admit(source(), incoming, FRAMES);
         routed.notes().to_vec()
     }
 
     #[test]
-    fn notes_play_in_frame_order_with_note_offs_first_at_one_frame() {
+    fn notes_play_in_frame_order_keeping_the_sources_order_inside_a_frame() {
         let mut routed = RoutedNotes::default();
         admitted(&mut routed, &[BlockNote::on(0, 60, 90)]);
 
@@ -127,8 +143,8 @@ mod tests {
                 ]
             ),
             [
-                BlockNote::off(4, 60),
                 BlockNote::on(4, 62, 70),
+                BlockNote::off(4, 60),
                 BlockNote::on(9, 64, 80)
             ]
         );
@@ -184,5 +200,55 @@ mod tests {
         routed.release();
 
         assert!(admitted(&mut routed, &[]).is_empty());
+    }
+
+    #[test]
+    fn a_note_on_and_its_note_off_at_one_frame_release_on_the_next_frame() {
+        let mut routed = RoutedNotes::default();
+
+        assert_eq!(
+            admitted(
+                &mut routed,
+                &[BlockNote::on(5, 60, 90), BlockNote::off(5, 60)]
+            ),
+            [BlockNote::on(5, 60, 90), BlockNote::off(6, 60)]
+        );
+        assert_eq!(
+            admitted(
+                &mut routed,
+                &[
+                    BlockNote::on(FRAMES - 1, 62, 90),
+                    BlockNote::off(FRAMES - 1, 62)
+                ]
+            ),
+            [BlockNote::on(FRAMES - 1, 62, 90)]
+        );
+        assert_eq!(admitted(&mut routed, &[]), [BlockNote::off(0, 62)]);
+    }
+
+    #[test]
+    fn notes_outside_the_block_or_midi_are_kept_in_range() {
+        let mut routed = RoutedNotes::default();
+
+        assert_eq!(
+            admitted(
+                &mut routed,
+                &[BlockNote::on(FRAMES + 9, 60, 90), BlockNote::on(3, 200, 90)]
+            ),
+            [BlockNote::on(FRAMES - 1, 60, 90)]
+        );
+    }
+
+    #[test]
+    fn a_changed_or_missing_source_ends_held_notes_at_the_next_block_start() {
+        let other = vibez_core::id::TrackId::new();
+        for next in [Some((other, 0)), Some((source().unwrap().0, 1)), None] {
+            let mut routed = RoutedNotes::default();
+            admitted(&mut routed, &[BlockNote::on(5, 60, 90)]);
+
+            routed.admit(next, &[], FRAMES);
+
+            assert_eq!(routed.notes(), [BlockNote::off(0, 60)], "{next:?}");
+        }
     }
 }

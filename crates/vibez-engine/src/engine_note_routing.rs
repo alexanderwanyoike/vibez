@@ -26,7 +26,7 @@ impl AudioEngine {
                     _ => None,
                 });
         let Some(source) = source else {
-            self.tracks[receiver].routed_notes.admit(&[]);
+            self.tracks[receiver].routed_notes.admit(None, &[], 0);
             return;
         };
         let (receiving, playing) = if receiver < source {
@@ -36,7 +36,9 @@ impl AudioEngine {
             let (front, back) = self.tracks.split_at_mut(receiver);
             (&mut back[0], &front[source])
         };
-        receiving.routed_notes.admit(playing.played_notes.notes());
+        receiving
+            .routed_notes
+            .admit(None, playing.played_notes.notes(), 0);
     }
 
     /// Ends routed notes on every track whose MIDI From source `next` changes.
