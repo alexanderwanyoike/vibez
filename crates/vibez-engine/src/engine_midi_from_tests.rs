@@ -412,3 +412,29 @@ fn a_stop_the_engine_makes_itself_releases_a_routed_note_once() {
 
     assert_eq!(rig.heard(), [(10, true, 60), (BLOCK as u64, false, 60)]);
 }
+
+#[test]
+fn stop_and_play_in_one_callback_still_release_a_routed_note() {
+    let mut rig = Rig::new(true);
+    rig.commands.push(EngineCommand::Play).unwrap();
+    rig.play(vec![vec![BlockNote::on(10, 60, 100)]]);
+    rig.commands.push(EngineCommand::Stop).unwrap();
+    rig.commands.push(EngineCommand::Play).unwrap();
+
+    rig.play(vec![vec![], vec![]]);
+
+    assert_eq!(rig.heard(), [(10, true, 60), (BLOCK as u64, false, 60)]);
+}
+
+#[test]
+fn removing_the_sources_instrument_mid_note_releases_it_at_the_next_block_start() {
+    let mut rig = Rig::new(true);
+    rig.play(vec![vec![BlockNote::on(10, 60, 100)]]);
+    rig.commands
+        .push(EngineCommand::RemoveTrackInstrument(rig.source))
+        .unwrap();
+
+    rig.play(vec![vec![], vec![]]);
+
+    assert_eq!(rig.heard(), [(10, true, 60), (BLOCK as u64, false, 60)]);
+}
