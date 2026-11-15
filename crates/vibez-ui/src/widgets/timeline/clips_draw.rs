@@ -93,9 +93,9 @@ impl TrackClipCanvas {
         // Layout can place the lane between pixel rows, which would smear
         // every clip edge and one pixel line across two rows.
         let offset = whole_pixel_offset(bounds.position());
-        let resting = static_layer.draw(self, renderer, bounds, cursor, |frame| {
+        let resting = static_layer.draw(self, renderer, bounds, |frame| {
             frame.translate(offset);
-            self.draw_static_layer(frame, bounds, cursor);
+            self.draw_static_layer(frame, bounds);
         });
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         frame.translate(offset);
@@ -110,12 +110,7 @@ impl TrackClipCanvas {
     }
 
     /// The lane background, grid and every Clip not moving with a drag.
-    fn draw_static_layer(
-        &self,
-        frame: &mut canvas::Frame,
-        bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) {
+    fn draw_static_layer(&self, frame: &mut canvas::Frame, bounds: Rectangle) {
         let w = bounds.width;
         let h = bounds.height;
         let geometry = self.geometry();
