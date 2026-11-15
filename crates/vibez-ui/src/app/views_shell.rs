@@ -152,21 +152,11 @@ impl App {
             .on_release(Message::Browser(BrowserMsg::EndDragSample))
             .into();
         let base_layout: Element<'_, Message> =
-            if let Some(label) = self.state.browser.drag_label.as_ref() {
-                let mode = match self.state.browser.audition_mode {
-                    crate::state::AuditionMode::Raw => "RAW",
-                    crate::state::AuditionMode::Warp => "WARP",
-                };
-                let length = self
-                    .state
-                    .browser
-                    .drag_preview_beats(self.state.transport.bpm)
-                    .map(|beats| format!(" · {beats:.2} beats"))
-                    .unwrap_or_default();
+            if let Some(title) = self.state.browser.drag_detail(self.state.transport.bpm) {
                 let valid = self.state.browser.drag_accepted();
                 let ghost = canvas(crate::widgets::browser_drag_ghost::BrowserDragGhost {
                     cursor: iced::Point::new(self.state.view.cursor_x, self.state.view.cursor_y),
-                    title: format!("{label} · {mode}{length}"),
+                    title,
                     valid,
                 })
                 .width(Length::Fill)
