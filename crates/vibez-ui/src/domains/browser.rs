@@ -374,11 +374,14 @@ impl BrowserState {
         }
     }
 
-    /// Makes `target` the drop target and returns its status.
-    fn hover(&mut self, target: crate::state::BrowserDropTarget) -> String {
-        let status = target.status(self.drag_media().unwrap_or(DragMedia::Audio));
-        self.drag_target = Some(target);
-        status
+    /// Makes `target` the drop target and says what a release there does; a
+    /// desktop drop waiting for a target is released on it.
+    fn hover(&mut self, target: crate::state::BrowserDropTarget, action: &mut BrowserAction) {
+        action.status = Some(target.status(self.drag_media().unwrap_or(DragMedia::Audio)));
+        self.drag_target = Some(target.clone());
+        if self.desktop_drop_waits_for_target() {
+            self.release_desktop_drop(target, action);
+        }
     }
 
     /// Clears the drop target; while dragging, the status goes back to the
@@ -507,27 +510,32 @@ impl BrowserState {
                 if self.drag_source.is_none() {
                     return action;
                 }
-                action.status = Some(self.hover(
+                self.hover(
                     crate::state::BrowserDropTarget::ArrangementLane {
                         track_id,
                         beat,
                         compatible,
                     },
-                ));
+                    &mut action,
+                );
             }
             BrowserMsg::DragHoverEmptyArrangement { beat } => {
                 if self.drag_source.is_none() {
                     return action;
                 }
-                action.status =
-                    Some(self.hover(crate::state::BrowserDropTarget::EmptyArrangement { beat }));
+                self.hover(
+                    crate::state::BrowserDropTarget::EmptyArrangement { beat },
+                    &mut action,
+                );
             }
             BrowserMsg::DragHoverSampler { track_id } => {
                 if self.drag_source.is_none() {
                     return action;
                 }
-                action.status =
-                    Some(self.hover(crate::state::BrowserDropTarget::Sampler { track_id }));
+                self.hover(
+                    crate::state::BrowserDropTarget::Sampler { track_id },
+                    &mut action,
+                );
             }
             BrowserMsg::DragHoverDrumRackPad {
                 track_id,
@@ -536,10 +544,13 @@ impl BrowserState {
                 if self.drag_source.is_none() {
                     return action;
                 }
-                action.status = Some(self.hover(crate::state::BrowserDropTarget::DrumRackPad {
-                    track_id,
-                    pad_index,
-                }));
+                self.hover(
+                    crate::state::BrowserDropTarget::DrumRackPad {
+                        track_id,
+                        pad_index,
+                    },
+                    &mut action,
+                );
             }
             BrowserMsg::DragHoverDrumRack {
                 track_id,
@@ -548,10 +559,13 @@ impl BrowserState {
                 if self.drag_source.is_none() || self.hovers_drum_rack_pad(track_id) {
                     return action;
                 }
-                action.status = Some(self.hover(crate::state::BrowserDropTarget::DrumRack {
-                    track_id,
-                    pad_index,
-                }));
+                self.hover(
+                    crate::state::BrowserDropTarget::DrumRack {
+                        track_id,
+                        pad_index,
+                    },
+                    &mut action,
+                );
             }
             BrowserMsg::DragHoverDevicePanel { track_id, drop } => {
                 // The panel's hover arrives after that of any card inside it,
@@ -559,8 +573,9 @@ impl BrowserState {
                 if self.drag_source.is_none() || self.hovers_instrument_card(track_id) {
                     return action;
                 }
-                action.status = Some(
-                    self.hover(crate::state::BrowserDropTarget::DevicePanel { track_id, drop }),
+                self.hover(
+                    crate::state::BrowserDropTarget::DevicePanel { track_id, drop },
+                    &mut action,
                 );
             }
             BrowserMsg::LeaveDragTarget(target) => {
@@ -576,8 +591,10 @@ impl BrowserState {
                 if self.drag_source.is_none() {
                     return action;
                 }
-                action.status =
-                    Some(self.hover(crate::state::BrowserDropTarget::ClipSlot { track_id, row }));
+                self.hover(
+                    crate::state::BrowserDropTarget::ClipSlot { track_id, row },
+                    &mut action,
+                );
             }
             BrowserMsg::DesktopFileHovered(path) => action.status = self.hover_desktop_file(path),
             BrowserMsg::DesktopFileDropped(path) => self.drop_desktop_file(&path, &mut action),
@@ -795,13 +812,6 @@ impl BrowserState {
             }
             BrowserMsg::SetDropboxAppKey(key) => {
                 self.remote.app_key_input = key;
-            }
-        }
-        // A file dropped before the pointer reached a target goes to the first
-        // target the pointer then reports.
-        if self.desktop_drop_waits_for_target() && action.release.is_none() {
-            if let Some(target) = self.drag_target.clone() {
-                self.release_desktop_drop(target, &mut action);
             }
         }
         action
