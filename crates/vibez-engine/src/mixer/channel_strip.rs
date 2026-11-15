@@ -466,10 +466,7 @@ impl EngineTrack {
                 clip.inherit_groove_latch(old);
             }
         }
-        let mut sounding = self.active_notes;
-        while sounding != 0 {
-            let pitch = sounding.trailing_zeros() as u8;
-            sounding &= sounding - 1;
+        for pitch in super::pitch_mask::pitches(self.active_notes) {
             let unchanged = self
                 .launcher_source
                 .note_clips
@@ -500,10 +497,7 @@ impl EngineTrack {
             .note_clips
             .iter()
             .find(|clip| clip.id == clip_id);
-        let mut sounding = self.active_notes;
-        while sounding != 0 {
-            let pitch = sounding.trailing_zeros() as u8;
-            sounding &= sounding - 1;
+        for pitch in super::pitch_mask::pitches(self.active_notes) {
             if self.note_owners[pitch as usize] != Some(clip_id)
                 || clip.is_some_and(|clip| clip.holds_note_at(pitch, beat))
             {

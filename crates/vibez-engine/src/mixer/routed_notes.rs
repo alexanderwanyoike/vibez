@@ -3,6 +3,8 @@
 use vibez_core::note_output::{BlockNote, NoteOutput};
 use vibez_instruments::Instrument;
 
+use super::pitch_mask::pitches;
+
 /// A release adds a note-off per held pitch, and a retrigger adds one before
 /// its note-on, so the block never outgrows this.
 const BLOCK_CAPACITY: usize = 128 + NoteOutput::CAPACITY * 2;
@@ -131,16 +133,6 @@ impl RoutedNotes {
             *cursor += 1;
         }
     }
-}
-
-fn pitches(mut mask: u128) -> impl Iterator<Item = u8> {
-    std::iter::from_fn(move || {
-        (mask != 0).then(|| {
-            let pitch = mask.trailing_zeros() as u8;
-            mask &= mask - 1;
-            pitch
-        })
-    })
 }
 
 /// Stable, so notes at one frame keep the source's order, and allocation-free.

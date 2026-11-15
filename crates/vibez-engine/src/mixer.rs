@@ -15,6 +15,7 @@ mod effect_slot;
 mod groove;
 mod note_repeat;
 mod pan;
+mod pitch_mask;
 mod render_context;
 mod routed_notes;
 pub use effect_slot::EffectSlot;
