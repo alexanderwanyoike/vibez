@@ -368,7 +368,8 @@ impl BrowserState {
                     .saturating_add(crate::state::BROWSER_RESULTS_PAGE_SIZE);
             }
             BrowserMsg::SelectSampleBrowserEntry(source) => {
-                if self.select_source(source.clone()) {
+                if self.select_source(source.clone()) && DragMedia::of(&source) == DragMedia::Audio
+                {
                     action.load_waveform = Some(source);
                 }
             }
