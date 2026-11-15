@@ -693,7 +693,9 @@ a receiving plugin plays note-offs first within a frame. Each block the
 receiver names its source by track and instrument; when that changes (a new
 or removed MIDI From, a replaced or removed instrument, a source that did not
 render), and when the receiver skips a block or the transport stops for any
-reason, held routed notes end at the next block start. Each admitted
+reason, held routed notes end at the next block start. Clip notes and routed
+notes play one instrument, so a note-off from either ends a pitch both hold.
+Each admitted
 note is also reported as the receiver's `SourceNoteInput` and
 `InstrumentNoteInput` at its exact sample, so Section Record, Clip Record and
 Capture record it like played input. The source keeps sounding its own
