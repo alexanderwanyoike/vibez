@@ -13,6 +13,7 @@ use super::test_support::{app, run_until_idle};
 use super::*;
 use crate::domains::midi_file_import::MidiFileLayout;
 use crate::domains::project::ProjectMsg;
+use crate::message::BrowserImportTarget;
 use crate::state::ProjectTrack;
 
 const PPQ: u16 = 96;
@@ -420,4 +421,72 @@ async fn a_midi_file_dropped_on_a_section_lane_lands_in_that_section() {
     assert_eq!(clips.len(), 1);
     assert_eq!(clips[0].position_beats, 4.0);
     assert!(note_clips(&app, track_id).is_empty());
+}
+
+#[tokio::test]
+async fn a_section_deleted_while_its_file_is_read_takes_nothing() {
+    let (mut app, track_id) = app_with_track(TrackKind::Midi);
+    let import = crate::domains::midi_file_import::MidiFileImport {
+        name: "Rebeater P3".into(),
+        file: vibez_core::midi_file::MidiFile {
+            tracks: vec![vibez_core::midi_file::MidiFileTrack {
+                name: None,
+                notes: vec![vibez_core::midi::MidiNote {
+                    pitch: 36,
+                    velocity: 100,
+                    start_beat: 0.0,
+                    duration_beats: 0.25,
+                }],
+                on_drum_channel: true,
+            }],
+            length_beats: 4.0,
+        },
+    };
+    let generation = app.browser_import_request.begin();
+
+    let _ = app.update(Message::MidiFileRead {
+        target: BrowserImportTarget::SectionClipAt {
+            section_id: vibez_core::id::SectionId::new(),
+            track_id,
+            position_samples: 0,
+        },
+        generation,
+        result: Ok(import),
+    });
+
+    assert!(app.state.project.history.undo.is_empty());
+    assert!(!app.state.project.dirty);
+    assert!(!app.state.status_text.starts_with("Imported"));
+}
+
+#[tokio::test]
+async fn a_read_no_drop_waits_for_any_more_lands_nothing() {
+    let directory = tempfile::tempdir().unwrap();
+    let (mut app, track_id) = app_with_track(TrackKind::Midi);
+    let stale = app.browser_import_request.begin();
+    app.browser_import_request.cancel();
+
+    drag(&mut app, drum_phrase(directory.path()));
+    let bytes = std::fs::read(app_drag_path(&app)).unwrap();
+    let _ = app.update(Message::MidiFileRead {
+        target: BrowserImportTarget::ArrangementClipAt {
+            track_id,
+            position_samples: 0,
+        },
+        generation: stale,
+        result: Ok(crate::domains::midi_file_import::MidiFileImport {
+            name: "Rebeater P3".into(),
+            file: vibez_core::midi_file::MidiFile::read(&bytes).unwrap(),
+        }),
+    });
+
+    assert!(note_clips(&app, track_id).is_empty());
+    assert!(app.state.project.history.undo.is_empty());
+}
+
+fn app_drag_path(app: &App) -> PathBuf {
+    match app.state.browser.drag_source.as_ref() {
+        Some(MediaSourceRef::LocalFile { path }) => path.clone(),
+        _ => unreachable!("the test drags a local file"),
+    }
 }

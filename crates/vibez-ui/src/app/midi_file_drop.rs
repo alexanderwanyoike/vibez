@@ -86,6 +86,7 @@ impl App {
         Task::perform(read_midi_file_async(path), move |result| {
             Message::MidiFileRead {
                 target: target.clone(),
+                generation: 0,
                 result,
             }
         })

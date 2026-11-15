@@ -347,6 +347,7 @@ pub enum Message {
     ChooseMidiFileLayout(Option<crate::domains::midi_file_import::MidiFileLayout>),
     MidiFileRead {
         target: BrowserImportTarget,
+        generation: u64,
         result: Result<crate::domains::midi_file_import::MidiFileImport, String>,
     },
     DropSampleOnDrumPad {
