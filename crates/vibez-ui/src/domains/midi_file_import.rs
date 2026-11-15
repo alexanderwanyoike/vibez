@@ -3,7 +3,9 @@
 use std::collections::HashSet;
 
 use vibez_core::id::{ClipId, TrackId};
+use vibez_core::midi::MidiNote;
 use vibez_core::midi_file::MidiFile;
+use vibez_core::perform::GrooveGrid;
 
 use crate::state::UiNoteClip;
 
@@ -22,7 +24,10 @@ pub enum MidiClipTrack {
     Existing(TrackId),
     /// A new MIDI track, holding a Drum Rack when its notes are General MIDI
     /// drums, whose pads start at the same note 36 as the drum map.
-    New { name: String, drum_rack: bool },
+    New {
+        name: String,
+        drum_rack: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -42,7 +47,7 @@ impl MidiFileImport {
     /// Whether the producer chooses between one Clip and a track per file
     /// track.
     pub fn offers_layouts(&self) -> bool {
-        todo!()
+        self.file.tracks.len() > 1
     }
 
     /// The Clips for a drop at `position_beats` on `onto`, or on new tracks
@@ -53,8 +58,57 @@ impl MidiFileImport {
         position_beats: f64,
         layout: MidiFileLayout,
     ) -> Vec<PlannedMidiClip> {
-        let _ = (onto, position_beats, layout, ClipId::new(), HashSet::<usize>::new());
-        todo!()
+        let clip = |name: &str, notes| self.clip(name, notes, position_beats);
+        if layout == MidiFileLayout::TrackPerFileTrack && self.offers_layouts() {
+            return self
+                .file
+                .tracks
+                .iter()
+                .enumerate()
+                .map(|(index, track)| {
+                    let name = track
+                        .name
+                        .clone()
+                        .unwrap_or_else(|| format!("{} {}", self.name, index + 1));
+                    PlannedMidiClip {
+                        clip: clip(&name, track.notes.clone()),
+                        track: MidiClipTrack::New {
+                            name,
+                            drum_rack: track.on_drum_channel,
+                        },
+                    }
+                })
+                .collect();
+        }
+        let track = match onto {
+            Some(track_id) => MidiClipTrack::Existing(track_id),
+            None => MidiClipTrack::New {
+                name: self.name.clone(),
+                drum_rack: self.file.on_drum_channel(),
+            },
+        };
+        vec![PlannedMidiClip {
+            track,
+            clip: clip(&self.name, self.file.merged_notes()),
+        }]
+    }
+
+    /// A Clip looping over the whole file, as a new pattern does.
+    fn clip(&self, name: &str, notes: Vec<MidiNote>, position_beats: f64) -> UiNoteClip {
+        let length = self.file.length_beats;
+        UiNoteClip {
+            id: ClipId::new(),
+            name: name.to_string(),
+            position_beats,
+            duration_beats: length,
+            notes,
+            selected_notes: HashSet::new(),
+            start_marker_beats: 0.0,
+            loop_enabled: true,
+            loop_start_beats: 0.0,
+            loop_end_beats: length,
+            groove_grid: GrooveGrid::Off,
+        }
     }
 }
 
