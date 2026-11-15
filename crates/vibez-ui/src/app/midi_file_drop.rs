@@ -4,52 +4,20 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use iced::Task;
-use vibez_core::id::{SectionId, TrackId};
+use vibez_core::id::TrackId;
 use vibez_core::midi::{InstrumentKind, TrackKind};
 use vibez_core::midi_file::MidiFile;
 use vibez_core::track::MediaSourceRef;
-use vibez_project::PerformLayout;
 
 use super::App;
+use crate::domains::arrangement::ArrangementAction;
 use crate::domains::midi_file_import::{
-    MidiClipTrack, MidiFileImport, MidiFileLayout, MidiFileLayoutChoice, MIDI_FILE_TARGETS,
+    MidiClipTrack, MidiFileImport, MidiFileLayout, MidiFileLayoutChoice,
 };
+use crate::domains::midi_file_landing::{MidiLanding, MidiLandingCtx};
+use crate::domains::EngineHandle;
 use crate::message::{BrowserImportTarget, Message};
-use crate::state::UiNoteClip;
-
-/// Where the Clips of one MIDI file drop go.
-#[derive(Debug, Clone, Copy)]
-enum MidiLanding {
-    Arrange {
-        onto: Option<TrackId>,
-        beat: f64,
-    },
-    Section {
-        section_id: SectionId,
-        onto: Option<TrackId>,
-        beat: f64,
-    },
-    Slot {
-        onto: TrackId,
-        row: u32,
-    },
-}
-
-impl MidiLanding {
-    fn onto(self) -> Option<TrackId> {
-        match self {
-            Self::Arrange { onto, .. } | Self::Section { onto, .. } => onto,
-            Self::Slot { onto, .. } => Some(onto),
-        }
-    }
-
-    fn beat(self) -> f64 {
-        match self {
-            Self::Arrange { beat, .. } | Self::Section { beat, .. } => beat,
-            Self::Slot { .. } => 0.0,
-        }
-    }
-}
+use crate::state::{ArrangementTimeline, UiNoteClip};
 
 async fn read_midi_file_async(path: PathBuf) -> Result<MidiFileImport, String> {
     tokio::task::spawn_blocking(move || {
@@ -138,62 +106,16 @@ impl App {
         }
     }
 
-    /// Whether `target` takes MIDI, re-checked when the file has been read
-    /// since the track or slot may have gone meanwhile.
     fn midi_landing(&self, target: &BrowserImportTarget) -> Result<MidiLanding, String> {
-        let midi_track = |track_id: TrackId| {
-            self.state
-                .find_track(track_id)
-                .is_some_and(|track| track.kind.is_midi())
-        };
-        let refused = || Err(MIDI_FILE_TARGETS.to_string());
-        let beat = |position_samples: u64| {
-            position_samples as f64 / self.state.transport.samples_per_beat().max(f64::EPSILON)
-        };
-        match *target {
-            BrowserImportTarget::ArrangementClipAt {
-                track_id,
-                position_samples,
-            } if midi_track(track_id) => Ok(MidiLanding::Arrange {
-                onto: Some(track_id),
-                beat: beat(position_samples),
-            }),
-            BrowserImportTarget::ArrangementClip(preferred) => Ok(MidiLanding::Arrange {
-                onto: preferred.filter(|track_id| midi_track(*track_id)),
-                beat: self.state.transport.position_beats(),
-            }),
-            BrowserImportTarget::ArrangementNewTrackAt { position_samples } => {
-                Ok(MidiLanding::Arrange {
-                    onto: None,
-                    beat: beat(position_samples),
-                })
-            }
-            BrowserImportTarget::SectionClipAt {
-                section_id,
-                track_id,
-                position_samples,
-            } if midi_track(track_id)
-                && self.state.perform.sections.by_id(section_id).is_some() =>
-            {
-                Ok(MidiLanding::Section {
-                    section_id,
-                    onto: Some(track_id),
-                    beat: beat(position_samples),
-                })
-            }
-            BrowserImportTarget::LauncherClipAt { track_id, row } if midi_track(track_id) => {
-                if self.state.perform.layout != PerformLayout::Clips
-                    || self.state.perform.clips.at(track_id, row).is_some()
-                {
-                    return Err("Clip slot is no longer available".into());
-                }
-                Ok(MidiLanding::Slot {
-                    onto: track_id,
-                    row,
-                })
-            }
-            _ => refused(),
-        }
+        MidiLanding::resolve(
+            target,
+            &MidiLandingCtx {
+                project_tracks: &self.state.project_tracks,
+                perform: &self.state.perform,
+                samples_per_beat: self.state.transport.samples_per_beat(),
+                playhead_beats: self.state.transport.position_beats(),
+            },
+        )
     }
 
     fn land_midi_file(
@@ -214,43 +136,45 @@ impl App {
             .iter()
             .filter(|planned| matches!(planned.track, MidiClipTrack::New { .. }))
             .count();
-        if self.state.project_tracks.tracks.len() + new_tracks
-            > vibez_engine::mixer::CHANNEL_CAPACITY
-        {
+        if !self.state.project_tracks.has_room_for(new_tracks) {
             self.state.status_text = crate::domains::arrangement::PROJECT_TRACKS_FULL.into();
             return;
         }
         self.push_undo_snapshot(None);
         self.mark_project_dirty();
-        let mut landed_on = Vec::new();
-        for planned in plan {
-            let track_id = match planned.track {
-                MidiClipTrack::Existing(track_id) => {
-                    self.place_note_clip(landing, track_id, planned.clip, false);
-                    track_id
-                }
-                MidiClipTrack::New { name, drum_rack } => {
-                    let track_id = self.add_imported_midi_track(name, drum_rack);
-                    self.place_note_clip(landing, track_id, planned.clip, true);
-                    let track = self.state.find_track(track_id).cloned();
-                    if let Some(track) = track {
-                        self.replay_track_to_engine(&track);
-                    }
-                    track_id
-                }
-            };
-            landed_on.push(track_id);
+        let placed: Vec<_> = plan
+            .into_iter()
+            .map(|planned| match planned.track {
+                MidiClipTrack::Existing(track_id) => (track_id, false, planned.clip),
+                MidiClipTrack::New { name, drum_rack } => (
+                    self.add_imported_midi_track(name, drum_rack),
+                    true,
+                    planned.clip,
+                ),
+            })
+            .collect();
+        let tracks: Vec<_> = placed
+            .iter()
+            .map(|(track_id, new, _)| (*track_id, *new))
+            .collect();
+        self.place_note_clips(landing, placed);
+        for (track_id, new) in &tracks {
+            if let Some(track) = self.state.find_track(*track_id).cloned().filter(|_| *new) {
+                self.replay_track_to_engine(&track);
+            }
         }
         if new_tracks > 0 {
             self.state
                 .perform
                 .sync_project_tracks(&self.state.project_tracks.tracks);
         }
-        if let MidiLanding::Section { section_id, .. } = landing {
-            self.refresh_playing_section_after_edit(section_id);
-        }
-        self.state.arrangement.selected_track = landed_on.first().copied();
-        self.state.status_text = self.midi_landing_status(&import.name, landing, &landed_on);
+        self.state.arrangement.selected_track = tracks.first().map(|(track_id, _)| *track_id);
+        let names: Vec<_> = tracks
+            .iter()
+            .filter_map(|(track_id, _)| self.state.find_track(*track_id))
+            .map(|track| track.name.as_str())
+            .collect();
+        self.state.status_text = landing.status(&import.name, &names);
     }
 
     /// A new MIDI track named for the file; the engine learns of it when the
@@ -274,76 +198,34 @@ impl App {
         track_id
     }
 
-    /// Puts `clip` where the landing says; a new track's Arrange Clips reach
-    /// the engine with its replay instead.
-    fn place_note_clip(
-        &mut self,
-        landing: MidiLanding,
-        track_id: TrackId,
-        clip: UiNoteClip,
-        new_track: bool,
-    ) {
-        match landing {
-            MidiLanding::Arrange { .. } => {
-                let content = self.state.arrange_content_mut(track_id);
-                let resident = content.note_clips.len();
-                let command = clip.add_command_beside(track_id, resident);
+    /// Puts each Clip where the landing says. Only Clips on existing Arrange
+    /// lanes are sent to the engine here; a new track's reach it when the
+    /// track replays.
+    fn place_note_clips(&mut self, landing: MidiLanding, placed: Vec<(TrackId, bool, UiNoteClip)>) {
+        let Some(location) = landing.timeline() else {
+            if let MidiLanding::Slot { row, .. } = landing {
+                for (track_id, _, clip) in placed {
+                    let id = clip.id;
+                    let mut timeline = ArrangementTimeline::default();
+                    timeline.ensure(track_id).note_clips.push(clip);
+                    self.add_launcher_clip(id, track_id, row, timeline);
+                }
+            }
+            return;
+        };
+        self.with_timeline_editor_at(location, |editor, _, engine| {
+            let timeline = Arc::make_mut(&mut editor.timeline);
+            for (track_id, new, clip) in placed {
+                let content = timeline.ensure(track_id);
+                if !new {
+                    engine.send(clip.add_command_beside(track_id, content.note_clips.len()));
+                }
                 content.note_clips.push(clip);
-                if !new_track {
-                    self.send_command(command);
-                }
             }
-            MidiLanding::Section { section_id, .. } => {
-                if self.state.perform.selected_section == Some(section_id) {
-                    let editor = self.state.perform.section_editor.editor_mut();
-                    Arc::make_mut(&mut editor.timeline)
-                        .ensure(track_id)
-                        .note_clips
-                        .push(clip);
-                    self.state.perform.commit_selected_timeline();
-                } else if let Some(section) =
-                    Arc::make_mut(&mut self.state.perform.sections).by_id_mut(section_id)
-                {
-                    Arc::make_mut(&mut section.timeline)
-                        .ensure(track_id)
-                        .note_clips
-                        .push(clip);
-                }
+            ArrangementAction {
+                mark_dirty: true,
+                ..ArrangementAction::default()
             }
-            MidiLanding::Slot { row, .. } => {
-                let id = clip.id;
-                let mut timeline = crate::state::ArrangementTimeline::default();
-                timeline.ensure(track_id).note_clips.push(clip);
-                Arc::make_mut(&mut self.state.perform.clips).clips.push(
-                    crate::domains::perform::LauncherClip {
-                        id,
-                        track_id,
-                        row,
-                        timeline: Arc::new(timeline),
-                        launch: Default::default(),
-                    },
-                );
-                self.state.perform.select_launcher_clip(id);
-                self.state.view.detail_panel_tab = crate::state::DetailPanelTab::Clip;
-            }
-        }
-    }
-
-    fn midi_landing_status(&self, name: &str, landing: MidiLanding, tracks: &[TrackId]) -> String {
-        if tracks.len() > 1 {
-            return format!("Imported '{name}' as {} new MIDI tracks", tracks.len());
-        }
-        let track_name = tracks
-            .first()
-            .and_then(|track_id| self.state.find_track(*track_id))
-            .map(|track| track.name.clone())
-            .unwrap_or_default();
-        match landing {
-            MidiLanding::Slot { row, .. } => format!("Added {name} to Clip row {}", row + 1),
-            _ => format!(
-                "Imported '{name}' to {track_name} at beat {:.2}",
-                landing.beat()
-            ),
-        }
+        });
     }
 }
