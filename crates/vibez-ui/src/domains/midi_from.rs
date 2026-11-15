@@ -5,12 +5,17 @@ use vibez_core::midi_from::MidiFrom;
 
 use crate::state::{ProjectTrack, ProjectTracksState};
 
+/// Whether `track` can take another track's notes at all.
+pub fn can_receive(track: &ProjectTrack) -> bool {
+    track.kind.is_midi()
+}
+
 /// Tracks whose plugin instrument could feed `receiver` without a MIDI From
 /// loop, in track order. Built-in instruments play no notes out.
 pub fn sources(tracks: &[ProjectTrack], receiver: TrackId) -> Vec<TrackId> {
     if !tracks
         .iter()
-        .any(|track| track.id == receiver && track.kind.is_midi())
+        .any(|track| track.id == receiver && can_receive(track))
     {
         return Vec::new();
     }
@@ -22,6 +27,39 @@ pub fn sources(tracks: &[ProjectTrack], receiver: TrackId) -> Vec<TrackId> {
         .filter(|track| !forms_loop(tracks, receiver, track.id))
         .map(|track| track.id)
         .collect()
+}
+
+/// One entry in a MIDI track's MIDI From picker: a source, or none.
+pub type MidiFromChoice = crate::domains::labelled_choice::LabelledChoice<Option<TrackId>>;
+
+/// The picker's entries for `receiver`, and the one it shows as chosen.
+pub fn choices(
+    tracks: &[ProjectTrack],
+    receiver: &ProjectTrack,
+) -> (Vec<MidiFromChoice>, MidiFromChoice) {
+    let choice = |source: TrackId| MidiFromChoice {
+        value: Some(source),
+        label: format!(
+            "MF \u{b7} {}",
+            tracks
+                .iter()
+                .find(|track| track.id == source)
+                .map_or("Missing Track", |track| track.name.as_str())
+        ),
+    };
+    let mut entries = vec![MidiFromChoice {
+        value: None,
+        label: "No Input".into(),
+    }];
+    entries.extend(sources(tracks, receiver.id).into_iter().map(choice));
+    let chosen = receiver.midi_from.map_or_else(
+        || entries[0].clone(),
+        |midi_from| choice(midi_from.source()),
+    );
+    if !entries.contains(&chosen) {
+        entries.push(chosen.clone());
+    }
+    (entries, chosen)
 }
 
 /// The MIDI From `receiver` would have after choosing `source`, or `None`
@@ -216,6 +254,50 @@ mod tests {
         chain[1].midi_from = MidiFrom::new(second.id, first.id);
         drop_impossible(&mut chain);
         assert_eq!(chain[1].midi_from, MidiFrom::new(second.id, first.id));
+    }
+
+    #[test]
+    fn the_picker_offers_no_input_then_each_source_and_shows_the_current_choice() {
+        let (rebeater, arp, lead) = (
+            plugin_track("Rebeater"),
+            plugin_track("Arp"),
+            plugin_track("Lead"),
+        );
+        let mut tracks = project(vec![rebeater.clone(), arp.clone(), lead.clone()]);
+
+        let (entries, chosen) = choices(&tracks.tracks, &tracks.tracks[2]);
+        let labels: Vec<_> = entries.iter().map(ToString::to_string).collect();
+        assert_eq!(labels, ["No Input", "MF \u{b7} Rebeater", "MF \u{b7} Arp"]);
+        assert_eq!(chosen.value, None);
+        assert_eq!(entries[2].value, Some(arp.id));
+
+        set(&mut tracks, lead.id, Some(arp.id));
+        let (_, chosen) = choices(&tracks.tracks, &tracks.tracks[2]);
+        assert_eq!(chosen.label, "MF \u{b7} Arp");
+    }
+
+    #[test]
+    fn a_choice_that_is_no_longer_offered_still_shows() {
+        let (rebeater, lead) = (plugin_track("Rebeater"), plugin_track("Lead"));
+        let mut tracks = project(vec![rebeater.clone(), lead.clone()]);
+        set(&mut tracks, lead.id, Some(rebeater.id));
+        tracks.tracks[0].plugin_instrument_ref = None;
+
+        let (entries, chosen) = choices(&tracks.tracks, &tracks.tracks[1]);
+
+        assert_eq!(chosen.label, "MF \u{b7} Rebeater");
+        assert!(entries.contains(&chosen));
+    }
+
+    #[test]
+    fn a_source_that_is_gone_shows_as_a_missing_track() {
+        let mut lead = plugin_track("Lead");
+        lead.midi_from = MidiFrom::new(lead.id, TrackId::new());
+
+        let (entries, chosen) = choices(std::slice::from_ref(&lead), &lead);
+
+        assert_eq!(chosen.label, "MF \u{b7} Missing Track");
+        assert!(entries.contains(&chosen));
     }
 
     #[test]

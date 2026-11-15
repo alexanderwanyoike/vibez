@@ -60,6 +60,10 @@ fn shows_audio_input(track: &ProjectTrack) -> bool {
     track.kind == TrackKind::Audio
 }
 
+fn shows_midi_from(track: &ProjectTrack) -> bool {
+    crate::domains::midi_from::can_receive(track)
+}
+
 impl TrackHeaderFlags {
     /// Whether the quiet add action is shown and clickable.
     fn shows_actions(self) -> bool {
@@ -85,16 +89,26 @@ pub struct TrackHeaderRecordingView<'a> {
     pub source_tracks: &'a [ProjectTrack],
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct AudioInputChoice {
-    route: AudioInputRoute,
-    label: String,
+type AudioInputChoice = crate::domains::labelled_choice::LabelledChoice<AudioInputRoute>;
+
+/// A source picker widens when it names a track, so the track name fits.
+const INPUT_PICKER_WIDTH: f32 = 78.0;
+const ROUTED_INPUT_PICKER_WIDTH: f32 = 119.0;
+
+fn input_picker_width(routed: bool) -> f32 {
+    if routed {
+        ROUTED_INPUT_PICKER_WIDTH
+    } else {
+        INPUT_PICKER_WIDTH
+    }
 }
 
-impl std::fmt::Display for AudioInputChoice {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(&self.label)
-    }
+/// The controls row of a header with input pickers beside Mute and Solo.
+fn input_controls_row<'a>(controls: Vec<Element<'a, Message>>) -> Element<'a, Message> {
+    iced::widget::Row::with_children(controls)
+        .spacing(3)
+        .align_y(iced::Alignment::Center)
+        .into()
 }
 
 fn compact_input_pick_list<'a, T>(
@@ -308,14 +322,14 @@ pub fn view_track_header<'a>(
         for channel in 0..audio_input_channels {
             let route = AudioInputRoute::Mono { channel };
             routes.push(AudioInputChoice {
-                route,
+                value: route,
                 label: route.to_string(),
             });
         }
         for left in (0..audio_input_channels.saturating_sub(1)).step_by(2) {
             let route = AudioInputRoute::Stereo { left };
             routes.push(AudioInputChoice {
-                route,
+                value: route,
                 label: route.to_string(),
             });
         }
@@ -324,7 +338,7 @@ pub fn view_track_header<'a>(
                 .iter()
                 .filter(|source| source.id != track.id && source.is_playable_midi_target())
                 .map(|source| AudioInputChoice {
-                    route: AudioInputRoute::Resample {
+                    value: AudioInputRoute::Resample {
                         track_id: source.id,
                     },
                     label: format!("RS · {}", source.name),
@@ -332,10 +346,10 @@ pub fn view_track_header<'a>(
         );
         let selected_route = routes
             .iter()
-            .find(|choice| choice.route == track.audio_input_route)
+            .find(|choice| choice.value == track.audio_input_route)
             .cloned()
             .unwrap_or_else(|| AudioInputChoice {
-                route: track.audio_input_route,
+                value: track.audio_input_route,
                 label: match track.audio_input_route {
                     AudioInputRoute::Resample { .. } => "RS · Missing Track".into(),
                     route => route.to_string(),
@@ -349,15 +363,17 @@ pub fn view_track_header<'a>(
         let route = compact_input_pick_list(
             routes,
             selected_route,
-            move |choice| Message::SetAudioTrackInputRoute(track_id, choice.route),
-            if is_resample { 119.0 } else { 78.0 },
+            move |choice| Message::SetAudioTrackInputRoute(track_id, choice.value),
+            input_picker_width(is_resample),
             is_resample,
         );
         if is_resample {
-            row![mute_btn, solo_btn, arm_btn, route]
-                .spacing(3)
-                .align_y(iced::Alignment::Center)
-                .into()
+            input_controls_row(vec![
+                mute_btn.into(),
+                solo_btn.into(),
+                arm_btn.into(),
+                route,
+            ])
         } else {
             let track_id = track.id;
             let monitor = compact_input_pick_list(
@@ -367,11 +383,26 @@ pub fn view_track_header<'a>(
                 42.0,
                 track.input_monitoring != InputMonitoring::Off,
             );
-            row![mute_btn, solo_btn, arm_btn, route, monitor]
-                .spacing(3)
-                .align_y(iced::Alignment::Center)
-                .into()
+            input_controls_row(vec![
+                mute_btn.into(),
+                solo_btn.into(),
+                arm_btn.into(),
+                route,
+                monitor,
+            ])
         }
+    } else if shows_midi_from(track) {
+        let (entries, chosen) = crate::domains::midi_from::choices(source_tracks, track);
+        let routed = chosen.value.is_some();
+        let track_id = track.id;
+        let picker = compact_input_pick_list(
+            entries,
+            chosen,
+            move |choice| Message::SetMidiFrom(track_id, choice.value),
+            input_picker_width(routed),
+            routed,
+        );
+        input_controls_row(vec![mute_btn.into(), solo_btn.into(), picker])
     } else {
         row![mute_btn, solo_btn].spacing(4).into()
     };
@@ -547,6 +578,17 @@ mod tests {
         assert!(hovered.shows_automation_toggle());
         assert!(!automation_open.shows_actions());
         assert!(automation_open.shows_automation_toggle());
+    }
+
+    #[test]
+    fn only_a_midi_header_shows_midi_from() {
+        let mut midi = audio_track();
+        midi.kind = TrackKind::Midi;
+
+        assert!(shows_midi_from(&midi));
+        midi.kind = TrackKind::Instrument(vibez_core::midi::InstrumentKind::SubtractiveSynth);
+        assert!(shows_midi_from(&midi));
+        assert!(!shows_midi_from(&audio_track()));
     }
 
     #[test]
