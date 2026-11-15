@@ -1,4 +1,4 @@
-//! Releases a media drag on its target, as a button release over it would.
+//! Files other apps drag over the window, from window event to their drop target.
 
 use iced::Task;
 
@@ -7,26 +7,29 @@ use crate::domains::browser::BrowserMsg;
 use crate::message::Message;
 use crate::state::BrowserDropTarget;
 
+/// The Browser message a file dragged over the window from another app sends.
+pub(super) fn desktop_drop_message(event: &iced::window::Event) -> Option<Message> {
+    use iced::window::Event;
+    let message = match event {
+        Event::FileHovered(path) => BrowserMsg::DesktopFileHovered(path.clone()),
+        Event::FileDropped(path) => BrowserMsg::DesktopFileDropped(path.clone()),
+        Event::FilesHoveredLeft => BrowserMsg::DesktopDragLeft,
+        _ => return None,
+    };
+    Some(Message::Browser(message))
+}
+
 impl App {
     /// A file dropped from another app arrives with no button release, so
     /// the target the pointer reported takes the drop in its place.
     pub(super) fn release_media_drag_at(&mut self, target: BrowserDropTarget) -> Task<Message> {
         let message = match target {
-            BrowserDropTarget::ArrangementLane {
-                track_id,
-                beat,
-                compatible: true,
-            } => Message::DropSampleOnArrangement {
-                track_id,
-                position_samples: self.state.transport.beats_to_samples(beat),
-            },
-            refused @ BrowserDropTarget::ArrangementLane { .. } => {
-                let media = self
-                    .state
-                    .browser
-                    .drag_media()
-                    .unwrap_or(crate::domains::browser::DragMedia::Audio);
-                Message::Browser(BrowserMsg::CancelDrag(refused.status(media)))
+            // The Browser domain releases only on targets that take the drag.
+            BrowserDropTarget::ArrangementLane { track_id, beat, .. } => {
+                Message::DropSampleOnArrangement {
+                    track_id,
+                    position_samples: self.state.transport.beats_to_samples(beat),
+                }
             }
             BrowserDropTarget::EmptyArrangement { .. } => Message::DropSampleOnEmptyArrangement,
             BrowserDropTarget::Sampler { track_id } => Message::DropSampleOnSampler { track_id },

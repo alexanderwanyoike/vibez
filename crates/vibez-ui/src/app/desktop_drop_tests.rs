@@ -139,16 +139,16 @@ fn window_file_events_become_desktop_drag_messages() {
     let path = PathBuf::from("/tmp/Rebeater drags/Rebeater P3.mid");
 
     assert!(matches!(
-        desktop_drop_message(&Event::FileHovered(path.clone())),
+        desktop_drop::desktop_drop_message(&Event::FileHovered(path.clone())),
         Some(Message::Browser(BrowserMsg::DesktopFileHovered(hovered))) if hovered == path
     ));
     assert!(matches!(
-        desktop_drop_message(&Event::FileDropped(path.clone())),
+        desktop_drop::desktop_drop_message(&Event::FileDropped(path.clone())),
         Some(Message::Browser(BrowserMsg::DesktopFileDropped(dropped))) if dropped == path
     ));
     assert!(matches!(
-        desktop_drop_message(&Event::FilesHoveredLeft),
+        desktop_drop::desktop_drop_message(&Event::FilesHoveredLeft),
         Some(Message::Browser(BrowserMsg::DesktopDragLeft))
     ));
-    assert!(desktop_drop_message(&Event::Focused).is_none());
+    assert!(desktop_drop::desktop_drop_message(&Event::Focused).is_none());
 }

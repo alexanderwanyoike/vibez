@@ -273,7 +273,7 @@ mod window_policy;
 
 mod sample_retirement;
 
-mod media_drag_release;
+mod desktop_drop;
 
 mod midi_file_drop;
 
@@ -791,23 +791,11 @@ impl App {
                 iced::Event::Window(iced::window::Event::CloseRequested) => {
                     Some(Message::WindowCloseRequested)
                 }
-                iced::Event::Window(event) => desktop_drop_message(&event),
+                iced::Event::Window(event) => desktop_drop::desktop_drop_message(&event),
                 _ => None,
             }),
         ])
     }
-}
-
-/// The Browser message a file dragged over the window from another app sends.
-fn desktop_drop_message(event: &iced::window::Event) -> Option<Message> {
-    use iced::window::Event;
-    let message = match event {
-        Event::FileHovered(path) => BrowserMsg::DesktopFileHovered(path.clone()),
-        Event::FileDropped(path) => BrowserMsg::DesktopFileDropped(path.clone()),
-        Event::FilesHoveredLeft => BrowserMsg::DesktopDragLeft,
-        _ => return None,
-    };
-    Some(Message::Browser(message))
 }
 
 #[cfg(test)]
