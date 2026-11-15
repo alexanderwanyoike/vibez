@@ -3,23 +3,18 @@
 use vibez_core::id::TrackId;
 use vibez_core::midi_from::MidiFrom;
 
-use vibez_core::routing::{RoutingError, RoutingGraph};
-
-use crate::domains::sidechain::routing_channels;
-use crate::state::ProjectTracksState;
+use crate::state::{ProjectTrack, ProjectTracksState};
 
 /// Tracks whose plugin instrument could feed `receiver` without a MIDI From
 /// loop, in track order. Built-in instruments play no notes out.
-pub fn sources(tracks: &ProjectTracksState, receiver: TrackId) -> Vec<TrackId> {
+pub fn sources(tracks: &[ProjectTrack], receiver: TrackId) -> Vec<TrackId> {
     if !tracks
-        .tracks
         .iter()
         .any(|track| track.id == receiver && track.kind.is_midi())
     {
         return Vec::new();
     }
     tracks
-        .tracks
         .iter()
         .filter(|track| {
             track.id != receiver && track.kind.is_midi() && track.plugin_instrument_ref.is_some()
@@ -42,7 +37,7 @@ pub fn change(
         .find(|track| track.id == receiver)?
         .midi_from;
     let next = match source {
-        Some(source) if sources(tracks, receiver).contains(&source) => {
+        Some(source) if sources(&tracks.tracks, receiver).contains(&source) => {
             Some(MidiFrom::new(receiver, source)?)
         }
         Some(_) => return None,
@@ -62,21 +57,29 @@ pub fn set(tracks: &mut ProjectTracksState, receiver: TrackId, source: Option<Tr
     true
 }
 
-fn forms_loop(tracks: &ProjectTracksState, receiver: TrackId, source: TrackId) -> bool {
-    let mut channels = routing_channels(&tracks.tracks, &tracks.master, &tracks.buses);
-    if let Some(channel) = channels.iter_mut().find(|channel| channel.id == receiver) {
-        channel.midi_from = Some(source);
+/// Audio edges never enter a track's Source stage, so only a chain of MIDI
+/// From choices can lead from `source` back to `receiver`.
+fn forms_loop(tracks: &[ProjectTrack], receiver: TrackId, source: TrackId) -> bool {
+    let mut next = Some(source);
+    for _ in 0..=tracks.len() {
+        match next {
+            Some(track) if track == receiver => return true,
+            Some(track) => {
+                next = tracks
+                    .iter()
+                    .find(|candidate| candidate.id == track)
+                    .and_then(|candidate| candidate.midi_from)
+                    .map(MidiFrom::source);
+            }
+            None => return false,
+        }
     }
-    matches!(
-        RoutingGraph::prepare(&channels),
-        Err(RoutingError::FeedbackLoop)
-    )
+    false
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::ProjectTrack;
     use vibez_core::midi::TrackKind;
 
     fn plugin_track(name: &str) -> ProjectTrack {
@@ -119,7 +122,7 @@ mod tests {
             lead.clone(),
         ]);
 
-        assert_eq!(sources(&tracks, lead.id), [rebeater.id, arp.id]);
+        assert_eq!(sources(&tracks.tracks, lead.id), [rebeater.id, arp.id]);
     }
 
     #[test]
@@ -128,7 +131,21 @@ mod tests {
         let mut tracks = project(vec![first.clone(), second.clone()]);
         assert!(set(&mut tracks, second.id, Some(first.id)));
 
-        assert!(sources(&tracks, first.id).is_empty());
+        assert!(sources(&tracks.tracks, first.id).is_empty());
+    }
+
+    #[test]
+    fn a_longer_chain_back_to_the_receiver_is_not_a_source() {
+        let (first, second, third) = (
+            plugin_track("First"),
+            plugin_track("Second"),
+            plugin_track("Third"),
+        );
+        let mut tracks = project(vec![first.clone(), second.clone(), third.clone()]);
+        assert!(set(&mut tracks, second.id, Some(first.id)));
+        assert!(set(&mut tracks, third.id, Some(second.id)));
+
+        assert!(sources(&tracks.tracks, first.id).is_empty());
     }
 
     #[test]
