@@ -37,6 +37,7 @@ pub mod gain;
 pub mod gate;
 pub mod instrument_card;
 pub mod limiter;
+pub mod midi_file_import;
 pub mod param_entry;
 pub mod perform;
 pub mod phaser;
