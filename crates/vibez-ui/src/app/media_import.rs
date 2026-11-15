@@ -74,6 +74,11 @@ impl App {
         source: MediaSourceRef,
         target: BrowserImportTarget,
     ) -> Task<Message> {
+        if let MediaSourceRef::LocalFile { path } = &source {
+            if vibez_core::midi_file::is_midi_file_path(path) {
+                return self.dispatch_midi_file_drop(path.clone(), target);
+            }
+        }
         let treatment = self.state.browser.import_input_for_source(&source);
         match source {
             MediaSourceRef::LocalFile { path } => {

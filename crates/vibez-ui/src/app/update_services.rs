@@ -319,6 +319,8 @@ impl App {
             Message::DropSampleOnEmptyArrangement => {
                 return self.on_drop_sample_on_empty_arrangement()
             }
+            Message::MidiFileRead { target, result } => self.on_midi_file_read(target, result),
+            Message::ChooseMidiFileLayout(layout) => self.on_choose_midi_file_layout(layout),
             Message::DropSampleOnDrumPad {
                 track_id,
                 pad_index,

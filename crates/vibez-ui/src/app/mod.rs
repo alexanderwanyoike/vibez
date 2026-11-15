@@ -271,6 +271,8 @@ mod window_policy;
 
 mod sample_retirement;
 
+mod midi_file_drop;
+
 #[cfg(test)]
 mod device_panel_drop_tests;
 

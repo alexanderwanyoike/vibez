@@ -356,7 +356,6 @@ impl App {
                     dialog.markers = markers;
                 }
             }
-            Message::ChooseMidiFileLayout(_) => {}
             Message::CancelDrumRackSlice => {
                 self.state.view.drum_rack_slice_dialog = None;
             }
@@ -789,6 +788,8 @@ impl App {
             | Message::EscapePressed
             | Message::DropSampleOnArrangement { .. }
             | Message::DropSampleOnEmptyArrangement
+            | Message::MidiFileRead { .. }
+            | Message::ChooseMidiFileLayout(..)
             | Message::DropSampleOnDrumPad { .. }
             | Message::DropSampleOnSampler { .. }
             | Message::DropSampleOnDrumRack { .. }
