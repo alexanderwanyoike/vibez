@@ -351,7 +351,8 @@ impl App {
                 &metadata_detail,
                 entry.file_size,
             );
-            let midi = vibez_core::midi_file::is_midi_file_path(&entry.relative_path);
+            let midi = crate::domains::browser::DragMedia::of(&entry.source)
+                == crate::domains::browser::DragMedia::Midi;
             let compact_detail = if midi {
                 source_detail.clone()
             } else {
