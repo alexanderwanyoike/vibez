@@ -282,6 +282,9 @@ mod device_panel_drop_tests;
 mod midi_file_drop_tests;
 
 #[cfg(test)]
+mod desktop_drop_tests;
+
+#[cfg(test)]
 mod instrument_media_retirement_tests;
 
 #[cfg(test)]
@@ -790,6 +793,12 @@ impl App {
             }),
         ])
     }
+}
+
+/// The Browser message a file dragged over the window from another app sends.
+fn desktop_drop_message(event: &iced::window::Event) -> Option<Message> {
+    let _ = event;
+    None
 }
 
 #[cfg(test)]
