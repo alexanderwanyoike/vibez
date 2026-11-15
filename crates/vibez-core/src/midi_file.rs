@@ -95,7 +95,7 @@ impl MidiFile {
                     duration_beats: beats((note.end - note.start).max(1)),
                 })
                 .collect();
-            sort_notes(&mut notes);
+            MidiNote::sort(&mut notes);
             tracks.push(MidiFileTrack {
                 name: track.name,
                 on_drum_channel: track.notes.iter().all(|note| note.channel == DRUM_CHANNEL),
@@ -123,7 +123,7 @@ impl MidiFile {
             .iter()
             .flat_map(|track| track.notes.iter().copied())
             .collect();
-        sort_notes(&mut notes);
+        MidiNote::sort(&mut notes);
         notes
     }
 
@@ -131,14 +131,6 @@ impl MidiFile {
     pub fn on_drum_channel(&self) -> bool {
         self.tracks.iter().all(|track| track.on_drum_channel)
     }
-}
-
-fn sort_notes(notes: &mut [MidiNote]) {
-    notes.sort_by(|a, b| {
-        a.start_beat
-            .total_cmp(&b.start_beat)
-            .then(a.pitch.cmp(&b.pitch))
-    });
 }
 
 struct TickNote {
