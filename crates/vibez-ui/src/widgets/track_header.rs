@@ -60,8 +60,8 @@ fn shows_audio_input(track: &ProjectTrack) -> bool {
     track.kind == TrackKind::Audio
 }
 
-fn shows_midi_from(_track: &ProjectTrack) -> bool {
-    false
+fn shows_midi_from(track: &ProjectTrack) -> bool {
+    track.kind.is_midi()
 }
 
 impl TrackHeaderFlags {
@@ -376,6 +376,21 @@ pub fn view_track_header<'a>(
                 .align_y(iced::Alignment::Center)
                 .into()
         }
+    } else if shows_midi_from(track) {
+        let (entries, chosen) = crate::domains::midi_from::choices(source_tracks, track);
+        let routed = chosen.source.is_some();
+        let track_id = track.id;
+        let picker = compact_input_pick_list(
+            entries,
+            chosen,
+            move |choice| Message::SetMidiFrom(track_id, choice.source),
+            if routed { 119.0 } else { 78.0 },
+            routed,
+        );
+        row![mute_btn, solo_btn, picker]
+            .spacing(3)
+            .align_y(iced::Alignment::Center)
+            .into()
     } else {
         row![mute_btn, solo_btn].spacing(4).into()
     };

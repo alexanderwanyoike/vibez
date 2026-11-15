@@ -39,14 +39,32 @@ impl std::fmt::Display for MidiFromChoice {
 
 /// The picker's entries for `receiver`, and the one it shows as chosen.
 pub fn choices(
-    _tracks: &[ProjectTrack],
-    _receiver: &ProjectTrack,
+    tracks: &[ProjectTrack],
+    receiver: &ProjectTrack,
 ) -> (Vec<MidiFromChoice>, MidiFromChoice) {
-    let none = MidiFromChoice {
-        source: None,
-        label: String::new(),
+    let choice = |source: TrackId| MidiFromChoice {
+        source: Some(source),
+        label: format!(
+            "MF \u{b7} {}",
+            tracks
+                .iter()
+                .find(|track| track.id == source)
+                .map_or("Missing Track", |track| track.name.as_str())
+        ),
     };
-    (Vec::new(), none)
+    let mut entries = vec![MidiFromChoice {
+        source: None,
+        label: "No Input".into(),
+    }];
+    entries.extend(sources(tracks, receiver.id).into_iter().map(choice));
+    let chosen = receiver.midi_from.map_or_else(
+        || entries[0].clone(),
+        |midi_from| choice(midi_from.source()),
+    );
+    if !entries.contains(&chosen) {
+        entries.push(chosen.clone());
+    }
+    (entries, chosen)
 }
 
 /// The MIDI From `receiver` would have after choosing `source`, or `None`
