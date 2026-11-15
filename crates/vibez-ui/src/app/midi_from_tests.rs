@@ -6,25 +6,8 @@ use vibez_core::id::TrackId;
 use vibez_core::midi_from::MidiFrom;
 
 use crate::message::Message;
-use crate::state::ProjectTrack;
 
-fn plugin_track(name: &str) -> ProjectTrack {
-    let mut track = ProjectTrack::new_instrument(
-        TrackId::new(),
-        name.into(),
-        vibez_core::midi::TrackKind::Midi,
-        0,
-    );
-    track.has_instrument = true;
-    track.plugin_instrument_ref = Some(vibez_core::effect::PluginDeviceInfo {
-        format: "clap".into(),
-        uid: format!("{name}.id"),
-        path: format!("/plugins/{name}.clap").into(),
-        name: name.into(),
-        state_b64: None,
-    });
-    track
-}
+use crate::domains::midi_from::plugin_track;
 
 fn routed_app() -> (super::App, TrackId, TrackId) {
     let mut app = super::test_support::app();

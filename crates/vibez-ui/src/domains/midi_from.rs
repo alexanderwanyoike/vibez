@@ -77,24 +77,30 @@ fn forms_loop(tracks: &[ProjectTrack], receiver: TrackId, source: TrackId) -> bo
     false
 }
 
+/// A MIDI track hosting a plugin instrument, the only kind that can be a source.
+#[cfg(test)]
+pub(crate) fn plugin_track(name: &str) -> ProjectTrack {
+    let mut track = ProjectTrack::new_instrument(
+        TrackId::new(),
+        name.into(),
+        vibez_core::midi::TrackKind::Midi,
+        0,
+    );
+    track.has_instrument = true;
+    track.plugin_instrument_ref = Some(vibez_core::effect::PluginDeviceInfo {
+        format: "clap".into(),
+        uid: format!("{name}.id"),
+        path: format!("/plugins/{name}.clap").into(),
+        name: name.into(),
+        state_b64: None,
+    });
+    track
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use vibez_core::midi::TrackKind;
-
-    fn plugin_track(name: &str) -> ProjectTrack {
-        let mut track =
-            ProjectTrack::new_instrument(TrackId::new(), name.into(), TrackKind::Midi, 0);
-        track.has_instrument = true;
-        track.plugin_instrument_ref = Some(vibez_core::effect::PluginDeviceInfo {
-            format: "clap".into(),
-            uid: format!("{name}.id"),
-            path: format!("/plugins/{name}.clap").into(),
-            name: name.into(),
-            state_b64: None,
-        });
-        track
-    }
 
     fn project(tracks: Vec<ProjectTrack>) -> ProjectTracksState {
         ProjectTracksState {
