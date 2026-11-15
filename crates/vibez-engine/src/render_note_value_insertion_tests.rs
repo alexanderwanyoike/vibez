@@ -25,7 +25,8 @@ fn offline_channel_note_values_cross_full_notes_and_cache_at_seven_boundaries() 
             native_instrument: None,
             plugin_instrument: None,
             automation: Vec::new(),
-            sends: Vec::new(), midi_from: None,
+            sends: Vec::new(),
+            midi_from: None,
         };
         let track_id = track.id;
         let target = boundary_clip(count, ClipId::new());

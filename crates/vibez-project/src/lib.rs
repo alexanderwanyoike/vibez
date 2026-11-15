@@ -957,3 +957,5 @@ mod automation_persistence_tests {
 
 #[cfg(test)]
 mod compensation_project_tests;
+#[cfg(test)]
+mod midi_from_project_tests;

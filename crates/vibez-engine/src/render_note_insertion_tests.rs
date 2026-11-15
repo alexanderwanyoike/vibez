@@ -26,7 +26,8 @@ fn offline_note_channel_prepares_actual_content_and_grows_live_and_staging_at_bo
             native_instrument: None,
             plugin_instrument: None,
             automation: Vec::new(),
-            sends: Vec::new(), midi_from: None,
+            sends: Vec::new(),
+            midi_from: None,
         };
         let track_id = track.id;
         let request = BounceRequest {

@@ -99,7 +99,8 @@ fn bare_track(name: &str) -> TrackInfo {
         native_instrument: None,
         plugin_instrument: None,
         automation: Vec::new(),
-        sends: Vec::new(), midi_from: None,
+        sends: Vec::new(),
+        midi_from: None,
     }
 }
 
@@ -743,7 +744,8 @@ fn synth_note_clip_produces_audio() {
         native_instrument: Some(InstrumentStateInfo::SubtractiveSynth { params: Vec::new() }),
         plugin_instrument: None,
         automation: Vec::new(),
-        sends: Vec::new(), midi_from: None,
+        sends: Vec::new(),
+        midi_from: None,
     };
     let note_clip = NoteClipInfo {
         id: cid,
@@ -805,7 +807,8 @@ fn warns_on_midi_track_with_no_native_instrument() {
         native_instrument: None,
         plugin_instrument: None,
         automation: Vec::new(),
-        sends: Vec::new(), midi_from: None,
+        sends: Vec::new(),
+        midi_from: None,
     };
     let req = BounceRequest {
         master: None,
