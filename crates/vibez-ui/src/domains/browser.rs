@@ -87,6 +87,20 @@ pub enum BrowserMsg {
     SetDropboxAppKey(String),
 }
 
+impl BrowserMsg {
+    /// Whether this hovers an instrument or device target, which take
+    /// samples only.
+    fn hovers_a_device_target(&self) -> bool {
+        matches!(
+            self,
+            Self::DragHoverSampler { .. }
+                | Self::DragHoverDrumRackPad { .. }
+                | Self::DragHoverDrumRack { .. }
+                | Self::DragHoverDevicePanel { .. }
+        )
+    }
+}
+
 /// Cross-domain effects requested by a browser update.
 #[derive(Debug, Default, PartialEq)]
 pub struct BrowserAction {
@@ -127,6 +141,14 @@ impl DragMedia {
         kind.is_midi() == (self == Self::Midi)
     }
 
+    /// The media's name as a sentence starts it.
+    fn title(self) -> &'static str {
+        match self {
+            Self::Audio => "Audio",
+            Self::Midi => "MIDI",
+        }
+    }
+
     fn noun(self) -> &'static str {
         match self {
             Self::Audio => "audio",
@@ -153,7 +175,7 @@ impl crate::state::BrowserDropTarget {
                 beat,
                 compatible: true,
                 ..
-            } => format!("{} lane at beat {beat:.2}", capitalised(kind)),
+            } => format!("{} lane at beat {beat:.2}", media.title()),
             Target::ArrangementLane { .. } => media.refused_lane_status(),
             Target::EmptyArrangement { beat } => format!("New {kind} track at beat {beat:.2}"),
             Target::Sampler { .. } => DevicePanelDrop::LoadIntoExisting.hover_status(),
@@ -189,15 +211,6 @@ impl crate::state::BrowserDropTarget {
             }
         )
     }
-}
-
-/// "audio" and "MIDI" as a sentence starts them.
-fn capitalised(kind: &str) -> String {
-    let mut chars = kind.chars();
-    chars
-        .next()
-        .map(|first| first.to_uppercase().chain(chars).collect())
-        .unwrap_or_default()
 }
 
 impl BrowserState {
@@ -315,6 +328,12 @@ impl BrowserState {
 
     pub fn update(&mut self, msg: BrowserMsg) -> BrowserAction {
         let mut action = BrowserAction::default();
+        if msg.hovers_a_device_target() {
+            if let Some(status) = self.refuses_device_targets() {
+                action.status = Some(status);
+                return action;
+            }
+        }
         match msg {
             BrowserMsg::SetKeyboardFocus(focused) => self.keyboard_focus = focused && self.open,
             BrowserMsg::ToggleSampleBrowser => {
@@ -417,10 +436,6 @@ impl BrowserState {
                 if self.drag_source.is_none() {
                     return action;
                 }
-                if let Some(status) = self.refuses_device_targets() {
-                    action.status = Some(status);
-                    return action;
-                }
                 action.status =
                     Some(self.hover(crate::state::BrowserDropTarget::Sampler { track_id }));
             }
@@ -429,10 +444,6 @@ impl BrowserState {
                 pad_index,
             } => {
                 if self.drag_source.is_none() {
-                    return action;
-                }
-                if let Some(status) = self.refuses_device_targets() {
-                    action.status = Some(status);
                     return action;
                 }
                 action.status = Some(self.hover(crate::state::BrowserDropTarget::DrumRackPad {
@@ -447,10 +458,6 @@ impl BrowserState {
                 if self.drag_source.is_none() || self.hovers_drum_rack_pad(track_id) {
                     return action;
                 }
-                if let Some(status) = self.refuses_device_targets() {
-                    action.status = Some(status);
-                    return action;
-                }
                 action.status = Some(self.hover(crate::state::BrowserDropTarget::DrumRack {
                     track_id,
                     pad_index,
@@ -460,10 +467,6 @@ impl BrowserState {
                 // The panel's hover arrives after that of any card inside it,
                 // so the card under the cursor keeps the target.
                 if self.drag_source.is_none() || self.hovers_instrument_card(track_id) {
-                    return action;
-                }
-                if let Some(status) = self.refuses_device_targets() {
-                    action.status = Some(status);
                     return action;
                 }
                 action.status = Some(
