@@ -96,13 +96,6 @@ impl App {
     }
 
     pub(super) fn route_view_message(&mut self, msg: ViewMsg) -> Task<Message> {
-        // Pointer events reach this router after the widgets under the
-        // pointer reported their drop target, so a desktop drop still
-        // waiting here has none.
-        if matches!(msg, ViewMsg::CursorMoved(..)) && self.state.browser.drags_from_desktop() {
-            let action = self.state.browser.update(BrowserMsg::DesktopPointerMoved);
-            let _ = self.apply_browser_action(action);
-        }
         if matches!(&msg, ViewMsg::ToggleEditMenu) {
             self.state.project.file_menu_open = false;
         }
@@ -186,6 +179,12 @@ impl App {
         let pending_drag_msg = match &msg {
             ViewMsg::CursorMoved(x, y) if self.state.browser.pending_drag.is_some() => {
                 Some(BrowserMsg::PendingDragMoved { x: *x, y: *y })
+            }
+            // Pointer events reach this router after the widgets under the
+            // pointer reported any drop target, so the Browser domain can
+            // tell a desktop drop that the pointer found none.
+            ViewMsg::CursorMoved(..) if self.state.browser.drags_from_desktop() => {
+                Some(BrowserMsg::DesktopPointerMoved)
             }
             ViewMsg::MouseReleased if self.state.browser.pending_drag.is_some() => {
                 Some(BrowserMsg::EndDragSample)
