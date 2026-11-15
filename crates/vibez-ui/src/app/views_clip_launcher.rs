@@ -1,5 +1,6 @@
 //! Clip Project creation and grid authoring use the shared Vibez shell.
 
+use crate::domains::browser::BrowserMsg;
 use iced::widget::{
     button, canvas, center, column, container, horizontal_space, mouse_area, pick_list, row, stack,
     text, text_input, tooltip,
@@ -676,19 +677,26 @@ impl App {
                         border: iced::Border::default(),
                         ..Default::default()
                     });
-                    let cell: Element<'_, Message> = if !track.kind.is_midi()
-                        && slot.is_none()
-                        && self.state.browser.drag_source.is_some()
-                    {
-                        mouse_area(slot_cell)
-                            .on_release(Message::ImportLauncherClip {
+                    let cell: Element<'_, Message> =
+                        if slot.is_none() && self.state.browser.drag_lands_on(track.kind) {
+                            let slot = crate::state::BrowserDropTarget::ClipSlot {
                                 track_id: track.id,
                                 row: slot_row,
-                            })
-                            .into()
-                    } else {
-                        slot_cell.into()
-                    };
+                            };
+                            mouse_area(slot_cell)
+                                .on_enter(Message::Browser(BrowserMsg::DragHoverClipSlot {
+                                    track_id: track.id,
+                                    row: slot_row,
+                                }))
+                                .on_exit(Message::Browser(BrowserMsg::LeaveDragTarget(slot)))
+                                .on_release(Message::ImportLauncherClip {
+                                    track_id: track.id,
+                                    row: slot_row,
+                                })
+                                .into()
+                        } else {
+                            slot_cell.into()
+                        };
                     let play: Element<'_, Message> = if let Some(clip) = slot {
                         let triggered = self.state.perform.clip_is_triggered(clip);
                         self.view_clip_cell_action(

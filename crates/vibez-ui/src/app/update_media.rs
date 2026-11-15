@@ -7,7 +7,7 @@ use std::sync::Arc;
 use iced::Task;
 
 use crate::domains::arrangement::ArrangementMsg;
-use crate::domains::browser::BrowserMsg;
+use crate::domains::browser::{BrowserMsg, DragMedia};
 use crate::domains::device_panel_drop::DevicePanelDrop;
 use crate::domains::piano_roll::PianoRollMsg;
 use crate::domains::view::ViewMsg;
@@ -327,6 +327,10 @@ impl App {
             self.state.status_text = "Drag cancelled".into();
             return Task::none();
         }
+        if DragMedia::of(&source) == DragMedia::Midi {
+            self.select_midi_file(source);
+            return Task::none();
+        }
         let changed = self.state.browser.select_source(source.clone());
         if changed {
             if let MediaSourceRef::LocalFile { path } = source.clone() {
@@ -349,6 +353,10 @@ impl App {
     }
 
     pub(super) fn on_preview_local_entry(&mut self, source: MediaSourceRef) -> Task<Message> {
+        if DragMedia::of(&source) == DragMedia::Midi {
+            self.select_midi_file(source);
+            return Task::none();
+        }
         self.state.browser.select_source(source.clone());
         if let Some(raw) = self.state.browser.waveform_for_source(&source) {
             return self.play_browser_mode(source, raw);
@@ -423,6 +431,10 @@ impl App {
             return Task::none();
         }
         if self.state.view.drum_rack_slice_dialog.take().is_some() {
+            return Task::none();
+        }
+        if self.state.view.midi_file_layout_choice.is_some() {
+            self.on_choose_midi_file_layout(None);
             return Task::none();
         }
         if !self

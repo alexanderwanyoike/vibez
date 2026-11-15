@@ -32,6 +32,7 @@ use crate::widgets::track_header::{
 };
 
 use super::*;
+use crate::domains::browser::DragMedia;
 
 /// Expanded return or master automation scrolls inside this cap so the
 /// pinned footer can never squeeze the track list out of the window.
@@ -56,6 +57,8 @@ impl App {
             };
             let prompt_text = if zone.is_some() {
                 ""
+            } else if self.state.browser.drag_media() == Some(DragMedia::Midi) {
+                "Drop for a new MIDI track"
             } else if browser_drag_active {
                 "Drop for a new audio track"
             } else {
@@ -97,6 +100,9 @@ impl App {
                             beat: beat.max(0.0),
                         })
                     })
+                    .on_exit(Message::Browser(BrowserMsg::LeaveDragTarget(
+                        crate::state::BrowserDropTarget::EmptyArrangement { beat: 0.0 },
+                    )))
                     .on_release(Message::DropSampleOnEmptyArrangement);
             }
             return area.into();
@@ -218,20 +224,6 @@ impl App {
             .iter()
             .map(|t| t.id)
             .collect();
-        let browser_drag_duration = self
-            .state
-            .browser
-            .drag_preview_beats(self.state.transport.bpm);
-        let browser_drag_detail = self.state.browser.drag_label.as_ref().map(|label| {
-            let mode = match self.state.browser.audition_mode {
-                crate::state::AuditionMode::Raw => "RAW",
-                crate::state::AuditionMode::Warp => "WARP",
-            };
-            match browser_drag_duration {
-                Some(beats) => format!("{label} · {mode} · {beats:.2} beats"),
-                None => format!("{label} · {mode}"),
-            }
-        });
 
         // Track rows: header widgets + clip canvas
         // Real vertical layout of the column, so a rubber-band drag can map
@@ -313,6 +305,7 @@ impl App {
             );
 
             // Clip canvas for this track
+            let refusal = self.state.browser.lane_refusal(track.kind);
             let mut clip_canvas_widget = TrackClipCanvas::from_track(
                 track,
                 content,
@@ -339,8 +332,6 @@ impl App {
                 timeline.selection_end_beats,
                 timeline.time_selection_track,
                 browser_drag_active,
-                browser_drag_duration,
-                browser_drag_detail.clone(),
             )
             .with_marquee(
                 row_spans.clone(),
@@ -348,7 +339,8 @@ impl App {
             )
             .with_snap_targets(snap_targets.clone())
             .with_clip_drag(timeline.clip_drag.as_ref().map(|drag| drag.preview.clone()))
-            .with_drop_zone(self.state.browser.lane_drop_zone(track.id));
+            .with_drop_zone(self.state.browser.lane_drop_zone(track.id))
+            .with_drop_refusal(refusal.clone());
             if let Some(preview) = self.state.audio_recording.preview_for_track(track.id) {
                 let name = match preview.source {
                     crate::domains::audio_recording::AudioRecordingSource::HardwareInput => {
@@ -383,7 +375,7 @@ impl App {
                     });
             }
             let track_id = track.id;
-            let compatible = !track.kind.is_midi();
+            let compatible = refusal.is_none();
             let grid = self.state.view.arrange_grid;
             let track_geometry = geometry;
             let mut clip_canvas_area = mouse_area(
@@ -434,10 +426,10 @@ impl App {
             };
             // Until the drag reaches it, the lane only hints at what it is;
             // once there, its zone says it.
-            let hint = if zone.is_some() {
-                ""
-            } else {
-                "New audio track"
+            let hint = match (zone.is_some(), self.state.browser.drag_media()) {
+                (true, _) => "",
+                (false, Some(DragMedia::Midi)) => "New MIDI track",
+                (false, _) => "New audio track",
             };
             let header = container(text("+").size(14).color(th::accent()))
                 .width(Length::Fixed(
@@ -478,6 +470,9 @@ impl App {
                     beat: beat.max(0.0),
                 })
             })
+            .on_exit(Message::Browser(BrowserMsg::LeaveDragTarget(
+                crate::state::BrowserDropTarget::EmptyArrangement { beat: 0.0 },
+            )))
             .on_release(Message::DropSampleOnEmptyArrangement);
             track_rows = track_rows.push(row![header, zone].height(Length::Fixed(54.0)));
         }
