@@ -50,22 +50,157 @@ impl std::fmt::Display for MidiFileError {
 impl std::error::Error for MidiFileError {}
 
 pub fn is_midi_file_path(path: &Path) -> bool {
-    todo!("{path:?}")
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            MIDI_FILE_EXTENSIONS
+                .iter()
+                .any(|candidate| candidate.eq_ignore_ascii_case(extension))
+        })
 }
 
 impl MidiFile {
     pub fn read(bytes: &[u8]) -> Result<Self, MidiFileError> {
-        todo!("{}", bytes.len())
+        let smf = midly::Smf::parse(bytes)
+            .map_err(|error| MidiFileError::Malformed(error.to_string()))?;
+        let ticks_per_beat = match smf.header.timing {
+            midly::Timing::Metrical(ticks) => f64::from(ticks.as_int().max(1)),
+            midly::Timing::Timecode(..) => return Err(MidiFileError::TimecodeTiming),
+        };
+        let beats = |tick: u64| tick as f64 / ticks_per_beat;
+        let mut end_tick = 0;
+        let mut tracks = Vec::new();
+        for events in &smf.tracks {
+            let track = TrackReader::read(events);
+            end_tick = end_tick.max(track.end_tick);
+            if track.notes.is_empty() {
+                continue;
+            }
+            let mut notes: Vec<_> = track
+                .notes
+                .iter()
+                .map(|note| MidiNote {
+                    pitch: note.pitch,
+                    velocity: note.velocity,
+                    start_beat: beats(note.start),
+                    // A note ended on its own tick still sounds for one.
+                    duration_beats: beats((note.end - note.start).max(1)),
+                })
+                .collect();
+            sort_notes(&mut notes);
+            tracks.push(MidiFileTrack {
+                name: track.name,
+                on_drum_channel: track.notes.iter().all(|note| note.channel == DRUM_CHANNEL),
+                notes,
+            });
+        }
+        if tracks.is_empty() {
+            return Err(MidiFileError::NoNotes);
+        }
+        let last_note_end = tracks
+            .iter()
+            .flat_map(|track| &track.notes)
+            .map(MidiNote::end_beat)
+            .fold(0.0, f64::max);
+        Ok(Self {
+            tracks,
+            length_beats: beats(end_tick).max(last_note_end),
+        })
     }
 
     /// Every track's notes as one sorted list, for a single Clip.
     pub fn merged_notes(&self) -> Vec<MidiNote> {
-        todo!()
+        let mut notes: Vec<_> = self
+            .tracks
+            .iter()
+            .flat_map(|track| track.notes.iter().copied())
+            .collect();
+        sort_notes(&mut notes);
+        notes
     }
 
     /// Every note sits on the General MIDI percussion channel.
     pub fn on_drum_channel(&self) -> bool {
-        todo!("{DRUM_CHANNEL}")
+        self.tracks.iter().all(|track| track.on_drum_channel)
+    }
+}
+
+fn sort_notes(notes: &mut [MidiNote]) {
+    notes.sort_by(|a, b| {
+        a.start_beat
+            .total_cmp(&b.start_beat)
+            .then(a.pitch.cmp(&b.pitch))
+    });
+}
+
+struct TickNote {
+    channel: u8,
+    pitch: u8,
+    velocity: u8,
+    start: u64,
+    end: u64,
+}
+
+/// One track's notes in ticks, paired from its note-on and note-off events.
+struct TrackReader {
+    name: Option<String>,
+    notes: Vec<TickNote>,
+    end_tick: u64,
+}
+
+impl TrackReader {
+    fn read(events: &[midly::TrackEvent<'_>]) -> Self {
+        let mut reader = Self {
+            name: None,
+            notes: Vec::new(),
+            end_tick: 0,
+        };
+        // Indices into `notes` still sounding, oldest first per channel and
+        // key, so overlapping notes on one key end first in, first out.
+        let mut sounding: Vec<usize> = Vec::new();
+        let mut tick = 0;
+        for event in events {
+            tick += u64::from(event.delta.as_int());
+            match event.kind {
+                midly::TrackEventKind::Midi { channel, message } => {
+                    let channel = channel.as_int();
+                    match message {
+                        midly::MidiMessage::NoteOn { key, vel } if vel.as_int() > 0 => {
+                            sounding.push(reader.notes.len());
+                            reader.notes.push(TickNote {
+                                channel,
+                                pitch: key.as_int(),
+                                velocity: vel.as_int(),
+                                start: tick,
+                                end: tick,
+                            });
+                        }
+                        midly::MidiMessage::NoteOn { key, .. }
+                        | midly::MidiMessage::NoteOff { key, .. } => {
+                            let notes = &mut reader.notes;
+                            if let Some(slot) = sounding.iter().position(|&index| {
+                                notes[index].channel == channel
+                                    && notes[index].pitch == key.as_int()
+                            }) {
+                                notes[sounding.remove(slot)].end = tick;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                midly::TrackEventKind::Meta(midly::MetaMessage::TrackName(name)) => {
+                    reader.name = Some(String::from_utf8_lossy(name).trim().to_string())
+                        .filter(|name| !name.is_empty());
+                }
+                _ => {}
+            }
+        }
+        // End of Track is the last event, so the final tick is where it sits.
+        reader.end_tick = tick;
+        for index in sounding {
+            reader.notes[index].end = tick;
+        }
+        reader
     }
 }
 
