@@ -154,3 +154,15 @@ fn stepping_onto_a_midi_file_loads_no_waveform() {
     assert_eq!(browser.selected_source, Some(source));
     assert_eq!(action.load_waveform, None);
 }
+
+#[test]
+fn a_midi_drag_is_previewed_as_midi_not_as_an_audio_import_mode() {
+    let midi = dragging("Rebeater P3.mid");
+    let audio = dragging("kick.wav");
+
+    assert_eq!(
+        midi.drag_detail(120.0).as_deref(),
+        Some("Rebeater P3.mid · MIDI")
+    );
+    assert_eq!(audio.drag_detail(120.0).as_deref(), Some("kick.wav · WARP"));
+}
