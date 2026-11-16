@@ -23,6 +23,14 @@ pub enum BrowserAuditionPlan {
     Warp { source_bpm: f64 },
 }
 
+/// A MIDI file handed to the Audition Bus and the track it plays on, fixed
+/// when it started.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MidiAuditionStart {
+    pub source: MediaSourceRef,
+    pub target: Option<TrackId>,
+}
+
 /// What the Audition footer says the Audition is doing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuditionStatus {
@@ -149,6 +157,8 @@ pub struct BrowserState {
     pub midi_preview: Option<crate::domains::midi_audition::MidiPreview>,
     /// The MIDI file the Audition Bus plays, and the ones it may still hold.
     pub audition_pattern: super::EngineHeld<vibez_engine::midi_audition::MidiAuditionPattern, 4>,
+    /// The MIDI file last handed to the Audition Bus.
+    pub midi_audition: Option<MidiAuditionStart>,
     pub audition_mode: AuditionMode,
     pub scan_in_progress: bool,
     pub mode: SampleBrowserMode,
@@ -213,6 +223,7 @@ impl Default for BrowserState {
             audition_audio: super::EngineHeld::default(),
             midi_preview: None,
             audition_pattern: super::EngineHeld::default(),
+            midi_audition: None,
             audition_mode: AuditionMode::default(),
             scan_in_progress: false,
             mode: SampleBrowserMode::default(),
@@ -576,17 +587,27 @@ impl BrowserState {
     /// The track that plays the shown MIDI file, given the MIDI target a new
     /// audition would play on.
     pub fn midi_audition_player(&self, target: Option<TrackId>) -> Option<TrackId> {
-        target
+        match &self.midi_audition {
+            Some(started) if self.shows_playing_midi() => started.target,
+            _ => target,
+        }
+    }
+
+    /// Whether the MIDI file the Audition Bus plays is the one shown.
+    fn shows_playing_midi(&self) -> bool {
+        self.audition_playing
+            && self.audition_pattern.current().is_some()
+            && self.midi_preview.as_ref().is_some_and(|preview| {
+                self.midi_audition
+                    .as_ref()
+                    .is_some_and(|started| started.source == preview.source)
+            })
     }
 
     /// Where the playhead sits in the MIDI strip, at `samples_per_beat`.
     pub fn midi_audition_playhead(&self, samples_per_beat: f64) -> Option<f32> {
         let pattern = self.audition_pattern.current()?;
-        let shown = self
-            .midi_preview
-            .as_ref()
-            .is_some_and(|preview| Arc::ptr_eq(&preview.pattern, pattern));
-        if !self.audition_playing || !shown {
+        if !self.shows_playing_midi() {
             return None;
         }
         crate::domains::midi_audition::playhead_fraction(
@@ -606,6 +627,7 @@ impl BrowserState {
         if self.selected_source.as_ref() != Some(&preview.source) {
             return false;
         }
+
         self.waveform_loading = false;
         self.waveform_error = None;
         self.midi_preview = Some(preview);

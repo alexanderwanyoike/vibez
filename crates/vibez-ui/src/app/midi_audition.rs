@@ -105,6 +105,10 @@ impl App {
     pub(super) fn start_midi_audition(&mut self, preview: &MidiPreview) {
         let mode = self.state.browser.audition_mode;
         let target = super::midi_input::configured_target(&self.state);
+        self.state.browser.midi_audition = Some(crate::state::MidiAuditionStart {
+            source: preview.source.clone(),
+            target,
+        });
         self.state.browser.audition_audio.retire();
         self.state
             .browser
