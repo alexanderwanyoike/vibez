@@ -829,6 +829,10 @@ mod stuck_note_tests;
 mod midi_from_tests;
 
 #[cfg(test)]
+#[path = "engine_midi_audition_tests.rs"]
+mod midi_audition_tests;
+
+#[cfg(test)]
 #[path = "engine_note_listener_test_support.rs"]
 mod note_listener_test_support;
 

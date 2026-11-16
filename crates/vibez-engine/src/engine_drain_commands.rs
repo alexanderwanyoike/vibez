@@ -940,6 +940,7 @@ impl AudioEngine {
             EngineCommand::SetAuditionGain(gain) => {
                 self.audition.gain = gain.clamp(0.0, 2.0);
             }
+            EngineCommand::StartMidiAudition { .. } | EngineCommand::SetAuditionVoice(_) => {}
 
             // -- External MIDI input --
             EngineCommand::StartNoteRepeat {
