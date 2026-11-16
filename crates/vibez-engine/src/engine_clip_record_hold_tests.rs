@@ -235,13 +235,11 @@ impl Rig {
         }
         // `advance_pass`: a fixed-length take commits held notes at each wrap
         // and reopens them at local 0.
-        if let (Some(length), Some(on)) = (self.length, self.note_on_at) {
+        if let (Some(_), Some(on)) = (self.length, self.note_on_at) {
             let pass = self.pass_start(now);
             if self.note_off_at.is_none() && self.pass_start(on) < pass {
-                let boundary = pass;
-                self.committed.push(self.note(on, boundary));
-                self.note_on_at = Some(boundary);
-                let _ = length;
+                self.committed.push(self.note(on, pass));
+                self.note_on_at = Some(pass);
             }
         }
         let mut notes = self.committed.clone();
@@ -252,16 +250,6 @@ impl Rig {
         let beats = self
             .length
             .map_or_else(|| free_recording_beats(now - start), |l| l as f64 / SPB);
-        if std::env::var_os("HOLD_TRACE").is_some() {
-            eprintln!(
-                "ui tick heard {now} engine {} notes {:?}",
-                self.engine.performance_position,
-                notes
-                    .iter()
-                    .map(|n| (n.start_beat * SPB, (n.start_beat + n.duration_beats) * SPB))
-                    .collect::<Vec<_>>()
-            );
-        }
         self.in_flight = Some(self.source(beats, notes, 0));
     }
 
@@ -290,7 +278,6 @@ impl Rig {
     }
 
     fn key(&mut self, on: bool) -> u64 {
-        let at = self.engine.performance_position;
         let command = if on {
             EngineCommand::ExternalNoteOn {
                 track_id: self.track,
@@ -305,13 +292,7 @@ impl Rig {
         };
         self.commands.push(command).unwrap();
         // Map Perform samples onto the probe's output frame counter.
-        let frame = self.log.lock().unwrap().0;
-        eprintln!(
-            "key {} at perform {at} (local {}), output frame {frame}",
-            if on { "down" } else { "up" },
-            self.start.map_or(0, |_| self.local(at)),
-        );
-        frame
+        self.log.lock().unwrap().0
     }
 
     fn heard(&self) -> Vec<(u64, u8, bool)> {
@@ -327,10 +308,8 @@ impl Rig {
 }
 
 fn assert_one_sustained_note(rig: &Rig, down: u64, up: u64) {
-    let heard = rig.heard();
-    eprintln!("probe pitch {PITCH} events (output frame, on): {heard:?}");
     assert_eq!(
-        heard,
+        rig.heard(),
         vec![(down, PITCH, true), (up, PITCH, false)],
         "the held key must sound once from {down} until its release at {up}"
     );
@@ -411,7 +390,7 @@ fn fixed_length_overdub_sustains_a_held_note_across_the_loop_wrap() {
     }
 }
 
-/// Control: many refreshes alone do not release the live voice (hypothesis 1).
+/// Many refreshes alone do not release the live voice.
 #[test]
 fn control_refreshes_within_a_bar_keep_a_note_that_quantizes_back() {
     for batch in [false, true] {
@@ -429,8 +408,7 @@ fn control_refreshes_within_a_bar_keep_a_note_that_quantizes_back() {
     }
 }
 
-/// Control: a key held through count-in and the record start boundary
-/// (hypothesis 3).
+/// A key held through count-in and the record start boundary sustains.
 #[test]
 fn control_a_note_held_through_count_in_and_record_start_sustains() {
     for batch in [false, true] {
