@@ -39,7 +39,7 @@ struct Rig {
     track: TrackId,
     clip_id: ClipId,
     log: NoteLog,
-    /// UI model.
+    // UI model.
     start: Option<u64>,
     heard_now: u64,
     length: Option<u64>,
@@ -326,7 +326,6 @@ fn free_length_take_sustains_a_held_note_that_quantizes_forward() {
 fn free_length_take_sustains_a_held_note_across_a_bar_line() {
     assert_held_key_sustains(
         None,
-        // Just after a sixteenth, so quantizing moves it back onto it.
         press_rounding_backward,
         // Hold across the first bar line (start + 96000).
         |rig| {
@@ -354,13 +353,13 @@ fn fixed_length_overdub_sustains_a_held_note_across_the_loop_wrap() {
 
 /// Many refreshes alone do not release the live voice.
 #[test]
-fn control_refreshes_within_a_bar_keep_a_note_that_quantizes_back() {
+fn refreshes_within_a_bar_keep_a_note_that_quantizes_back() {
     assert_held_key_sustains(None, press_rounding_backward, |rig| rig.blocks(40));
 }
 
 /// A key held through count-in and the record start boundary sustains.
 #[test]
-fn control_a_note_held_through_count_in_and_record_start_sustains() {
+fn a_note_held_through_count_in_and_record_start_sustains() {
     assert_held_key_sustains(
         None,
         |rig| {
