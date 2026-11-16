@@ -111,7 +111,7 @@ impl App {
             .into();
 
         let status = self.state.browser.audition_status();
-        let status_width = if status.has_picture() {
+        let status_width = if status.keeps_its_width() {
             Length::Fixed(audition_status_width())
         } else {
             Length::Shrink
@@ -232,9 +232,8 @@ impl App {
     }
 }
 
-/// Wide enough for the longest status shown beside a waveform or strip, so
-/// the picture never moves when the status changes. UNAVAILABLE is longer,
-/// but it has no picture to move. Measured with the status's own shaping.
+/// Wide enough for the longest status that keeps its width, measured with
+/// the status's own shaping.
 fn audition_status_width() -> f32 {
     crate::widgets::device_controls::text_width("PREPARING", 9.0, iced::Font::DEFAULT).ceil()
 }

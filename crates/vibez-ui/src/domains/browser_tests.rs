@@ -1528,9 +1528,9 @@ fn the_audition_status_says_what_the_selection_and_audition_are_doing() {
     browser.select_source(midi);
     browser.waveform_error = Some("unreadable".into());
     assert!(browser.selected_is_midi());
-    assert!(!browser.audition_status().has_picture());
+    assert!(!browser.audition_status().keeps_its_width());
 
     browser.audition_queued = true;
     assert_eq!(browser.audition_status().label(), "QUEUED");
-    assert!(browser.audition_status().has_picture());
+    assert!(browser.audition_status().keeps_its_width());
 }

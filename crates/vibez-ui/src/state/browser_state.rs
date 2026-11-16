@@ -40,7 +40,8 @@ pub enum AuditionStatus {
     Preparing,
     Queued,
     Playing(Option<AuditionMode>),
-    /// The selected source could not be read, so there is no picture.
+    /// The selected source could not be read, so its strip or waveform is
+    /// empty.
     Unavailable,
     /// A source is ready to audition in the selected treatment.
     Ready(AuditionMode),
@@ -61,8 +62,10 @@ impl AuditionStatus {
         }
     }
 
-    /// Whether a waveform or strip sits beside the status.
-    pub fn has_picture(self) -> bool {
+    /// Whether the status keeps the footer's fixed width, so the waveform or
+    /// strip beside it never shifts. An unreadable source leaves that empty,
+    /// so its longer status may push it aside.
+    pub fn keeps_its_width(self) -> bool {
         self != Self::Unavailable
     }
 }
