@@ -481,4 +481,12 @@ mod tests {
         let one_shot = FrameClipTimeline::new(0, 0, 32, 44, false);
         assert_eq!(one_shot.launch_period(), 44);
     }
+
+    #[test]
+    fn a_launch_started_in_its_loop_repeats_on_the_loop() {
+        let frames = FrameClipTimeline::new(4, 0, 32, 44, true);
+        assert_eq!(frames.launch_period(), 32);
+        let beats = BeatClipTimeline::new(12.0, 8.0, 48.0, 44.0, true);
+        assert_eq!(beats.launch_period(), 40.0);
+    }
 }
