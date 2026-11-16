@@ -42,13 +42,19 @@ impl App {
     /// Play in the Audition footer, reading the file first if it is not yet.
     pub(super) fn preview_midi_file(&mut self, source: MediaSourceRef) -> Task<Message> {
         self.state.browser.select_source(source.clone());
-        match self.state.browser.midi_preview_for(&source).cloned() {
-            Some(preview) => {
-                self.start_midi_audition(&preview);
-                Task::none()
-            }
-            None => self.read_midi_preview(source, true),
+        if self.audition_read_midi_file(&source) {
+            return Task::none();
         }
+        self.read_midi_preview(source, true)
+    }
+
+    /// Auditions `source` if it is a MIDI file already read; false if not.
+    pub(super) fn audition_read_midi_file(&mut self, source: &MediaSourceRef) -> bool {
+        let Some(preview) = self.state.browser.midi_preview_for(source).cloned() else {
+            return false;
+        };
+        self.start_midi_audition(&preview);
+        true
     }
 
     fn read_midi_preview(&mut self, source: MediaSourceRef, play: bool) -> Task<Message> {

@@ -414,8 +414,7 @@ impl App {
         let Some(source) = self.state.browser.selected_source.clone() else {
             return Task::none();
         };
-        if let Some(preview) = self.state.browser.midi_preview_for(&source).cloned() {
-            self.start_midi_audition(&preview);
+        if self.audition_read_midi_file(&source) {
             return Task::none();
         }
         let Some(raw) = self.state.browser.waveform_audio.clone() else {
