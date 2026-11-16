@@ -11,6 +11,7 @@ use crate::state::{ArrangementTimeline, UiNoteClip};
 use std::sync::Arc;
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::MidiNote;
+use vibez_core::time::MusicalTime;
 
 /// A new Clip made at Free length has no take to measure yet.
 pub const DEFAULT_NEW_CLIP_BEATS: f64 = 16.0;
@@ -239,7 +240,9 @@ pub fn latest_audio_pass(frames: &[[f32; 2]], length: usize) -> Vec<[f32; 2]> {
 
 pub fn free_recording_beats(elapsed_samples: u64, samples_per_beat: f64) -> f64 {
     // Independently rounded start/stop boundaries can differ from whole bars by one sample.
-    (((elapsed_samples as f64 - 1.0).max(0.0) / samples_per_beat / 4.0).ceil() * 4.0).max(4.0)
+    MusicalTime((elapsed_samples as f64 - 1.0).max(0.0) / samples_per_beat)
+        .whole_bars_holding(0.0)
+        .0
 }
 
 pub fn recorded_audio_window(

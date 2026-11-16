@@ -58,6 +58,12 @@ impl MusicalTime {
         }
     }
 
+    /// The whole bars that hold this length, at least one. A length up to
+    /// `slack` beats past a bar line counts as ending on it.
+    pub fn whole_bars_holding(self, slack: f64) -> Self {
+        Self(((self.0 - slack).max(0.0) / BEATS_PER_BAR).ceil().max(1.0) * BEATS_PER_BAR)
+    }
+
     /// A position as bar, beat and sixteenth counted from 1, such as
     /// "33.1.1", as Ableton reads positions.
     pub fn bar_beat_sixteenth(self) -> String {
