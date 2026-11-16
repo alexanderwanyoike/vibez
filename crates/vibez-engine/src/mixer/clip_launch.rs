@@ -42,6 +42,20 @@ impl EngineTrack {
         Some(now + playing.length.saturating_sub(playing.position))
     }
 
+    /// Moves a waiting At End launch onto the end of the current pass once
+    /// an edit changes the playing Clip's length or position. A launch still
+    /// staged with its batch keeps the batch's shared boundary.
+    pub(crate) fn realign_at_end_launch(&mut self, now: u64) {
+        let Some(boundary) = self.own_launch_boundary(ClipLaunchMode::AtEnd, now) else {
+            return;
+        };
+        if let Some(queued) = self.queued_clip.as_mut().filter(|queued| {
+            !queued.pending_batch && queued.prepared.launch_mode == ClipLaunchMode::AtEnd
+        }) {
+            queued.effective_at = boundary;
+        }
+    }
+
     /// Frames until a queued Legato Clip replaces the one playing.
     pub(crate) fn legato_swap_in(&self, now: u64, batch_waiting: bool) -> Option<u64> {
         self.active_clip?;

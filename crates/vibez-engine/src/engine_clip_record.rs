@@ -270,6 +270,9 @@ impl AudioEngine {
                 }
                 refreshed = Some((track.id, active.position));
             }
+            if refreshed.is_some() {
+                track.realign_at_end_launch(self.performance_position);
+            }
         }
         if let Some((track_id, position)) = refreshed {
             self.clip_event(
