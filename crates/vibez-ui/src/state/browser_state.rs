@@ -502,7 +502,11 @@ impl BrowserState {
     /// Where the playhead sits in the MIDI strip, at `samples_per_beat`.
     pub fn midi_audition_playhead(&self, samples_per_beat: f64) -> Option<f32> {
         let pattern = self.audition_pattern.current()?;
-        if !self.audition_playing {
+        let shown = self
+            .midi_preview
+            .as_ref()
+            .is_some_and(|preview| Arc::ptr_eq(&preview.pattern, pattern));
+        if !self.audition_playing || !shown {
             return None;
         }
         crate::domains::midi_audition::playhead_fraction(

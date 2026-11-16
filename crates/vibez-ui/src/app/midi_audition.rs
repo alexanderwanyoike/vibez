@@ -92,7 +92,8 @@ impl App {
                     .browser
                     .fail_waveform_load(&source, error.clone());
                 if play {
-                    self.state.status_text = error;
+                    self.stop_browser_audition();
+                    self.state.status_text = format!("Audition error: {error}");
                 }
                 None
             }
