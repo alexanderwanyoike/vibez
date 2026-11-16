@@ -47,6 +47,7 @@ impl EngineTrack {
             active_notes: 0,
             note_owners: [None; 128],
             live_held: 0,
+            live_owned: 0,
             pending_note_activity: 0,
             suppress_source_notes: false,
             played_notes: vibez_core::note_output::NoteOutput::default(),

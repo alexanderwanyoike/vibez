@@ -191,6 +191,9 @@ pub struct EngineTrack {
     /// Pitches a live key is holding down. The key owns the voice until it
     /// is released, so Clip notes neither restart nor release them.
     live_held: u128,
+    /// Pitches a live key took over. They stay the key's after its release
+    /// until a Clip note-on for the pitch plays again.
+    live_owned: u128,
     /// Drum Rack pitches triggered by resident clips during this render block.
     /// Cosmetic feedback is deliberately lossy when the UI event ring is full.
     pending_note_activity: u128,
@@ -457,8 +460,8 @@ impl EngineTrack {
         live_hold::yield_to_live_keys(
             &mut self.timed_note_ons,
             &mut self.timed_note_offs,
-            self.active_notes,
             self.live_held,
+            &mut self.live_owned,
         );
     }
 
@@ -467,6 +470,7 @@ impl EngineTrack {
     pub(crate) fn hold_live_key(&mut self, pitch: u8) {
         if let Some(bit) = 1u128.checked_shl(u32::from(pitch)) {
             self.live_held |= bit;
+            self.live_owned |= bit;
             self.active_notes &= !bit;
             if let Some(owner) = self.note_owners.get_mut(usize::from(pitch)) {
                 *owner = None;
@@ -506,12 +510,14 @@ impl EngineTrack {
     ) -> Option<Box<dyn Instrument>> {
         self.note_epoch += 1;
         self.live_held = 0;
+        self.live_owned = 0;
         self.instrument.replace(instrument)
     }
 
     pub(crate) fn take_instrument(&mut self) -> Option<Box<dyn Instrument>> {
         self.note_epoch += 1;
         self.live_held = 0;
+        self.live_owned = 0;
         self.instrument.take()
     }
 
