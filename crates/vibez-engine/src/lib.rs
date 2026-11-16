@@ -10,6 +10,7 @@ pub mod engine;
 mod engine_audition;
 pub mod events;
 pub mod metering;
+pub mod midi_audition;
 pub mod mixer;
 pub mod note_repeat;
 pub mod playback_source;
