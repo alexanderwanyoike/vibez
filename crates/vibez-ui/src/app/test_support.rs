@@ -81,6 +81,7 @@ pub(super) fn app() -> super::App {
         section_residency_request: Default::default(),
         remote_catalog_pending: Vec::new(),
         midi_input: None,
+        hardware_keys: Default::default(),
         midi_input_ports: Vec::new(),
         interface_scale: crate::ui_settings::INTERFACE_SCALE_DEFAULT,
         save_runtime: Default::default(),

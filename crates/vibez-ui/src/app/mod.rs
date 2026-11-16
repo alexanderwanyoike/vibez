@@ -102,6 +102,7 @@ struct App {
     // External MIDI input (USB keyboard, Ableton Push, virtual cable...).
     // Dropping the handle closes the port.
     midi_input: Option<vibez_audio_io::midi_input::MidiInputHandle>,
+    hardware_keys: crate::domains::hardware_keys::HardwareKeys,
     /// Cached list of port names last seen by `list_midi_input_ports`.
     /// Populated when the user opens the MIDI picker; used so the UI
     /// can show a dropdown without re-scanning on every frame.
@@ -555,6 +556,7 @@ impl App {
             section_residency_request: Default::default(),
             remote_catalog_pending: Vec::new(),
             midi_input,
+            hardware_keys: Default::default(),
             midi_input_ports: Vec::new(),
             interface_scale,
             save_runtime: save_runtime::SaveRuntime::default(),

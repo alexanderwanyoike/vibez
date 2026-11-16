@@ -11,11 +11,8 @@ pub(super) fn configured_target(state: &crate::state::AppState) -> Option<vibez_
 }
 
 impl App {
-    /// Drain pending MIDI events from the external input port and
-    /// forward them to the engine. Events route to the currently-
-    /// selected track's instrument; if nothing is selected or the
-    /// track has no instrument attached, events are dropped (no
-    /// passthrough). Called on every UI tick.
+    /// Drain pending MIDI events from the external input port and play
+    /// them on the configured MIDI target. Called on every UI tick.
     pub(super) fn poll_midi_input(&mut self) {
         let Some(handle) = self.midi_input.as_ref() else {
             return;
@@ -27,25 +24,9 @@ impl App {
         if events.is_empty() {
             return;
         }
-        let Some(track_id) = configured_target(&self.state) else {
-            return;
-        };
+        let target = configured_target(&self.state);
         for event in events {
-            match event {
-                vibez_audio_io::midi_input::MidiEvent::NoteOn { pitch, velocity } => {
-                    self.send_command(EngineCommand::ExternalNoteOn {
-                        track_id,
-                        pitch,
-                        velocity,
-                    });
-                }
-                vibez_audio_io::midi_input::MidiEvent::NoteOff { pitch } => {
-                    self.send_command(EngineCommand::ExternalNoteOff { track_id, pitch });
-                }
-                vibez_audio_io::midi_input::MidiEvent::ControlChange { .. } => {
-                    // CC mapping not wired yet.
-                }
-            }
+            self.hardware_keys.play(event, target, &mut self.cmd_tx);
         }
     }
 }
