@@ -3,6 +3,7 @@ use std::sync::Arc;
 use rtrb::Producer;
 use vibez_core::audio_buffer::DecodedAudio;
 
+use crate::engine_midi_audition::MidiAudition;
 use crate::events::EngineEvent;
 use crate::transport::Transport;
 
@@ -19,6 +20,7 @@ pub(super) struct AuditionBus {
     outgoing: [Option<AuditionVoice>; AUDITION_OUTGOING_VOICES],
     pub(super) queued: Option<QueuedAudition>,
     pub(super) gain: f32,
+    pub(super) midi: MidiAudition,
 }
 
 pub(super) struct AuditionVoice {
@@ -44,6 +46,7 @@ impl AuditionBus {
             outgoing: std::array::from_fn(|_| None),
             queued: None,
             gain: 1.0,
+            midi: MidiAudition::new(),
         }
     }
 
@@ -93,7 +96,11 @@ impl AuditionBus {
         sample_rate: u32,
         fade_frames: usize,
     ) -> Option<bool> {
-        let active = self.active.as_ref().filter(|voice| voice.synchronized)?;
+        let Some(active) = self.active.as_ref().filter(|voice| voice.synchronized) else {
+            return self
+                .midi
+                .resync_on_transport_start(position, bpm, sample_rate);
+        };
         let audio = Arc::clone(&active.audio);
         let looped = active.looped;
         let frames_until_start = frames_until_audition_boundary(position, bpm, sample_rate, 4);
@@ -186,7 +193,12 @@ impl AuditionBus {
         if let Some(active) = self.active.as_ref() {
             let _ = event_tx.push(EngineEvent::AuditionPosition(active.position));
         }
-        if had_voice && self.active.is_none() && !self.has_outgoing() && self.queued.is_none() {
+        if had_voice
+            && self.active.is_none()
+            && !self.has_outgoing()
+            && self.queued.is_none()
+            && !self.midi.is_running()
+        {
             let _ = event_tx.push(EngineEvent::AuditionStopped);
         }
     }
@@ -205,7 +217,12 @@ pub(super) fn next_audition_boundary(position: u64, bpm: f64, sample_rate: u32, 
     (boundary_index * boundary_frames).round() as u64
 }
 
-fn frames_until_audition_boundary(position: u64, bpm: f64, sample_rate: u32, beats: u64) -> u64 {
+pub(crate) fn frames_until_audition_boundary(
+    position: u64,
+    bpm: f64,
+    sample_rate: u32,
+    beats: u64,
+) -> u64 {
     if bpm <= 0.0 || sample_rate == 0 {
         return 0;
     }

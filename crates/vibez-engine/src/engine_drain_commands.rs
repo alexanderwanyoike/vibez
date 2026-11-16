@@ -2,6 +2,7 @@
 //! Split from engine.rs. Runs in the audio callback: keep allocation-free and lock-free.
 
 use super::*;
+use crate::engine_midi_audition::MidiAuditionVoice;
 use crate::events::SectionSourceRefreshedEvent;
 use vibez_core::id::ClipId;
 
@@ -901,6 +902,7 @@ impl AudioEngine {
                 start,
                 looped,
             } => {
+                self.audition.midi.stop();
                 let fade_frames = audition_fade_frames(self.sample_rate);
                 if self.transport.is_playing() && start == AuditionStart::NextBar {
                     let clock_position = self.effective_position();
@@ -932,15 +934,50 @@ impl AudioEngine {
                 let queued_only = self.audition.queued.is_some()
                     && self.audition.active.is_none()
                     && !self.audition.has_outgoing();
+                let fadeless = queued_only
+                    || (self.audition.midi.is_running()
+                        && self.audition.active.is_none()
+                        && !self.audition.has_outgoing());
                 self.audition.stop(audition_fade_frames(self.sample_rate));
-                if queued_only {
+                self.audition.midi.stop();
+                if fadeless {
                     self.present_event(EngineEvent::AuditionStopped, allowance);
                 }
             }
             EngineCommand::SetAuditionGain(gain) => {
                 self.audition.gain = gain.clamp(0.0, 2.0);
             }
-            EngineCommand::StartMidiAudition { .. } | EngineCommand::SetAuditionVoice(_) => {}
+            EngineCommand::StartMidiAudition {
+                pattern,
+                target,
+                start,
+                looped,
+            } => {
+                self.audition.stop(audition_fade_frames(self.sample_rate));
+                let synchronized = start == AuditionStart::NextBar;
+                let voice = MidiAuditionVoice::new(pattern, target, looped, synchronized);
+                if self.transport.is_playing() && synchronized {
+                    let clock_position = self.effective_position();
+                    let target = next_audition_boundary(
+                        clock_position,
+                        self.transport.bpm(),
+                        self.sample_rate,
+                        4,
+                    );
+                    self.audition
+                        .midi
+                        .queue(voice, target.saturating_sub(clock_position));
+                    self.present_event(EngineEvent::AuditionQueued, allowance);
+                } else {
+                    self.audition.midi.start(voice);
+                    self.present_event(EngineEvent::AuditionStarted, allowance);
+                }
+            }
+            EngineCommand::SetAuditionVoice(voice) => {
+                if let Some(old) = self.audition.midi.replace_preview_voice(voice) {
+                    self.dispose_instrument(old, allowance);
+                }
+            }
 
             // -- External MIDI input --
             EngineCommand::StartNoteRepeat {

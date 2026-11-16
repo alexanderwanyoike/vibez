@@ -413,6 +413,7 @@ impl AudioEngine {
             capture.samples.fill(0.0);
         }
 
+        self.sequence_midi_audition(frames);
         self.process_multitrack(
             output,
             frames,
@@ -441,6 +442,9 @@ impl AudioEngine {
             self.sample_rate,
             &mut self.event_tx,
         );
+        self.audition
+            .midi
+            .render_preview_voice(output, frames, channels, self.audition.gain);
 
         // ---- 5. Advance transport and send events -----------------------
         let was_playing = self.transport.is_playing();

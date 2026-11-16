@@ -341,7 +341,7 @@ fn without_a_target_the_preview_voice_plays_into_the_output_at_the_audition_gain
     assert_eq!(rig.voice_heard(), [(0, true, 60), (end as u64, false, 60)]);
     assert!(left[..end].iter().all(|sample| *sample == 0.5));
     assert!(left[end..].iter().all(|sample| *sample == 0.0));
-    assert!(rig.heard().is_empty());
+    assert_eq!(rig.heard(), []);
 }
 
 #[test]

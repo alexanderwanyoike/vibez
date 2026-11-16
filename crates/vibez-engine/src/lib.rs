@@ -8,6 +8,7 @@ pub mod compensation_controls;
 pub mod effect_spectrum;
 pub mod engine;
 mod engine_audition;
+mod engine_midi_audition;
 pub mod events;
 pub mod metering;
 pub mod midi_audition;
