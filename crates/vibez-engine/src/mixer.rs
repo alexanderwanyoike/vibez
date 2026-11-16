@@ -14,6 +14,8 @@ mod clip_loop_tests;
 mod effect_slot;
 mod groove;
 mod live_hold;
+#[cfg(test)]
+mod live_hold_tests;
 mod note_repeat;
 mod pan;
 mod pitch_mask;
