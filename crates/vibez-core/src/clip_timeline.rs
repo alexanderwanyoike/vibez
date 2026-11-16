@@ -471,4 +471,14 @@ mod tests {
         let beats = BeatClipTimeline::new(0.0, 0.0, 4.0, 4.0, true);
         assert_eq!(beats.clamp_start(4.0, 0.0, 4.0), 3.99);
     }
+
+    #[test]
+    fn a_launch_keeps_the_window_for_an_intro_or_a_loop_past_it() {
+        let intro = FrameClipTimeline::new(0, 16, 32, 44, true);
+        assert_eq!(intro.launch_period(), 44);
+        let past_window = BeatClipTimeline::new(0.0, 0.0, 32.0, 16.0, true);
+        assert_eq!(past_window.launch_period(), 16.0);
+        let one_shot = FrameClipTimeline::new(0, 0, 32, 44, false);
+        assert_eq!(one_shot.launch_period(), 44);
+    }
 }
