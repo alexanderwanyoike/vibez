@@ -69,12 +69,14 @@ impl vibez_instruments::Instrument for Probe {
     fn reset(&mut self) {}
 }
 
-/// `vibez-ui` `quantize_start`.
+/// Mirrors `quantize_start` in `vibez-ui/src/domains/perform/loop_record.rs`
+/// at sixteenth quantization.
 fn quantize_start(beat: f64, length_beats: f64) -> f64 {
     ((beat / SIXTEENTH).round() * SIXTEENTH).rem_euclid(length_beats)
 }
 
-/// `vibez-ui` `free_recording_beats`.
+/// Mirrors `free_recording_beats` in
+/// `vibez-ui/src/domains/perform/clip_record.rs` at 120 BPM.
 fn free_recording_beats(elapsed: u64) -> f64 {
     (((elapsed as f64 - 1.0).max(0.0) / SPB / 4.0).ceil() * 4.0).max(4.0)
 }
@@ -361,7 +363,7 @@ fn free_length_take_sustains_a_held_note_across_a_bar_line() {
     for batch in [false, true] {
         let mut rig = Rig::new(batch);
         rig.arm(None);
-        // Exactly on a sixteenth: quantizing does not move it.
+        // Just after a sixteenth, so quantizing moves it back onto it.
         let down = press_rounding_backward(&mut rig);
         // Hold across the first bar line (start + 96000).
         rig.run_until(|rig| rig.engine.performance_position > rig.start.unwrap() + 96_000 + 4_096);
