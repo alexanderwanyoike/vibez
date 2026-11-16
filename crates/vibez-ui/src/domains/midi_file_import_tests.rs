@@ -208,3 +208,14 @@ fn a_file_shorter_than_a_bar_lands_as_one_bar() {
 
     assert_eq!(clip.duration_beats, 4.0);
 }
+
+#[test]
+fn a_file_overshooting_its_last_bar_by_a_tick_keeps_that_bar() {
+    let mut file = drum_phrase();
+    // One tick at 96 PPQ past four bars.
+    file.file.length_beats = 16.0 + 1.0 / 96.0;
+
+    let clip = &file.plan(None, 0.0, MidiFileLayout::OneClip)[0].clip;
+
+    assert_eq!(clip.duration_beats, 16.0);
+}
