@@ -149,6 +149,8 @@ overlay and on-screen selector update the same selection used by the Section
 overview, while per-mode target banks remain runtime interaction state.
 Window focus loss drains all held computer keys through matching note-offs and
 clears the Shift overlay so OS-level focus changes cannot leave a note sounding.
+Keys on the hardware MIDI input likewise remember the Track each press played,
+so selecting another Track cannot redirect or drop the release.
 Widget-captured presses are not forwarded, so text fields suppress pad input.
 The mapping and fixed computer-key velocity (default 100) persist in the user's
 `ui.json` settings and are absent from the project document and undo snapshots.
