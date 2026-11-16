@@ -107,3 +107,19 @@ fn a_new_instrument_lets_the_clip_play_a_pitch_a_held_key_took_over() {
         );
     }
 }
+
+#[test]
+fn a_held_key_keeps_its_pitch_while_its_instrument_is_reconfigured() {
+    for batch in [false, true] {
+        let log = NoteLog::default();
+        let mut track = track_playing(vec![note(1.0, 1.0)], &log, batch);
+        track.hold_live_key(PITCH);
+
+        // Device reconfiguration takes the instrument and restores it.
+        let instrument = track.take_instrument();
+        track.instrument = instrument;
+        render(&mut track, 0, 512);
+
+        assert_eq!(heard(&log), [], "batch {batch}");
+    }
+}
