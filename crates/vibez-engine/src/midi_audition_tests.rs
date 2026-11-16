@@ -110,3 +110,13 @@ fn played_once_the_audition_ends_after_its_length() {
     assert!(pattern.ended(401, SAMPLES_PER_BEAT, false));
     assert!(!pattern.ended(4_000, SAMPLES_PER_BEAT, true));
 }
+
+#[test]
+fn a_note_shorter_than_a_sample_ends_after_it_starts() {
+    let pattern = MidiAuditionPattern::new(vec![note(36, 0.005, 0.0005)], 4.0);
+
+    assert_eq!(
+        collected(&pattern, 0, 8, false),
+        [BlockNote::on(1, 36, 100), BlockNote::off(1, 36)]
+    );
+}

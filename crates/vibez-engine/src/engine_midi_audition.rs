@@ -1,4 +1,4 @@
-//! The Browser's MIDI audition: when its notes start, which instrument plays them, and the preview voice that plays them when no track can.
+//! The Browser's MIDI audition, worked out block by block into the notes it plays and the instrument that plays them.
 
 use std::sync::Arc;
 
@@ -8,9 +8,11 @@ use vibez_core::note_output::{BlockNote, NoteOutput};
 use vibez_instruments::Instrument;
 
 use crate::engine_audition::frames_until_audition_boundary;
+use crate::engine_audition_queue::{take_due, QueuedStart};
+use crate::engine_preview_voice::PreviewVoice;
 use crate::events::EngineEvent;
 use crate::midi_audition::MidiAuditionPattern;
-use crate::mixer::{EngineTrack, RoutedNotes};
+use crate::mixer::EngineTrack;
 
 /// Who plays this block's audition notes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,14 +47,9 @@ impl MidiAuditionVoice {
     }
 }
 
-struct QueuedMidiAudition {
-    voice: MidiAuditionVoice,
-    frames_until_start: u64,
-}
-
 pub(crate) struct MidiAudition {
     active: Option<MidiAuditionVoice>,
-    queued: Option<QueuedMidiAudition>,
+    queued: Option<QueuedStart<MidiAuditionVoice>>,
     /// Bumped by every start, so the instrument playing an audition releases
     /// what the one before it held.
     generation: u64,
@@ -61,10 +58,7 @@ pub(crate) struct MidiAudition {
     /// The block's notes before a start inside the block delays them.
     pattern_notes: NoteOutput,
     player: Option<Player>,
-    preview_voice: Option<Box<dyn Instrument>>,
-    preview_notes: RoutedNotes<u64>,
-    /// The preview voice made sound last block, so its release may still ring.
-    preview_sounding: bool,
+    preview_voice: PreviewVoice,
 }
 
 impl MidiAudition {
@@ -76,9 +70,7 @@ impl MidiAudition {
             block: NoteOutput::default(),
             pattern_notes: NoteOutput::default(),
             player: None,
-            preview_voice: None,
-            preview_notes: RoutedNotes::default(),
-            preview_sounding: false,
+            preview_voice: PreviewVoice::new(),
         }
     }
 
@@ -90,10 +82,7 @@ impl MidiAudition {
 
     pub(crate) fn queue(&mut self, voice: MidiAuditionVoice, frames_until_start: u64) {
         self.active = None;
-        self.queued = Some(QueuedMidiAudition {
-            voice,
-            frames_until_start,
-        });
+        self.queued = Some(QueuedStart::new(voice, frames_until_start));
     }
 
     /// Ends the audition; whoever holds its notes releases them at the next
@@ -112,7 +101,6 @@ impl MidiAudition {
         &mut self,
         voice: Box<dyn Instrument>,
     ) -> Option<Box<dyn Instrument>> {
-        self.preview_notes.release();
         self.preview_voice.replace(voice)
     }
 
@@ -149,21 +137,10 @@ impl MidiAudition {
     ) {
         self.block.clear();
         let mut lead = 0;
-        let starts = self
-            .queued
-            .as_ref()
-            .is_some_and(|queued| !playing || queued.frames_until_start < frames as u64);
-        if starts {
-            let queued = self.queued.take().expect("queued audition exists");
-            if playing {
-                lead = queued.frames_until_start as usize;
-            }
-            self.start(queued.voice);
+        if let Some((voice, starts_at)) = take_due(&mut self.queued, frames, playing) {
+            lead = starts_at;
+            self.start(voice);
             let _ = event_tx.push(EngineEvent::AuditionStarted);
-        } else if playing {
-            if let Some(queued) = self.queued.as_mut() {
-                queued.frames_until_start -= frames as u64;
-            }
         }
         let Some(voice) = self.active.as_mut() else {
             self.player = None;
@@ -198,16 +175,15 @@ impl MidiAudition {
         }
     }
 
-    /// The key and notes `player` admits this block, which are none unless
-    /// it plays them.
-    fn notes_for(&self, player: Player) -> (Option<u64>, &[BlockNote]) {
-        notes_for(self.player, self.generation, &self.block, player)
-    }
-
     /// Hands `track` this block's notes when it plays them, and otherwise
     /// lets it release any it still holds.
     pub(crate) fn admit_into(&self, track: &mut EngineTrack, frames: u32) {
-        let (key, notes) = self.notes_for(Player::Track(track.id));
+        let (key, notes) = notes_for(
+            self.player,
+            self.generation,
+            &self.block,
+            Player::Track(track.id),
+        );
         track.audition_notes.admit(key, notes, frames);
     }
 
@@ -225,29 +201,13 @@ impl MidiAudition {
             &self.block,
             Player::PreviewVoice,
         );
-        self.preview_notes.admit(key, notes, frames as u32);
-        let Some(voice) = self.preview_voice.as_mut() else {
-            return;
-        };
-        if key.is_none() && !self.preview_sounding && self.preview_notes.notes().is_empty() {
-            return;
-        }
-        let mut cursor = 0;
-        let mut sounding = false;
-        for frame in 0..frames {
-            self.preview_notes
-                .play_due(frame as u32, &mut cursor, voice.as_mut());
-            let mut stereo = [0.0; 2];
-            voice.render(&mut stereo, 2);
-            sounding |= stereo != [0.0; 2];
-            for channel in 0..channels {
-                output[frame * channels + channel] += stereo[channel.min(1)] * gain;
-            }
-        }
-        self.preview_sounding = sounding;
+        self.preview_voice
+            .render(key, notes, output, frames, channels, gain);
     }
 }
 
+/// The key and notes `player` admits this block, which are none unless it
+/// plays them.
 fn notes_for(
     playing: Option<Player>,
     generation: u64,

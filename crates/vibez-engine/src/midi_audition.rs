@@ -52,7 +52,9 @@ impl MidiAuditionPattern {
         let first_beat = pos as f64 / samples_per_beat;
         let last_beat = pos.saturating_add(frames as u64) as f64 / samples_per_beat;
         // Every pass that could put `beat` inside the block; the exact
-        // sample test below keeps only those that do.
+        // sample test below keeps only those that do. Unlike
+        // `BeatClipTimeline::occurrences_of`, which walks every pass from the
+        // first, this costs the same however long a loop has been playing.
         let passes = |beat: f64| {
             if looped {
                 let first = ((first_beat - beat) / length).floor().max(0.0) as u64;
@@ -65,18 +67,29 @@ impl MidiAuditionPattern {
         let frame_of = |beat: f64, pass: u64| {
             frame_for_beat(beat + pass as f64 * length, pos, frames, samples_per_beat)
         };
-        for note in &self.notes {
-            let end = note.end_beat().min(length);
-            for frame in passes(end).filter_map(|pass| frame_of(end, pass)) {
-                out.push(BlockNote::off(frame, note.pitch));
+        // A note shorter than a sample starts and ends on one frame; its
+        // note-off follows its note-on there, or it would never be released.
+        let offs = |starting_too: bool, out: &mut NoteOutput| {
+            for note in &self.notes {
+                let end = note.end_beat().min(length);
+                for pass in passes(end) {
+                    let Some(frame) = frame_of(end, pass) else {
+                        continue;
+                    };
+                    if (frame_of(note.start_beat, pass) == Some(frame)) == starting_too {
+                        out.push(BlockNote::off(frame, note.pitch));
+                    }
+                }
             }
-        }
+        };
+        offs(false, out);
         for note in &self.notes {
             for frame in passes(note.start_beat).filter_map(|pass| frame_of(note.start_beat, pass))
             {
                 out.push(BlockNote::on(frame, note.pitch, note.velocity));
             }
         }
+        offs(true, out);
     }
 
     /// Whether an audition `pos` samples in has played all of its notes,

@@ -905,14 +905,7 @@ impl AudioEngine {
                 self.audition.midi.stop();
                 let fade_frames = audition_fade_frames(self.sample_rate);
                 if self.transport.is_playing() && start == AuditionStart::NextBar {
-                    let clock_position = self.effective_position();
-                    let target = next_audition_boundary(
-                        clock_position,
-                        self.transport.bpm(),
-                        self.sample_rate,
-                        4,
-                    );
-                    let frames_until_start = target.saturating_sub(clock_position);
+                    let frames_until_start = self.frames_until_next_audition_bar();
                     self.audition
                         .queue(audio, frames_until_start, fade_frames, looped, true);
                     self.present_event(EngineEvent::AuditionQueued, allowance);
@@ -957,16 +950,8 @@ impl AudioEngine {
                 let synchronized = start == AuditionStart::NextBar;
                 let voice = MidiAuditionVoice::new(pattern, target, looped, synchronized);
                 if self.transport.is_playing() && synchronized {
-                    let clock_position = self.effective_position();
-                    let target = next_audition_boundary(
-                        clock_position,
-                        self.transport.bpm(),
-                        self.sample_rate,
-                        4,
-                    );
-                    self.audition
-                        .midi
-                        .queue(voice, target.saturating_sub(clock_position));
+                    let frames_until_start = self.frames_until_next_audition_bar();
+                    self.audition.midi.queue(voice, frames_until_start);
                     self.present_event(EngineEvent::AuditionQueued, allowance);
                 } else {
                     self.audition.midi.start(voice);
@@ -1089,6 +1074,14 @@ impl AudioEngine {
             } => self.command_set_instrument(track_id, instrument, allowance),
         }
         bus_cleanup
+    }
+
+    /// How long a synchronized audition waits for the next bar of the
+    /// clock the project is heard on.
+    fn frames_until_next_audition_bar(&self) -> u64 {
+        let clock_position = self.effective_position();
+        next_audition_boundary(clock_position, self.transport.bpm(), self.sample_rate, 4)
+            .saturating_sub(clock_position)
     }
 
     pub(super) fn recalculate_audio_length(&mut self) {

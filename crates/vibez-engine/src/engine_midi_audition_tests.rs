@@ -453,3 +453,26 @@ fn stopping_releases_a_note_the_preview_voice_holds_even_while_it_is_silent() {
         [(0, true, 60), (BLOCK as u64, false, 60)]
     );
 }
+
+#[test]
+fn a_target_that_loses_its_instrument_hands_the_rest_of_the_audition_to_the_preview_voice() {
+    let mut rig = Rig::new(true, true).with_voice();
+    let track = rig.track;
+    rig.start(
+        pattern(vec![note(60, 0.0, 0.02), note(62, 0.03, 0.01)], 4.0),
+        Some(track),
+    );
+    rig.run(1);
+    rig.commands
+        .push(EngineCommand::RemoveTrackInstrument(track))
+        .unwrap();
+
+    rig.run(4);
+
+    assert_eq!(rig.heard(), [(0, true, 60)]);
+    let moved = BLOCK as u64;
+    assert_eq!(
+        rig.voice_heard(),
+        [(at(0.03) - moved, true, 62), (at(0.04) - moved, false, 62)]
+    );
+}
