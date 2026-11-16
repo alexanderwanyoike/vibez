@@ -2,6 +2,7 @@
 
 use super::*;
 use graph_test_support::{graph_engine, routing_channel, routing_plan};
+use note_listener_test_support::{Heard, Listener};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use vibez_core::midi::InstrumentKind;
@@ -14,15 +15,6 @@ const BLOCK: usize = 256;
 struct NotePlayer {
     script: Arc<Mutex<VecDeque<Vec<BlockNote>>>>,
     output: NoteOutput,
-}
-
-/// `(absolute frame, on, pitch)` as the receiving instrument heard them.
-type Heard = Arc<Mutex<Vec<(u64, bool, u8)>>>;
-
-struct Listener {
-    heard: Heard,
-    rendered: u64,
-    batch: bool,
 }
 
 impl vibez_instruments::Instrument for NotePlayer {
@@ -52,48 +44,6 @@ impl vibez_instruments::Instrument for NotePlayer {
     fn reset(&mut self) {}
     fn supports_batch_render(&self) -> bool {
         true
-    }
-}
-
-impl vibez_instruments::Instrument for Listener {
-    fn instrument_kind(&self) -> InstrumentKind {
-        InstrumentKind::SubtractiveSynth
-    }
-    fn param_descriptors(&self) -> &'static [vibez_core::effect::ParamDescriptor] {
-        &[]
-    }
-    fn set_param(&mut self, _: usize, _: f32) -> bool {
-        false
-    }
-    fn get_param(&self, _: usize) -> f32 {
-        0.0
-    }
-    fn note_on(&mut self, pitch: u8, _: u8) {
-        self.heard
-            .lock()
-            .unwrap()
-            .push((self.rendered, true, pitch));
-    }
-    fn note_off(&mut self, pitch: u8) {
-        self.heard
-            .lock()
-            .unwrap()
-            .push((self.rendered, false, pitch));
-    }
-    fn note_on_at(&mut self, pitch: u8, _: u8, frame: u32) {
-        let at = self.rendered + u64::from(frame);
-        self.heard.lock().unwrap().push((at, true, pitch));
-    }
-    fn note_off_at(&mut self, pitch: u8, frame: u32) {
-        let at = self.rendered + u64::from(frame);
-        self.heard.lock().unwrap().push((at, false, pitch));
-    }
-    fn render(&mut self, buffer: &mut [f32], channels: usize) {
-        self.rendered += (buffer.len() / channels) as u64;
-    }
-    fn reset(&mut self) {}
-    fn supports_batch_render(&self) -> bool {
-        self.batch
     }
 }
 
@@ -139,11 +89,7 @@ impl Rig {
         for (track, instrument) in [
             (
                 receiver,
-                Box::new(Listener {
-                    heard,
-                    rendered: 0,
-                    batch,
-                }) as Box<dyn vibez_instruments::Instrument>,
+                Box::new(Listener::new(heard, batch)) as Box<dyn vibez_instruments::Instrument>,
             ),
             (
                 source,
