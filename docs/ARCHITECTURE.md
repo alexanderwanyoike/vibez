@@ -709,6 +709,21 @@ receiver renders the source's instrument first. The source keeps sounding its ow
 instrument, its mute silences only its audio, and the receiver plays routed
 notes whether or not it is the record target.
 
+The Browser's **MIDI audition** plays a MIDI file through a Track's
+instrument the same way, but never as input. `MidiAuditionPattern` places one
+pass of the file's notes on the samples of each block, played once or looped,
+with notes held past its length ending there. Before any Track renders, the
+Audition Bus works out the block's notes and their player: the target Track
+when it has an instrument, otherwise a preview voice the UI supplies and the
+bus mixes after master at the Audition gain. Each Track admits them through a
+second `RoutedNotes` keyed by an audition generation, so a new audition, a
+Stop, an audio audition or a change of player ends held notes at the next
+block start, and nothing reports them as `SourceNoteInput`, so no recording
+takes them. A synchronized (Warp) audition starts on the next bar while the
+transport plays, and moves to the bar Play starts on, like a warped audio
+audition. The preview voice renders only while it plays an audition or still
+rings, and a replaced voice is disposed off the audio thread.
+
 `EngineTrack` is the shared project channel strip: it owns the instrument,
 effects, sends, gain/pan, mute/solo, meters, and preallocated render scratch.
 Time-based content is a separate `PreparedPlaybackSource` behind an owned
