@@ -16,6 +16,8 @@ use crate::state::ProjectTrack;
 pub struct MidiPreview {
     pub source: MediaSourceRef,
     pub pattern: Arc<MidiAuditionPattern>,
+    /// Laid out once, since the footer draws it on every frame.
+    pub strip: Arc<MidiStrip>,
 }
 
 impl MidiPreview {
@@ -26,18 +28,22 @@ impl MidiPreview {
             .plan(None, 0.0, MidiFileLayout::OneClip)
             .swap_remove(0)
             .clip;
+        let pattern = MidiAuditionPattern::new(clip.notes, clip.duration_beats);
         Self {
             source,
-            pattern: Arc::new(MidiAuditionPattern::new(clip.notes, clip.duration_beats)),
+            strip: Arc::new(MidiStrip::of(&pattern)),
+            pattern: Arc::new(pattern),
         }
     }
+}
 
-    pub fn strip(&self) -> MidiStrip {
-        let notes = self.pattern.notes();
-        let length = self.pattern.length_beats();
+impl MidiStrip {
+    fn of(pattern: &MidiAuditionPattern) -> Self {
+        let notes = pattern.notes();
+        let length = pattern.length_beats();
         let rows = NoteRows::of(notes.iter().map(|note| note.pitch));
         let across = |beat: f64| (beat / length).clamp(0.0, 1.0) as f32;
-        MidiStrip {
+        Self {
             notes: notes
                 .iter()
                 .map(|note| StripNote {
@@ -67,7 +73,7 @@ pub struct StripNote {
     pub velocity: u8,
 }
 
-/// The strip's notes and bar lines, laid out once per preview.
+/// The strip's notes and bar lines.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MidiStrip {
     pub notes: Vec<StripNote>,

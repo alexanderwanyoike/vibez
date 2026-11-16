@@ -57,14 +57,14 @@ fn a_preview_plays_every_track_of_the_file_over_the_clip_a_drop_lands() {
 
 #[test]
 fn the_strip_spans_the_clip_with_a_line_on_every_bar() {
-    let strip = preview(vec![hit(36, 0.0, 1.0)], 16.0).strip();
+    let strip = preview(vec![hit(36, 0.0, 1.0)], 16.0).strip;
 
     assert_eq!(strip.bar_lines, [0.25, 0.5, 0.75]);
 }
 
 #[test]
 fn strip_notes_sit_across_the_clip_where_they_play() {
-    let strip = preview(vec![hit(36, 4.0, 2.0)], 16.0).strip();
+    let strip = preview(vec![hit(36, 4.0, 2.0)], 16.0).strip;
 
     assert_eq!(strip.notes.len(), 1);
     assert_eq!((strip.notes[0].start, strip.notes[0].end), (0.25, 0.375));
@@ -74,7 +74,7 @@ fn strip_notes_sit_across_the_clip_where_they_play() {
 fn strip_notes_sit_on_the_rows_clip_thumbnails_use_with_their_velocity() {
     let mut loud = hit(43, 1.0, 1.0);
     loud.velocity = 127;
-    let strip = preview(vec![hit(36, 0.0, 1.0), loud], 4.0).strip();
+    let strip = preview(vec![hit(36, 0.0, 1.0), loud], 4.0).strip;
 
     let rows = crate::note_rows::NoteRows::of([36, 43]);
     assert_eq!(strip.rows, rows);
@@ -86,7 +86,7 @@ fn strip_notes_sit_on_the_rows_clip_thumbnails_use_with_their_velocity() {
 
 #[test]
 fn a_note_held_past_the_clip_ends_at_its_edge() {
-    let strip = preview(vec![hit(36, 3.0, 4.0)], 4.0).strip();
+    let strip = preview(vec![hit(36, 3.0, 4.0)], 4.0).strip;
 
     assert_eq!(strip.notes[0].end, 1.0);
 }

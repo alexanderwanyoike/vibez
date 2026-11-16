@@ -1,6 +1,7 @@
 //! The selected MIDI file's notes as a compact piano-roll strip in the Browser Audition footer.
 
 use std::cell::Cell;
+use std::sync::Arc;
 
 use iced::mouse;
 use iced::widget::canvas;
@@ -18,7 +19,7 @@ const MIN_NOTE_WIDTH: f32 = 1.5;
 const VERTICAL_INSET: f32 = 2.0;
 
 pub struct BrowserMidiStrip {
-    pub strip: Option<MidiStrip>,
+    pub strip: Option<Arc<MidiStrip>>,
     /// Changes whenever a different file's strip is shown.
     pub identity: u64,
     pub playhead_fraction: Option<f32>,
