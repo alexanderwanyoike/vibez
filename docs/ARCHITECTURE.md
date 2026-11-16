@@ -564,7 +564,9 @@ The engine lives on the cpal audio callback. Its rules:
   started and no longer holds under the playhead; the track remembers which
   clip started each sounding pitch. A held live key owns its pitch over Clip
   notes, so a Clip being recorded neither restarts nor cuts the note it plays
-  back, and the pitch returns to the Clip at its next note-on.
+  back, and the pitch returns to the Clip at its next note-on. Transport stop
+  and Clip edits leave a held key sounding, since its voice is no longer the
+  Clip's to release.
 - Arrange playback stops on its own only when the playhead reaches the song
   end; a playhead already past it keeps going. Undo and Capture wrap the
   content they re-add in `BeginContentRebuild`/`EndContentRebuild`, and the
