@@ -7,10 +7,10 @@
 
 use super::*;
 use crate::playback_source::{EngineNoteClip, PreparedClipPlayback, PreparedPlaybackSource};
+use crate::test_support::{NoteLog, NoteLogProbe};
 use graph_test_support::{graph_engine, routing_channel};
-use std::sync::Mutex;
 use vibez_core::id::ClipId;
-use vibez_core::midi::{InstrumentKind, MidiNote};
+use vibez_core::midi::MidiNote;
 use vibez_core::perform::GrooveGrid;
 
 const RATE: u32 = 48_000;
@@ -19,55 +19,6 @@ const SIXTEENTH: f64 = 0.25;
 const BLOCK: usize = 512;
 const UI_TICK_BLOCKS: usize = 2;
 const PITCH: u8 = 60;
-
-type Log = Arc<Mutex<(u64, Vec<(u64, u8, bool)>)>>;
-
-struct Probe {
-    log: Log,
-    batch: bool,
-}
-
-impl Probe {
-    fn push(&self, offset: u32, pitch: u8, on: bool) {
-        let mut log = self.log.lock().unwrap();
-        let frame = log.0 + u64::from(offset);
-        log.1.push((frame, pitch, on));
-    }
-}
-
-impl vibez_instruments::Instrument for Probe {
-    fn instrument_kind(&self) -> InstrumentKind {
-        InstrumentKind::SubtractiveSynth
-    }
-    fn param_descriptors(&self) -> &'static [vibez_core::effect::ParamDescriptor] {
-        &[]
-    }
-    fn set_param(&mut self, _: usize, _: f32) -> bool {
-        false
-    }
-    fn get_param(&self, _: usize) -> f32 {
-        0.0
-    }
-    fn note_on(&mut self, pitch: u8, _: u8) {
-        self.push(0, pitch, true);
-    }
-    fn note_off(&mut self, pitch: u8) {
-        self.push(0, pitch, false);
-    }
-    fn note_on_at(&mut self, pitch: u8, _: u8, offset: u32) {
-        self.push(offset, pitch, true);
-    }
-    fn note_off_at(&mut self, pitch: u8, offset: u32) {
-        self.push(offset, pitch, false);
-    }
-    fn supports_batch_render(&self) -> bool {
-        self.batch
-    }
-    fn render(&mut self, buffer: &mut [f32], channels: usize) {
-        self.log.lock().unwrap().0 += (buffer.len() / channels) as u64;
-    }
-    fn reset(&mut self) {}
-}
 
 /// Mirrors `quantize_start` in `vibez-ui/src/domains/perform/loop_record.rs`
 /// at sixteenth quantization.
@@ -87,7 +38,7 @@ struct Rig {
     events: rtrb::Consumer<EngineEvent>,
     track: TrackId,
     clip_id: ClipId,
-    log: Log,
+    log: NoteLog,
     /// UI model.
     start: Option<u64>,
     heard_now: u64,
@@ -106,14 +57,14 @@ impl Rig {
         let track = TrackId::new();
         let (mut engine, mut commands, events) =
             graph_engine(&[routing_channel(track), routing_channel(TrackId::MASTER)]);
-        let log: Log = Arc::default();
+        let log: NoteLog = Arc::default();
         for command in [
             EngineCommand::SetSampleRate(RATE),
             EngineCommand::SetBpm(120.0),
             EngineCommand::add_track(track),
             EngineCommand::SetInstrument {
                 track_id: track,
-                instrument: Box::new(Probe {
+                instrument: Box::new(NoteLogProbe {
                     log: Arc::clone(&log),
                     batch,
                 }),
