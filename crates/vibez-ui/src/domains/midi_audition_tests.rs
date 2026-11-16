@@ -71,23 +71,17 @@ fn strip_notes_sit_across_the_clip_where_they_play() {
 }
 
 #[test]
-fn higher_notes_sit_higher_and_a_narrow_range_keeps_an_octave_of_rows() {
-    let strip = preview(vec![hit(36, 0.0, 1.0), hit(43, 1.0, 1.0)], 4.0).strip();
+fn strip_notes_sit_on_the_rows_clip_thumbnails_use_with_their_velocity() {
+    let mut loud = hit(43, 1.0, 1.0);
+    loud.velocity = 127;
+    let strip = preview(vec![hit(36, 0.0, 1.0), loud], 4.0).strip();
 
-    assert_eq!(strip.row_height, 1.0 / 12.0);
-    let (low, high) = (strip.notes[0], strip.notes[1]);
-    assert!(high.top < low.top);
-    assert!((low.top - high.top - 7.0 / 12.0).abs() < 1e-6);
-    assert!(high.top >= 0.0 && low.top + strip.row_height <= 1.0);
-}
-
-#[test]
-fn a_wide_range_gives_every_pitch_its_own_row_top_to_bottom() {
-    let strip = preview(vec![hit(24, 0.0, 1.0), hit(48, 1.0, 1.0)], 4.0).strip();
-
-    assert_eq!(strip.row_height, 1.0 / 25.0);
-    assert_eq!(strip.notes[1].top, 0.0);
-    assert_eq!(strip.notes[0].top, 24.0 / 25.0);
+    let rows = crate::note_rows::NoteRows::of([36, 43]);
+    assert_eq!(strip.rows, rows);
+    let depths: Vec<_> = strip.notes.iter().map(|note| note.depth).collect();
+    assert_eq!(depths, [rows.depth(36), rows.depth(43)]);
+    let velocities: Vec<_> = strip.notes.iter().map(|note| note.velocity).collect();
+    assert_eq!(velocities, [100, 127]);
 }
 
 #[test]

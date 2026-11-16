@@ -8,17 +8,14 @@ use iced::{Rectangle, Renderer, Theme};
 
 use crate::domains::midi_audition::MidiStrip;
 use crate::message::Message;
+use crate::note_rows::note_alpha;
 use crate::theme;
 
 use super::playhead::playhead_geometry;
 
-/// A note stays visible however short it is or however many rows share the
-/// strip's height.
+/// A note stays visible however short it is.
 const MIN_NOTE_WIDTH: f32 = 1.5;
-const MIN_NOTE_HEIGHT: f32 = 1.0;
-/// Rows never grow taller than this, so a one-note file stays a line.
-const MAX_NOTE_HEIGHT: f32 = 4.0;
-const VERTICAL_INSET: f32 = 3.0;
+const VERTICAL_INSET: f32 = 2.0;
 
 pub struct BrowserMidiStrip {
     pub strip: Option<MidiStrip>,
@@ -79,21 +76,18 @@ impl canvas::Program<Message> for BrowserMidiStrip {
                         .with_width(1.0),
                 );
             }
-            let usable = (height - 2.0 * VERTICAL_INSET).max(1.0);
-            let row = strip.row_height * usable;
-            let note_height = row.clamp(MIN_NOTE_HEIGHT, MAX_NOTE_HEIGHT);
-            // Rows shorter than the cap keep a gap between neighbouring pitches.
-            let gap = if row > 2.0 { 0.5 } else { 0.0 };
+            let plot_height = (height - 2.0 * VERTICAL_INSET).max(1.0);
+            let note_height = strip.rows.note_height(plot_height);
             for note in &strip.notes {
                 let x = note.start * width;
-                let y = VERTICAL_INSET + note.top * usable + (row - note_height) / 2.0;
+                let y = VERTICAL_INSET + note.depth * (plot_height - 3.0);
                 frame.fill_rectangle(
-                    iced::Point::new(x, y + gap / 2.0),
+                    iced::Point::new(x, y),
                     iced::Size::new(
                         ((note.end - note.start) * width).max(MIN_NOTE_WIDTH),
-                        (note_height - gap).max(MIN_NOTE_HEIGHT),
+                        note_height,
                     ),
-                    theme::waveform(),
+                    theme::with_alpha(theme::waveform(), note_alpha(note.velocity)),
                 );
             }
         });

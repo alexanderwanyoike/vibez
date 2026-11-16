@@ -50,7 +50,8 @@ impl MidiPreview {
                 .map(|note| StripNote {
                     start: across(note.start_beat),
                     end: across(note.end_beat()),
-                    top: (top_pitch - f32::from(note.pitch)) / f32::from(rows),
+                    depth: (top_pitch - f32::from(note.pitch)) / f32::from(rows),
+                    velocity: 0,
                 })
                 .collect(),
             bar_lines: (1..)
@@ -58,7 +59,7 @@ impl MidiPreview {
                 .take_while(|&beat| beat < length)
                 .map(across)
                 .collect(),
-            row_height: 1.0 / f32::from(rows),
+            rows: crate::note_rows::NoteRows::of([]),
         }
     }
 }
@@ -68,18 +69,18 @@ impl MidiPreview {
 pub struct StripNote {
     pub start: f32,
     pub end: f32,
-    /// The top of the note's pitch row.
-    pub top: f32,
+    /// How far down the strip the note sits.
+    pub depth: f32,
+    pub velocity: u8,
 }
 
 /// The strip's notes and bar lines, laid out once per preview.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MidiStrip {
     pub notes: Vec<StripNote>,
     /// Each bar line after the first bar, as a fraction of the width.
     pub bar_lines: Vec<f32>,
-    /// One pitch row, as a fraction of the height.
-    pub row_height: f32,
+    pub rows: crate::note_rows::NoteRows,
 }
 
 /// The track whose instrument plays the audition, which is the selected
