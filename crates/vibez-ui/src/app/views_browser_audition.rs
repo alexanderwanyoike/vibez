@@ -148,7 +148,8 @@ impl App {
             })
             .size(9)
             .color(th::text_dim())
-            .width(Length::Fixed(audition_status_width())),
+            .width(Length::Fixed(audition_status_width()))
+            .wrapping(iced::widget::text::Wrapping::None),
             waveform
         ]
         .spacing(5)
@@ -255,8 +256,9 @@ impl App {
     }
 }
 
-/// Wide enough for the longest status, so the waveform or strip beside it
-/// never moves when the status changes.
+/// Wide enough for the longest status shown beside a waveform or strip, so
+/// the picture never moves when the status changes. UNAVAILABLE is longer,
+/// but it has no picture to move.
 fn audition_status_width() -> f32 {
-    crate::widgets::device_controls::text_width("UNAVAILABLE", 9.0, iced::Font::DEFAULT).ceil()
+    crate::widgets::device_controls::text_width("PREPARING", 9.0, iced::Font::DEFAULT).ceil()
 }
