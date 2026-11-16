@@ -37,6 +37,19 @@ pub enum AuditionMode {
 }
 
 impl AuditionMode {
+    /// Warp waits for the next bar while the project plays; Raw starts now.
+    pub fn engine_start(self) -> vibez_engine::commands::AuditionStart {
+        match self {
+            Self::Raw => vibez_engine::commands::AuditionStart::Immediate,
+            Self::Warp => vibez_engine::commands::AuditionStart::NextBar,
+        }
+    }
+
+    /// Warp loops in time with the project; Raw plays once.
+    pub fn loops(self) -> bool {
+        self == Self::Warp
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Self::Raw => "RAW",

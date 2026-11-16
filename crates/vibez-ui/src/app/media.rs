@@ -9,7 +9,7 @@ use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::{InstrumentKind, TrackKind};
 use vibez_core::track::MediaSourceRef;
-use vibez_engine::commands::{AuditionStart, EngineCommand};
+use vibez_engine::commands::EngineCommand;
 
 use crate::domains::device_panel_drop::DevicePanelDrop;
 use crate::message::{BrowserImportTarget, Message, PreparedBrowserImport};
@@ -267,18 +267,18 @@ impl App {
         audio: Arc<DecodedAudio>,
         playback_mode: AuditionMode,
     ) {
-        let warped = playback_mode == AuditionMode::Warp;
-        let queued = self.state.transport.is_playing() && warped;
         self.state.browser.audition_audio.hand(Arc::clone(&audio));
         self.send_command(EngineCommand::StartAudition {
             audio,
-            start: if warped {
-                AuditionStart::NextBar
-            } else {
-                AuditionStart::Immediate
-            },
-            looped: warped,
+            start: playback_mode.engine_start(),
+            looped: playback_mode.loops(),
         });
+        self.audition_requested(playback_mode);
+    }
+
+    /// Records an audition just handed to the engine and says so.
+    pub(super) fn audition_requested(&mut self, playback_mode: AuditionMode) {
+        let queued = self.state.transport.is_playing() && playback_mode.loops();
         self.state
             .browser
             .mark_audition_requested(queued, playback_mode);
