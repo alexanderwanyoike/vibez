@@ -219,3 +219,16 @@ fn a_file_overshooting_its_last_bar_by_a_tick_keeps_that_bar() {
 
     assert_eq!(clip.duration_beats, 16.0);
 }
+
+#[test]
+fn a_short_hit_on_the_next_downbeat_keeps_its_bar() {
+    let mut file = drum_phrase();
+    let mut downbeat = hit(36, 16.0);
+    downbeat.duration_beats = 1.0 / 96.0;
+    file.file.tracks[0].notes.push(downbeat);
+    file.file.length_beats = 16.0 + 1.0 / 96.0;
+
+    let clip = &file.plan(None, 0.0, MidiFileLayout::OneClip)[0].clip;
+
+    assert_eq!(clip.duration_beats, 20.0);
+}
