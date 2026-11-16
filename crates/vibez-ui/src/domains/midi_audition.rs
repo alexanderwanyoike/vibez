@@ -1,13 +1,18 @@
-//! What the Browser shows and plays of a selected MIDI file: its notes over the Clip a drop would land, and the track whose instrument plays them.
+//! The Browser's preview of a selected MIDI file, showing and playing the Clip a drop would land on the track whose instrument plays it.
 
 use std::sync::Arc;
 
 use vibez_core::id::TrackId;
+use vibez_core::time::BEATS_PER_BAR;
 use vibez_core::track::MediaSourceRef;
 use vibez_engine::midi_audition::MidiAuditionPattern;
 
-use crate::domains::midi_file_import::MidiFileImport;
+use crate::domains::midi_file_import::{MidiFileImport, MidiFileLayout};
 use crate::state::ProjectTrack;
+
+/// A file spanning fewer pitches is drawn over an octave, so a bass line or
+/// a few drums keep the rows of a small piano roll.
+const MIN_STRIP_ROWS: u8 = 12;
 
 /// A selected MIDI file, read for the Audition footer.
 #[derive(Debug, Clone)]
@@ -17,15 +22,44 @@ pub struct MidiPreview {
 }
 
 impl MidiPreview {
-    pub fn of(source: MediaSourceRef, _import: &MidiFileImport) -> Self {
+    /// Previews the Clip a drop would land, so what the producer hears and
+    /// sees is what landing gives them.
+    pub fn of(source: MediaSourceRef, import: &MidiFileImport) -> Self {
+        let clip = import
+            .plan(None, 0.0, MidiFileLayout::OneClip)
+            .swap_remove(0)
+            .clip;
         Self {
             source,
-            pattern: Arc::new(MidiAuditionPattern::new(Vec::new(), 0.0)),
+            pattern: Arc::new(MidiAuditionPattern::new(clip.notes, clip.duration_beats)),
         }
     }
 
     pub fn strip(&self) -> MidiStrip {
-        MidiStrip::default()
+        let notes = self.pattern.notes();
+        let length = self.pattern.length_beats();
+        let lowest = notes.iter().map(|note| note.pitch).min().unwrap_or(60);
+        let highest = notes.iter().map(|note| note.pitch).max().unwrap_or(60);
+        let spanned = highest - lowest + 1;
+        let rows = spanned.max(MIN_STRIP_ROWS);
+        let top_pitch = f32::from(highest) + f32::from((rows - spanned) / 2);
+        let across = |beat: f64| (beat / length).clamp(0.0, 1.0) as f32;
+        MidiStrip {
+            notes: notes
+                .iter()
+                .map(|note| StripNote {
+                    start: across(note.start_beat),
+                    end: across(note.end_beat()),
+                    top: (top_pitch - f32::from(note.pitch)) / f32::from(rows),
+                })
+                .collect(),
+            bar_lines: (1..)
+                .map(|bar| f64::from(bar) * BEATS_PER_BAR)
+                .take_while(|&beat| beat < length)
+                .map(across)
+                .collect(),
+            row_height: 1.0 / f32::from(rows),
+        }
     }
 }
 
@@ -48,21 +82,35 @@ pub struct MidiStrip {
     pub row_height: f32,
 }
 
-/// The track whose instrument plays the audition: the selected track when
-/// it can play MIDI, otherwise none and the preview voice plays it.
-pub fn audition_target(_selected: Option<TrackId>, _tracks: &[ProjectTrack]) -> Option<TrackId> {
-    None
+/// The track whose instrument plays the audition, which is the selected
+/// track when it can play MIDI; without one the preview voice plays it.
+pub fn audition_target(selected: Option<TrackId>, tracks: &[ProjectTrack]) -> Option<TrackId> {
+    let selected = selected?;
+    tracks
+        .iter()
+        .any(|track| track.id == selected && track.is_playable_midi_target())
+        .then_some(selected)
 }
 
 /// Where the playhead sits in the strip, `position` samples into the
 /// audition.
 pub fn playhead_fraction(
-    _pattern: &MidiAuditionPattern,
-    _position: u64,
-    _samples_per_beat: f64,
-    _looped: bool,
+    pattern: &MidiAuditionPattern,
+    position: u64,
+    samples_per_beat: f64,
+    looped: bool,
 ) -> Option<f32> {
-    None
+    let length = pattern.length_beats();
+    if samples_per_beat <= 0.0 || length <= 0.0 {
+        return None;
+    }
+    let beats = position as f64 / samples_per_beat;
+    let played = if looped {
+        beats.rem_euclid(length)
+    } else {
+        beats.min(length)
+    };
+    Some((played / length) as f32)
 }
 
 #[cfg(test)]
