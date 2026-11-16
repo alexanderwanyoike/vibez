@@ -3,7 +3,6 @@
 use std::sync::Arc;
 
 use iced::Task;
-use vibez_core::midi::InstrumentKind;
 use vibez_core::track::MediaSourceRef;
 use vibez_engine::commands::EngineCommand;
 
@@ -14,17 +13,6 @@ use crate::domains::midi_file_import::MidiFileImport;
 use crate::message::Message;
 
 impl App {
-    /// Tells the engine the hardware rate, with a preview voice built for it.
-    pub(super) fn apply_engine_sample_rate(&mut self, sample_rate: u32) {
-        self.send_command(EngineCommand::SetSampleRate(sample_rate));
-        self.send_command(EngineCommand::SetAuditionVoice(
-            vibez_instruments::create_instrument(
-                InstrumentKind::SubtractiveSynth,
-                sample_rate as f32,
-            ),
-        ));
-    }
-
     /// A click on a MIDI file reads it to show its pattern, auditioning it
     /// too while Audition is on; a click on the selected file plays it again.
     pub(super) fn select_midi_file(&mut self, source: MediaSourceRef) -> Task<Message> {

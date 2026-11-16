@@ -186,6 +186,19 @@ fn live_output_requests(
 }
 
 impl App {
+    /// Tells the engine the hardware rate, with a preview voice built for it.
+    pub(super) fn apply_engine_sample_rate(&mut self, sample_rate: u32) {
+        self.send_command(vibez_engine::commands::EngineCommand::SetSampleRate(
+            sample_rate,
+        ));
+        self.send_command(vibez_engine::commands::EngineCommand::SetAuditionVoice(
+            vibez_instruments::create_instrument(
+                vibez_core::midi::InstrumentKind::SubtractiveSynth,
+                sample_rate as f32,
+            ),
+        ));
+    }
+
     pub(super) fn handle_select_audio_backend(&mut self, backend: AudioBackend) -> Task<Message> {
         if self.state.audio_recording.is_busy() {
             self.state.status_text = "Stop Audio Track Recording before changing hardware".into();
