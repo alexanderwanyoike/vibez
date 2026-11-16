@@ -8,6 +8,7 @@ use vibez_core::note_output::{BlockNote, NoteOutput};
 use vibez_instruments::Instrument;
 
 use crate::engine_audition::frames_until_audition_boundary;
+use crate::engine_audition_queue::{take_due, QueuedStart};
 use crate::events::EngineEvent;
 use crate::midi_audition::MidiAuditionPattern;
 use crate::mixer::{EngineTrack, RoutedNotes};
@@ -45,14 +46,9 @@ impl MidiAuditionVoice {
     }
 }
 
-struct QueuedMidiAudition {
-    voice: MidiAuditionVoice,
-    frames_until_start: u64,
-}
-
 pub(crate) struct MidiAudition {
     active: Option<MidiAuditionVoice>,
-    queued: Option<QueuedMidiAudition>,
+    queued: Option<QueuedStart<MidiAuditionVoice>>,
     /// Bumped by every start, so the instrument playing an audition releases
     /// what the one before it held.
     generation: u64,
@@ -90,10 +86,7 @@ impl MidiAudition {
 
     pub(crate) fn queue(&mut self, voice: MidiAuditionVoice, frames_until_start: u64) {
         self.active = None;
-        self.queued = Some(QueuedMidiAudition {
-            voice,
-            frames_until_start,
-        });
+        self.queued = Some(QueuedStart::new(voice, frames_until_start));
     }
 
     /// Ends the audition; whoever holds its notes releases them at the next
@@ -149,21 +142,10 @@ impl MidiAudition {
     ) {
         self.block.clear();
         let mut lead = 0;
-        let starts = self
-            .queued
-            .as_ref()
-            .is_some_and(|queued| !playing || queued.frames_until_start < frames as u64);
-        if starts {
-            let queued = self.queued.take().expect("queued audition exists");
-            if playing {
-                lead = queued.frames_until_start as usize;
-            }
-            self.start(queued.voice);
+        if let Some((voice, starts_at)) = take_due(&mut self.queued, frames, playing) {
+            lead = starts_at;
+            self.start(voice);
             let _ = event_tx.push(EngineEvent::AuditionStarted);
-        } else if playing {
-            if let Some(queued) = self.queued.as_mut() {
-                queued.frames_until_start -= frames as u64;
-            }
         }
         let Some(voice) = self.active.as_mut() else {
             self.player = None;
