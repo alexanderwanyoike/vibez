@@ -247,7 +247,7 @@ async fn the_playhead_follows_a_playing_midi_audition_and_wraps_its_loop() {
     let mut rig = Rig::new();
     let phrase = rig.phrase();
     rig.send(Message::ClickLocalBrowserEntry(phrase)).await;
-    let samples_per_beat = rig.app.state.transport.beats_to_samples(1.0) as u64;
+    let samples_per_beat = rig.app.state.transport.beats_to_samples(1.0);
     let browser = &mut rig.app.state.browser;
     browser.audition_playing = true;
 
