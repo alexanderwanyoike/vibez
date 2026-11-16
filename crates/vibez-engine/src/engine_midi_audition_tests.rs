@@ -408,3 +408,26 @@ fn a_midi_audition_fades_out_an_audio_one_without_reporting_a_stop() {
     assert!(left[BLOCK * 3..].iter().all(|sample| *sample == 0.0));
     assert!(!rig.saw(|event| *event == EngineEvent::AuditionStopped));
 }
+
+#[test]
+fn the_preview_voice_idles_until_an_audition_plays_through_it_and_after_it_falls_silent() {
+    let mut rig = Rig::new(true, true).with_voice();
+    rig.run(2);
+    rig.start(pattern(vec![note(60, 0.0, 0.01)], 0.02), None);
+    rig.run(4);
+    rig.start(pattern(vec![note(62, 0.0, 0.01)], 0.02), None);
+
+    rig.run(1);
+
+    // The voice renders only the two blocks the first audition plays.
+    let second = 2 * BLOCK as u64;
+    assert_eq!(
+        rig.voice_heard(),
+        [
+            (0, true, 60),
+            (at(0.01), false, 60),
+            (second, true, 62),
+            (second + at(0.01), false, 62),
+        ]
+    );
+}
