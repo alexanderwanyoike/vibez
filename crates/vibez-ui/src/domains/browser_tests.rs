@@ -1522,6 +1522,14 @@ fn the_audition_status_says_what_the_selection_and_audition_are_doing() {
     };
     let mut browser = BrowserState::default();
     assert_eq!(browser.audition_status(), AuditionStatus::Select);
+    browser.waveform_audio = Some(Arc::new(vibez_core::audio_buffer::DecodedAudio {
+        channels: vec![vec![0.0; 4]],
+        sample_rate: 44_100,
+    }));
+    assert_eq!(
+        browser.audition_status(),
+        AuditionStatus::Ready(AuditionMode::Warp)
+    );
 
     browser.select_source(midi);
     assert!(browser.selected_is_midi());
