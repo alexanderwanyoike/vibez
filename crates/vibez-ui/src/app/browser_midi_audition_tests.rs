@@ -314,3 +314,42 @@ async fn the_playhead_shows_only_on_the_strip_of_the_file_playing() {
     assert!(browser.audition_playing && browser.midi_preview.is_some());
     assert_eq!(browser.midi_audition_playhead(22_050.0), None);
 }
+
+#[tokio::test]
+async fn while_a_file_plays_the_footer_names_the_track_it_plays_on() {
+    let mut rig = Rig::new();
+    let phrase = rig.phrase();
+    rig.send(Message::ClickLocalBrowserEntry(phrase)).await;
+    rig.app.state.arrangement.selected_track = None;
+
+    let shown = rig
+        .app
+        .state
+        .browser
+        .midi_audition_player(super::midi_input::configured_target(&rig.app.state));
+
+    assert_eq!(shown, Some(rig.track));
+}
+
+#[tokio::test]
+async fn reading_the_playing_file_again_keeps_its_playhead() {
+    let mut rig = Rig::new();
+    rig.app.state.browser.audition_enabled = false;
+    let playing = rig.phrase();
+    rig.send(Message::PreviewLocalEntry(playing.clone())).await;
+    let elsewhere = rig.directory.path().join("elsewhere");
+    std::fs::create_dir(&elsewhere).unwrap();
+    rig.send(Message::ClickLocalBrowserEntry(MediaSourceRef::LocalFile {
+        path: drum_phrase(&elsewhere),
+    }))
+    .await;
+
+    rig.send(Message::ClickLocalBrowserEntry(playing)).await;
+
+    assert!(rig
+        .app
+        .state
+        .browser
+        .midi_audition_playhead(22_050.0)
+        .is_some());
+}

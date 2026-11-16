@@ -573,6 +573,12 @@ impl BrowserState {
             })
     }
 
+    /// The track that plays the shown MIDI file, given the MIDI target a new
+    /// audition would play on.
+    pub fn midi_audition_player(&self, target: Option<TrackId>) -> Option<TrackId> {
+        target
+    }
+
     /// Where the playhead sits in the MIDI strip, at `samples_per_beat`.
     pub fn midi_audition_playhead(&self, samples_per_beat: f64) -> Option<f32> {
         let pattern = self.audition_pattern.current()?;
