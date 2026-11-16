@@ -147,7 +147,8 @@ impl App {
                 "SELECT"
             })
             .size(9)
-            .color(th::text_dim()),
+            .color(th::text_dim())
+            .width(Length::Fixed(audition_status_width())),
             waveform
         ]
         .spacing(5)
@@ -252,4 +253,10 @@ impl App {
         .align_y(iced::Alignment::Center)
         .into()
     }
+}
+
+/// Wide enough for the longest status, so the waveform or strip beside it
+/// never moves when the status changes.
+fn audition_status_width() -> f32 {
+    crate::widgets::device_controls::text_width("UNAVAILABLE", 9.0, iced::Font::DEFAULT).ceil()
 }
