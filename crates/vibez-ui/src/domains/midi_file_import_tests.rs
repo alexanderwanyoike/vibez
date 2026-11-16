@@ -186,3 +186,25 @@ fn a_track_each_says_how_many_tracks_and_drum_racks_it_adds() {
     ]);
     assert_eq!(keys.track_each_summary(), "2 new MIDI tracks");
 }
+
+#[test]
+fn a_file_ending_mid_bar_lands_as_whole_bars() {
+    let mut file = drum_phrase();
+    // Sample-pack files often end their track on the last note-off.
+    file.file.length_beats = 15.885;
+
+    let clip = &file.plan(None, 0.0, MidiFileLayout::OneClip)[0].clip;
+
+    assert_eq!(clip.duration_beats, 16.0);
+    assert_eq!((clip.loop_start_beats, clip.loop_end_beats), (0.0, 16.0));
+}
+
+#[test]
+fn a_file_shorter_than_a_bar_lands_as_one_bar() {
+    let mut file = drum_phrase();
+    file.file.length_beats = 1.5;
+
+    let clip = &file.plan(None, 0.0, MidiFileLayout::OneClip)[0].clip;
+
+    assert_eq!(clip.duration_beats, 4.0);
+}
