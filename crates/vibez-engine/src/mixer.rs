@@ -188,11 +188,9 @@ pub struct EngineTrack {
     /// The Clip whose note started each pitch in `active_notes`, so an edit
     /// of one Clip can release its own voices and leave the others.
     note_owners: [Option<ClipId>; 128],
-    /// Pitches a live key is holding down. The key owns the voice until it
-    /// is released, so Clip notes neither restart nor release them.
+    /// Pitches a live key is holding down.
     live_held: u128,
-    /// Pitches a live key took over. They stay the key's after its release
-    /// until a Clip note-on for the pitch plays again.
+    /// Pitches a live key took over, until a Clip note-on reclaims them.
     live_owned: u128,
     /// Drum Rack pitches triggered by resident clips during this render block.
     /// Cosmetic feedback is deliberately lossy when the UI event ring is full.
@@ -465,8 +463,8 @@ impl EngineTrack {
         );
     }
 
-    /// A live key takes over its pitch until released, so any Clip voice
-    /// there is no longer the Clip's to release.
+    /// A live key takes over its pitch, so a Clip voice already there is no
+    /// longer the Clip's to release.
     pub(crate) fn hold_live_key(&mut self, pitch: u8) {
         if let Some(bit) = live_hold::pitch_bit(pitch) {
             self.live_held |= bit;
