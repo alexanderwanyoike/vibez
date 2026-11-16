@@ -40,6 +40,13 @@ impl Default for BrowserMidiStripState {
     }
 }
 
+impl BrowserMidiStripState {
+    /// Whether `strip` at theme `epoch` differs from what the cache holds.
+    fn redraws(&self, _strip: Option<&Arc<MidiStrip>>, _epoch: u64) -> bool {
+        false
+    }
+}
+
 impl canvas::Program<Message> for BrowserMidiStrip {
     type State = BrowserMidiStripState;
 
@@ -99,5 +106,32 @@ impl canvas::Program<Message> for BrowserMidiStrip {
         let mut geometry = vec![geometry];
         geometry.extend(playhead_geometry(renderer, bounds, playhead_x));
         geometry
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn strip() -> Arc<MidiStrip> {
+        Arc::new(MidiStrip {
+            notes: Vec::new(),
+            bar_lines: Vec::new(),
+            rows: crate::note_rows::NoteRows::of([60]),
+        })
+    }
+
+    #[test]
+    fn the_cache_redraws_for_another_strip_or_theme_and_keeps_the_one_it_drew() {
+        let state = BrowserMidiStripState::default();
+        let (first, second) = (strip(), strip());
+
+        assert!(state.redraws(Some(&first), 1));
+        assert!(!state.redraws(Some(&first), 1));
+        assert!(state.redraws(Some(&second), 1));
+        assert!(state.redraws(Some(&second), 2));
+        assert!(state.redraws(None, 2));
+        assert!(state.redraws(Some(&first), 2));
+        assert_eq!(Arc::strong_count(&first), 2);
     }
 }
