@@ -1516,21 +1516,35 @@ fn only_the_hovered_lane_marks_a_refusal_zone() {
 
 #[test]
 fn the_audition_status_says_what_the_selection_and_audition_are_doing() {
+    use crate::state::{AuditionMode, AuditionStatus};
     let midi = MediaSourceRef::LocalFile {
         path: "/samples/bass.mid".into(),
     };
     let mut browser = BrowserState::default();
-    assert_eq!(
-        browser.audition_status(),
-        crate::state::AuditionStatus::Select
-    );
+    assert_eq!(browser.audition_status(), AuditionStatus::Select);
 
     browser.select_source(midi);
-    browser.waveform_error = Some("unreadable".into());
     assert!(browser.selected_is_midi());
+    browser.waveform_error = Some("unreadable".into());
+    assert_eq!(browser.audition_status(), AuditionStatus::Unavailable);
     assert!(!browser.audition_status().keeps_its_width());
+
+    browser.audition_playing = true;
+    browser.audition_playback_mode = Some(AuditionMode::Raw);
+    browser.audition_mode = AuditionMode::Raw;
+    assert_eq!(browser.audition_status().label(), "RAW");
+    browser.audition_mode = AuditionMode::Warp;
+    assert_eq!(browser.audition_status(), AuditionStatus::Warping);
+    browser.audition_playback_mode = None;
+    assert_eq!(browser.audition_status().label(), "PLAYING");
 
     browser.audition_queued = true;
     assert_eq!(browser.audition_status().label(), "QUEUED");
+    browser.audition_loading = true;
+    assert_eq!(browser.audition_status(), AuditionStatus::Preparing);
+    browser.audition_playback_mode = Some(AuditionMode::Raw);
+    assert_eq!(browser.audition_status(), AuditionStatus::Warping);
+    browser.remote.preview_in_progress = true;
+    assert_eq!(browser.audition_status(), AuditionStatus::Fetching);
     assert!(browser.audition_status().keeps_its_width());
 }
