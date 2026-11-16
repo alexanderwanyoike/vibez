@@ -63,6 +63,8 @@ pub(crate) struct MidiAudition {
     player: Option<Player>,
     preview_voice: Option<Box<dyn Instrument>>,
     preview_notes: RoutedNotes<u64>,
+    /// The preview voice made sound last block, so its release may still ring.
+    preview_sounding: bool,
 }
 
 impl MidiAudition {
@@ -76,6 +78,7 @@ impl MidiAudition {
             player: None,
             preview_voice: None,
             preview_notes: RoutedNotes::default(),
+            preview_sounding: false,
         }
     }
 
@@ -226,16 +229,22 @@ impl MidiAudition {
         let Some(voice) = self.preview_voice.as_mut() else {
             return;
         };
+        if key.is_none() && !self.preview_sounding && self.preview_notes.notes().is_empty() {
+            return;
+        }
         let mut cursor = 0;
+        let mut sounding = false;
         for frame in 0..frames {
             self.preview_notes
                 .play_due(frame as u32, &mut cursor, voice.as_mut());
             let mut stereo = [0.0; 2];
             voice.render(&mut stereo, 2);
+            sounding |= stereo != [0.0; 2];
             for channel in 0..channels {
                 output[frame * channels + channel] += stereo[channel.min(1)] * gain;
             }
         }
+        self.preview_sounding = sounding;
     }
 }
 
