@@ -275,3 +275,42 @@ fn the_engine_gets_a_preview_voice_at_each_sample_rate() {
         ]
     ));
 }
+
+#[tokio::test]
+async fn an_unreadable_file_stops_the_audition_it_replaces() {
+    let mut rig = Rig::new();
+    let phrase = rig.phrase();
+    rig.send(Message::ClickLocalBrowserEntry(phrase)).await;
+    let path = rig.directory.path().join("broken.mid");
+    std::fs::write(&path, b"not midi").unwrap();
+    while rig.received.pop().is_ok() {}
+
+    rig.send(Message::ClickLocalBrowserEntry(MediaSourceRef::LocalFile {
+        path,
+    }))
+    .await;
+
+    let stopped = std::iter::from_fn(|| rig.received.pop().ok())
+        .any(|command| matches!(command, EngineCommand::StopAudition));
+    assert!(stopped);
+    assert!(rig.app.state.status_text.starts_with("Audition error"));
+}
+
+#[tokio::test]
+async fn the_playhead_shows_only_on_the_strip_of_the_file_playing() {
+    let mut rig = Rig::new();
+    rig.app.state.browser.audition_enabled = false;
+    let playing = rig.phrase();
+    rig.send(Message::PreviewLocalEntry(playing)).await;
+    let elsewhere = rig.directory.path().join("elsewhere");
+    std::fs::create_dir(&elsewhere).unwrap();
+    let other = MediaSourceRef::LocalFile {
+        path: drum_phrase(&elsewhere),
+    };
+
+    rig.send(Message::ClickLocalBrowserEntry(other)).await;
+
+    let browser = &rig.app.state.browser;
+    assert!(browser.audition_playing && browser.midi_preview.is_some());
+    assert_eq!(browser.midi_audition_playhead(22_050.0), None);
+}
