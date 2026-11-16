@@ -28,8 +28,10 @@ fn pattern(notes: Vec<MidiNote>, length_beats: f64) -> Arc<MidiAuditionPattern> 
     Arc::new(MidiAuditionPattern::new(notes, length_beats))
 }
 
-/// Sounds 1.0 on every channel while it holds a note, rendered frame by frame.
+/// Sounds `level` on every channel while it holds a note, rendered frame by
+/// frame.
 struct Tone {
+    level: f32,
     held: u32,
     heard: Heard,
     rendered: u64,
@@ -63,7 +65,7 @@ impl vibez_instruments::Instrument for Tone {
             .push((self.rendered, false, pitch));
     }
     fn render(&mut self, buffer: &mut [f32], channels: usize) {
-        let level = if self.held > 0 { 1.0 } else { 0.0 };
+        let level = if self.held > 0 { self.level } else { 0.0 };
         for sample in buffer.iter_mut() {
             *sample += level;
         }
@@ -110,9 +112,14 @@ impl Rig {
         }
     }
 
-    fn with_voice(mut self) -> Self {
+    fn with_voice(self) -> Self {
+        self.with_voice_at(1.0)
+    }
+
+    fn with_voice_at(mut self, level: f32) -> Self {
         self.commands
             .push(EngineCommand::SetAuditionVoice(Box::new(Tone {
+                level,
                 held: 0,
                 heard: Arc::clone(&self.voice_heard),
                 rendered: 0,
@@ -429,5 +436,20 @@ fn the_preview_voice_idles_until_an_audition_plays_through_it_and_after_it_falls
             (second, true, 62),
             (second + at(0.01), false, 62),
         ]
+    );
+}
+
+#[test]
+fn stopping_releases_a_note_the_preview_voice_holds_even_while_it_is_silent() {
+    let mut rig = Rig::new(true, true).with_voice_at(0.0);
+    rig.start(pattern(vec![note(60, 0.0, 2.0)], 4.0), None);
+    rig.run(1);
+    rig.commands.push(EngineCommand::StopAudition).unwrap();
+
+    rig.run(1);
+
+    assert_eq!(
+        rig.voice_heard(),
+        [(0, true, 60), (BLOCK as u64, false, 60)]
     );
 }
