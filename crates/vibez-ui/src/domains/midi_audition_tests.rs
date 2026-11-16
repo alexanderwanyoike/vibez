@@ -136,3 +136,11 @@ fn the_preview_voice_plays_when_the_selection_cannot() {
     assert_eq!(audition_target(Some(tracks[1].id), &tracks), None);
     assert_eq!(audition_target(None, &tracks), None);
 }
+
+#[test]
+fn the_footer_names_who_plays_the_audition() {
+    let tracks = vec![midi_track(true)];
+
+    assert_eq!(audition_player(Some(tracks[0].id), &tracks), "on Bass");
+    assert_eq!(audition_player(None, &tracks), "on Preview voice");
+}

@@ -92,6 +92,11 @@ pub fn audition_target(selected: Option<TrackId>, tracks: &[ProjectTrack]) -> Op
         .then_some(selected)
 }
 
+/// Who plays the audition, as the Audition footer names it.
+pub fn audition_player(_selected: Option<TrackId>, _tracks: &[ProjectTrack]) -> String {
+    String::new()
+}
+
 /// Where the playhead sits in the strip, `position` samples into the
 /// audition.
 pub fn playhead_fraction(
