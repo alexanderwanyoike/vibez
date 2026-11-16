@@ -93,8 +93,13 @@ pub fn audition_target(selected: Option<TrackId>, tracks: &[ProjectTrack]) -> Op
 }
 
 /// Who plays the audition, as the Audition footer names it.
-pub fn audition_player(_selected: Option<TrackId>, _tracks: &[ProjectTrack]) -> String {
-    String::new()
+pub fn audition_player(selected: Option<TrackId>, tracks: &[ProjectTrack]) -> String {
+    let track = audition_target(selected, tracks)
+        .and_then(|target| tracks.iter().find(|track| track.id == target));
+    match track {
+        Some(track) => format!("on {}", track.name),
+        None => "on Preview voice".into(),
+    }
 }
 
 /// Where the playhead sits in the strip, `position` samples into the
