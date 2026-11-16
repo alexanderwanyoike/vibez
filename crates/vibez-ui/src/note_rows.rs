@@ -1,4 +1,4 @@
-//! Where a small note thumbnail draws each pitch, centred on the notes' range with headroom, and how tall and strong each note is.
+//! The note layout small thumbnails share: where each pitch sits, how tall a note is drawn and how strongly it is shaded.
 
 /// Fewer pitches than this still spread over an octave, so a one-note
 /// rhythm does not fill the thumbnail.
