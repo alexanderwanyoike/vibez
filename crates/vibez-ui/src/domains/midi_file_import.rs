@@ -14,6 +14,11 @@ use crate::state::UiNoteClip;
 pub const MIDI_FILE_TARGETS: &str =
     "MIDI files go on a MIDI track, empty Arrange or a MIDI track's Clip slot";
 
+/// How far past a bar line a file may end and still end on it. A last
+/// note-off or End of Track often lands a tick or two late, which would
+/// otherwise add a silent bar.
+const BAR_LINE_SLACK_BEATS: f64 = 1.0 / 32.0;
+
 /// How a file with several playing tracks lands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MidiFileLayout {
@@ -127,10 +132,8 @@ impl MidiFileImport {
     /// does. Many files end their track on the last note-off, short of the
     /// bar, and would otherwise loop early.
     fn clip(&self, name: &str, notes: Vec<MidiNote>, position_beats: f64) -> UiNoteClip {
-        // The slack keeps a length a hair over a bar line, from float
-        // error, on that line.
         let length = MusicalTime(self.file.length_beats)
-            .whole_bars_holding(1e-6)
+            .whole_bars_holding(BAR_LINE_SLACK_BEATS)
             .0;
         UiNoteClip {
             id: ClipId::new(),
