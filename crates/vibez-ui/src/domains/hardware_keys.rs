@@ -1,29 +1,41 @@
 //! Keys on the hardware MIDI input play the configured MIDI target Track.
 
+use std::collections::HashMap;
+
 use vibez_audio_io::midi_input::MidiEvent;
 use vibez_core::id::TrackId;
 use vibez_engine::commands::EngineCommand;
 
 use super::EngineHandle;
 
-/// The keys of the open hardware MIDI input.
+/// The keys held down on the open hardware MIDI input, each with the Track
+/// it played, so selecting another Track cannot redirect its release.
 #[derive(Debug, Default)]
-pub struct HardwareKeys;
+pub struct HardwareKeys {
+    held: HashMap<u8, TrackId>,
+}
 
 impl HardwareKeys {
-    /// Plays `event` on `target`, the configured MIDI target Track now, and
-    /// drops it when there is none.
+    /// Plays a key-down on `target`, the configured MIDI target Track now,
+    /// and a key-up on the Track its key-down played. A key-down with no
+    /// target and a key-up with no key-down it played are dropped.
     pub fn play(
         &mut self,
         event: MidiEvent,
         target: Option<TrackId>,
         engine: &mut impl EngineHandle,
     ) {
-        let Some(track_id) = target else {
-            return;
-        };
         match event {
             MidiEvent::NoteOn { pitch, velocity } => {
+                let Some(track_id) = target else {
+                    return;
+                };
+                if let Some(previous) = self.held.insert(pitch, track_id) {
+                    engine.send(EngineCommand::ExternalNoteOff {
+                        track_id: previous,
+                        pitch,
+                    });
+                }
                 engine.send(EngineCommand::ExternalNoteOn {
                     track_id,
                     pitch,
@@ -31,7 +43,9 @@ impl HardwareKeys {
                 });
             }
             MidiEvent::NoteOff { pitch } => {
-                engine.send(EngineCommand::ExternalNoteOff { track_id, pitch });
+                if let Some(track_id) = self.held.remove(&pitch) {
+                    engine.send(EngineCommand::ExternalNoteOff { track_id, pitch });
+                }
             }
             MidiEvent::ControlChange { .. } => {
                 // CC mapping not wired yet.
