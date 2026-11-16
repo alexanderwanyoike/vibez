@@ -183,8 +183,10 @@ fn audition_playhead_tracks_the_active_buffer_and_hides_when_stopped() {
         channels: vec![vec![0.0; 1_000]],
         sample_rate: 44_100,
     });
+    let mut audition_audio = crate::state::EngineHeld::default();
+    audition_audio.hand(audio);
     let mut browser = BrowserState {
-        audition_audio: Some(audio),
+        audition_audio,
         audition_playing: true,
         audition_position_frames: 250,
         ..BrowserState::default()

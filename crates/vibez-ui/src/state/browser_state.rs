@@ -106,17 +106,9 @@ pub struct BrowserState {
     /// and WARP completions carry it so stale results never start
     /// playback after the user stopped or superseded the request.
     pub audition_generation: u64,
-    /// UI-retained clone of the audio last handed to the engine's
-    /// Audition Bus. The engine voice must never hold the final
-    /// reference: dropping it inside the RT callback would free on
-    /// the audio thread and violate the allocation-free invariant.
-    pub audition_audio: Option<Arc<DecodedAudio>>,
-    /// Ring of the most recently superseded audition buffers. The
-    /// Audition Bus holds at most four voices (one active + three
-    /// outgoing fades), so keeping the last four superseded Arcs
-    /// alive UI-side guarantees a re-trigger never leaves the engine
-    /// with the final reference either.
-    pub audition_audio_retired: [Option<Arc<DecodedAudio>>; 4],
+    /// The audio the Audition Bus plays, and the buffers its fading voices
+    /// may still hold.
+    pub audition_audio: super::EngineHeld<DecodedAudio, 4>,
     pub audition_mode: AuditionMode,
     pub scan_in_progress: bool,
     pub mode: SampleBrowserMode,
@@ -178,8 +170,7 @@ impl Default for BrowserState {
             audition_position_frames: 0,
             audition_playback_mode: None,
             audition_generation: 0,
-            audition_audio: None,
-            audition_audio_retired: [None, None, None, None],
+            audition_audio: super::EngineHeld::default(),
             audition_mode: AuditionMode::default(),
             scan_in_progress: false,
             mode: SampleBrowserMode::default(),
@@ -497,7 +488,7 @@ impl BrowserState {
     }
 
     pub fn audition_playhead_fraction(&self) -> Option<f32> {
-        let frames = self.audition_audio.as_ref()?.num_frames();
+        let frames = self.audition_audio.current()?.num_frames();
         (self.audition_playing && frames > 0)
             .then(|| (self.audition_position_frames as f64 / frames as f64).clamp(0.0, 1.0) as f32)
     }

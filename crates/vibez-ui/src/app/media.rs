@@ -269,21 +269,7 @@ impl App {
     ) {
         let warped = playback_mode == AuditionMode::Warp;
         let queued = self.state.transport.is_playing() && warped;
-        // Retain a UI-side clone (never cleared on stop) so the engine
-        // voice can never drop the final Arc inside the RT callback.
-        // A superseded buffer moves into the retired ring rather than
-        // dropping here, because up to three outgoing engine voices may
-        // still hold it while fading.
-        if let Some(prev) = self
-            .state
-            .browser
-            .audition_audio
-            .replace(Arc::clone(&audio))
-        {
-            let retired = &mut self.state.browser.audition_audio_retired;
-            retired.rotate_right(1);
-            retired[0] = Some(prev);
-        }
+        self.state.browser.audition_audio.hand(Arc::clone(&audio));
         self.send_command(EngineCommand::StartAudition {
             audio,
             start: if warped {

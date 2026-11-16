@@ -5,6 +5,7 @@ use std::sync::Arc;
 mod browser_results;
 mod browser_state;
 mod clip_drag;
+mod engine_held;
 mod project_tracks;
 mod same_channels;
 mod snapshot;
@@ -18,6 +19,7 @@ use crate::widgets::clip_editor_view::StoredClipView;
 pub use browser_results::LocalResults;
 pub use browser_state::*;
 pub use clip_drag::*;
+pub use engine_held::EngineHeld;
 pub use snapshot::*;
 pub use ui_types::*;
 
