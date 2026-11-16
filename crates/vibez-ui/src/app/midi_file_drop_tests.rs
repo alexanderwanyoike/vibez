@@ -61,7 +61,7 @@ fn write_midi(path: PathBuf, format: Format, tracks: Vec<Vec<TrackEvent<'static>
 }
 
 /// A one-bar type 0 drum phrase: kick on 1, snare on 2.
-fn drum_phrase(directory: &Path) -> PathBuf {
+pub(super) fn drum_phrase(directory: &Path) -> PathBuf {
     let mut events = Vec::new();
     events.extend(hit(0, 36));
     events.extend(hit(u32::from(PPQ) * 3 / 4, 38));

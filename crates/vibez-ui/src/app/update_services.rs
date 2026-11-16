@@ -352,6 +352,7 @@ impl App {
             Message::BrowserWaveformReady(source, Err(err)) => {
                 self.state.browser.fail_waveform_load(&source, err);
             }
+            Message::BrowserMidiPreviewReady { .. } => {}
             Message::BrowserAuditionReady {
                 source,
                 generation,

@@ -278,6 +278,7 @@ mod sample_retirement;
 
 mod desktop_drop;
 
+mod midi_audition;
 mod midi_file_drop;
 
 #[cfg(test)]
@@ -285,6 +286,9 @@ mod device_panel_drop_tests;
 
 #[cfg(test)]
 mod midi_file_drop_tests;
+
+#[cfg(test)]
+mod browser_midi_audition_tests;
 
 #[cfg(test)]
 mod desktop_drop_tests;

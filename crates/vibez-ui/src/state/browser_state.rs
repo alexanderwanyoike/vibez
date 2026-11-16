@@ -109,6 +109,10 @@ pub struct BrowserState {
     /// The audio the Audition Bus plays, and the buffers its fading voices
     /// may still hold.
     pub audition_audio: super::EngineHeld<DecodedAudio, 4>,
+    /// The selected MIDI file's notes, shown in place of a waveform.
+    pub midi_preview: Option<crate::domains::midi_audition::MidiPreview>,
+    /// The MIDI file the Audition Bus plays, and the ones it may still hold.
+    pub audition_pattern: super::EngineHeld<vibez_engine::midi_audition::MidiAuditionPattern, 4>,
     pub audition_mode: AuditionMode,
     pub scan_in_progress: bool,
     pub mode: SampleBrowserMode,
@@ -171,6 +175,8 @@ impl Default for BrowserState {
             audition_playback_mode: None,
             audition_generation: 0,
             audition_audio: super::EngineHeld::default(),
+            midi_preview: None,
+            audition_pattern: super::EngineHeld::default(),
             audition_mode: AuditionMode::default(),
             scan_in_progress: false,
             mode: SampleBrowserMode::default(),
@@ -491,6 +497,11 @@ impl BrowserState {
         let frames = self.audition_audio.current()?.num_frames();
         (self.audition_playing && frames > 0)
             .then(|| (self.audition_position_frames as f64 / frames as f64).clamp(0.0, 1.0) as f32)
+    }
+
+    /// Where the playhead sits in the MIDI strip, at `samples_per_beat`.
+    pub fn midi_audition_playhead(&self, _samples_per_beat: f64) -> Option<f32> {
+        None
     }
 
     pub fn import_input_for_source(&self, source: &MediaSourceRef) -> AuditionImportInput {
