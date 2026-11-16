@@ -353,3 +353,22 @@ async fn reading_the_playing_file_again_keeps_its_playhead() {
         .midi_audition_playhead(22_050.0)
         .is_some());
 }
+
+#[tokio::test]
+async fn while_a_file_waits_for_its_bar_the_footer_names_the_track_it_will_play_on() {
+    let mut rig = Rig::new();
+    let phrase = rig.phrase();
+    rig.send(Message::ClickLocalBrowserEntry(phrase)).await;
+    let browser = &mut rig.app.state.browser;
+    browser.audition_playing = false;
+    browser.audition_queued = true;
+    rig.app.state.arrangement.selected_track = None;
+
+    let shown = rig
+        .app
+        .state
+        .browser
+        .midi_audition_player(super::midi_input::configured_target(&rig.app.state));
+
+    assert_eq!(shown, Some(rig.track));
+}
