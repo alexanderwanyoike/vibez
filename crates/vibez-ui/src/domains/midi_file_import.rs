@@ -6,6 +6,7 @@ use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::MidiNote;
 use vibez_core::midi_file::MidiFile;
 use vibez_core::perform::GrooveGrid;
+use vibez_core::time::BEATS_PER_BAR;
 
 use crate::state::UiNoteClip;
 
@@ -122,9 +123,16 @@ impl MidiFileImport {
         }]
     }
 
-    /// A Clip looping over the whole file, as a new pattern does.
+    /// A Clip looping over the whole file in whole bars, as a new pattern
+    /// does. Many files end their track on the last note-off, short of the
+    /// bar, and would otherwise loop early.
     fn clip(&self, name: &str, notes: Vec<MidiNote>, position_beats: f64) -> UiNoteClip {
-        let length = self.file.length_beats;
+        // The epsilon keeps a length a hair over a bar line, from float
+        // error, on that line.
+        let length = ((self.file.length_beats - 1e-6) / BEATS_PER_BAR)
+            .ceil()
+            .max(1.0)
+            * BEATS_PER_BAR;
         UiNoteClip {
             id: ClipId::new(),
             name: name.to_string(),
