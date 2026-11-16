@@ -1513,3 +1513,24 @@ fn only_the_hovered_lane_marks_a_refusal_zone() {
     assert!(b.lane_drop_zone(hovered).is_some());
     assert_eq!(b.lane_drop_zone(TrackId::new()), None);
 }
+
+#[test]
+fn the_audition_status_says_what_the_selection_and_audition_are_doing() {
+    let midi = MediaSourceRef::LocalFile {
+        path: "/samples/bass.mid".into(),
+    };
+    let mut browser = BrowserState::default();
+    assert_eq!(
+        browser.audition_status(),
+        crate::state::AuditionStatus::Select
+    );
+
+    browser.select_source(midi);
+    browser.waveform_error = Some("unreadable".into());
+    assert!(browser.selected_is_midi());
+    assert!(!browser.audition_status().has_picture());
+
+    browser.audition_queued = true;
+    assert_eq!(browser.audition_status().label(), "QUEUED");
+    assert!(browser.audition_status().has_picture());
+}

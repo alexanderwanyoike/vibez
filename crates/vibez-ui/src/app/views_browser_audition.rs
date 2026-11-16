@@ -6,7 +6,6 @@ use iced::{Element, Length, Theme};
 
 use super::views_browser_style::*;
 use super::*;
-use crate::domains::browser::DragMedia;
 use crate::icons;
 use crate::message::Message;
 use crate::state::{AuditionMode, SampleBrowserMode};
@@ -19,8 +18,7 @@ impl App {
     pub(super) fn view_browser_audition_footer(&self) -> Element<'_, Message> {
         let selected_local = self.selected_sample_browser_entry();
         let selected_dropbox = self.selected_dropbox_entry();
-        let selected_midi = self.state.browser.mode == SampleBrowserMode::Local
-            && selected_local.is_some_and(|entry| DragMedia::of(&entry.source) == DragMedia::Midi);
+        let selected_midi = self.state.browser.selected_is_midi();
         let selected_label = match self.state.browser.mode {
             SampleBrowserMode::Local => selected_local
                 .map(|entry| entry.name.clone())
@@ -112,45 +110,16 @@ impl App {
             })
             .into();
 
-        let status = if self.state.browser.remote.preview_in_progress {
-            "FETCHING"
-        } else if self.state.browser.audition_loading
-            && self.state.browser.audition_playing
-            && self.state.browser.audition_playback_mode == Some(AuditionMode::Raw)
-        {
-            "WARPING"
-        } else if self.state.browser.audition_loading {
-            "PREPARING"
-        } else if self.state.browser.audition_queued {
-            "QUEUED"
-        } else if self.state.browser.audition_playing {
-            match self.state.browser.audition_playback_mode {
-                Some(AuditionMode::Raw)
-                    if self.state.browser.audition_mode == AuditionMode::Warp =>
-                {
-                    "WARPING"
-                }
-                Some(mode) => mode.label(),
-                None => "PLAYING",
-            }
-        } else if self.state.browser.waveform_error.is_some() {
-            "UNAVAILABLE"
-        } else if self.state.browser.waveform_audio.is_some()
-            || self.state.browser.midi_preview.is_some()
-        {
-            self.state.browser.audition_mode.label()
-        } else {
-            "SELECT"
-        };
-        let status_width = if status == "UNAVAILABLE" {
-            Length::Shrink
-        } else {
+        let status = self.state.browser.audition_status();
+        let status_width = if status.has_picture() {
             Length::Fixed(audition_status_width())
+        } else {
+            Length::Shrink
         };
         let controls = row![
             play,
             stop,
-            text(status)
+            text(status.label())
                 .size(9)
                 .color(th::text_dim())
                 .shaping(iced::widget::text::Shaping::Advanced)

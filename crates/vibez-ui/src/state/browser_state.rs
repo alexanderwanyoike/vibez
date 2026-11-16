@@ -23,6 +23,42 @@ pub enum BrowserAuditionPlan {
     Warp { source_bpm: f64 },
 }
 
+/// What the Audition footer says the Audition is doing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuditionStatus {
+    Fetching,
+    /// A Raw buffer plays while its Warp treatment is prepared.
+    Warping,
+    Preparing,
+    Queued,
+    Playing(Option<AuditionMode>),
+    /// The selected source could not be read, so there is no picture.
+    Unavailable,
+    /// A source is ready to audition in the selected treatment.
+    Ready(AuditionMode),
+    Select,
+}
+
+impl AuditionStatus {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Fetching => "FETCHING",
+            Self::Warping => "WARPING",
+            Self::Preparing => "PREPARING",
+            Self::Queued => "QUEUED",
+            Self::Playing(Some(mode)) | Self::Ready(mode) => mode.label(),
+            Self::Playing(None) => "PLAYING",
+            Self::Unavailable => "UNAVAILABLE",
+            Self::Select => "SELECT",
+        }
+    }
+
+    /// Whether a waveform or strip sits beside the status.
+    pub fn has_picture(self) -> bool {
+        self != Self::Unavailable
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BrowserSearchScope {
     #[default]
@@ -497,6 +533,44 @@ impl BrowserState {
         let frames = self.audition_audio.current()?.num_frames();
         (self.audition_playing && frames > 0)
             .then(|| (self.audition_position_frames as f64 / frames as f64).clamp(0.0, 1.0) as f32)
+    }
+
+    pub fn audition_status(&self) -> AuditionStatus {
+        if self.remote.preview_in_progress {
+            AuditionStatus::Fetching
+        } else if self.audition_loading
+            && self.audition_playing
+            && self.audition_playback_mode == Some(AuditionMode::Raw)
+        {
+            AuditionStatus::Warping
+        } else if self.audition_loading {
+            AuditionStatus::Preparing
+        } else if self.audition_queued {
+            AuditionStatus::Queued
+        } else if self.audition_playing {
+            match self.audition_playback_mode {
+                Some(AuditionMode::Raw) if self.audition_mode == AuditionMode::Warp => {
+                    AuditionStatus::Warping
+                }
+                mode => AuditionStatus::Playing(mode),
+            }
+        } else if self.waveform_error.is_some() {
+            AuditionStatus::Unavailable
+        } else if self.waveform_audio.is_some() || self.midi_preview.is_some() {
+            AuditionStatus::Ready(self.audition_mode)
+        } else {
+            AuditionStatus::Select
+        }
+    }
+
+    /// Whether the selection is a local MIDI file, shown as notes rather
+    /// than a waveform.
+    pub fn selected_is_midi(&self) -> bool {
+        self.mode == SampleBrowserMode::Local
+            && self.selected_source.as_ref().is_some_and(|source| {
+                crate::domains::browser::DragMedia::of(source)
+                    == crate::domains::browser::DragMedia::Midi
+            })
     }
 
     /// Where the playhead sits in the MIDI strip, at `samples_per_beat`.
