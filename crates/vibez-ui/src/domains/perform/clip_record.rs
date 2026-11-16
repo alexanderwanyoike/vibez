@@ -284,6 +284,13 @@ mod tests {
     }
 
     #[test]
+    fn free_recording_one_sample_past_a_bar_line_keeps_that_bar() {
+        // Eleven bars at 66 BPM is exactly 1,764,000 samples at 44.1 kHz.
+        let spb = 44_100.0 * 60.0 / 66.0;
+        assert_eq!(free_recording_beats(1_764_001, spb), 44.0);
+    }
+
+    #[test]
     fn audio_window_excludes_count_in_and_tail_and_replaces_each_loop_pass() {
         let frames: Vec<_> = (0..14).map(|n| [n as f32; 2]).collect();
         let take = recorded_audio_window(&frames, 100, 103, 6, Some(4)).unwrap();
