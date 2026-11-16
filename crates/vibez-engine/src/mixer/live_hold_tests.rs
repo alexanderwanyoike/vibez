@@ -86,3 +86,24 @@ fn overlapping_notes_of_one_pitch_play_every_event_without_a_live_key() {
         );
     }
 }
+
+#[test]
+fn a_new_instrument_lets_the_clip_play_a_pitch_a_held_key_took_over() {
+    for batch in [false, true] {
+        let log = NoteLog::default();
+        let mut track = track_playing(vec![note(1.0, 1.0)], &log, batch);
+        track.hold_live_key(PITCH);
+
+        track.replace_instrument(Box::new(NoteLogProbe {
+            log: Arc::clone(&log),
+            batch,
+        }));
+        render(&mut track, 0, 512);
+
+        assert_eq!(
+            heard(&log),
+            [(100, PITCH, true), (200, PITCH, false), (400, PITCH, false)],
+            "batch {batch}"
+        );
+    }
+}
