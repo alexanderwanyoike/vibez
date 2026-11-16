@@ -224,4 +224,15 @@ mod tests {
         let tm = TempoMap::new(130.0, 44_100);
         assert_eq!(tm.musical_to_sample(MusicalTime(1.0)).0, 20_354);
     }
+
+    #[test]
+    fn whole_bars_hold_a_length_with_its_slack_and_at_least_one_bar() {
+        let bars = |beats: f64, slack: f64| MusicalTime(beats).whole_bars_holding(slack).0;
+        assert_eq!(bars(16.0, 0.0), 16.0);
+        assert_eq!(bars(16.01, 0.0), 20.0);
+        assert_eq!(bars(16.01, 0.03), 16.0);
+        assert_eq!(bars(16.05, 0.03), 20.0);
+        assert_eq!(bars(0.0, 0.0), 4.0);
+        assert_eq!(bars(-2.0, 0.0), 4.0);
+    }
 }
