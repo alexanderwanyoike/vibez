@@ -724,6 +724,14 @@ transport plays, and moves to the bar Play starts on, like a warped audio
 audition. The preview voice renders only while it plays an audition or still
 rings, and a replaced voice is disposed off the audio thread.
 
+In the Browser, selecting a MIDI file reads it off the UI thread and previews
+the Clip a drop would land, so the producer sees and hears what landing gives.
+The Audition footer draws it as a piano-roll strip with bar lines, placing
+notes on the same note rows as Clip thumbnails. With Audition On it plays
+through the selected Track's instrument when that Track can play MIDI, and
+otherwise through the preview voice, which the UI builds for each hardware
+sample rate. Raw plays the file once at once; Warp loops it from the next bar.
+
 `EngineTrack` is the shared project channel strip: it owns the instrument,
 effects, sends, gain/pan, mute/solo, meters, and preallocated render scratch.
 Time-based content is a separate `PreparedPlaybackSource` behind an owned
