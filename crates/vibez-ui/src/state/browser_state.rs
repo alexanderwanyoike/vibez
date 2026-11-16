@@ -588,15 +588,18 @@ impl BrowserState {
     /// audition would play on.
     pub fn midi_audition_player(&self, target: Option<TrackId>) -> Option<TrackId> {
         match &self.midi_audition {
-            Some(started) if self.shows_playing_midi() => started.target,
+            Some(started)
+                if (self.audition_playing || self.audition_queued) && self.shows_started_midi() =>
+            {
+                started.target
+            }
             _ => target,
         }
     }
 
-    /// Whether the MIDI file the Audition Bus plays is the one shown.
-    fn shows_playing_midi(&self) -> bool {
-        self.audition_playing
-            && self.audition_pattern.current().is_some()
+    /// Whether the MIDI file last handed to the Audition Bus is the one shown.
+    fn shows_started_midi(&self) -> bool {
+        self.audition_pattern.current().is_some()
             && self.midi_preview.as_ref().is_some_and(|preview| {
                 self.midi_audition
                     .as_ref()
@@ -607,7 +610,7 @@ impl BrowserState {
     /// Where the playhead sits in the MIDI strip, at `samples_per_beat`.
     pub fn midi_audition_playhead(&self, samples_per_beat: f64) -> Option<f32> {
         let pattern = self.audition_pattern.current()?;
-        if !self.shows_playing_midi() {
+        if !self.audition_playing || !self.shows_started_midi() {
             return None;
         }
         crate::domains::midi_audition::playhead_fraction(
