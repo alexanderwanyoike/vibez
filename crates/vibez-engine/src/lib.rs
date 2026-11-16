@@ -10,6 +10,7 @@ pub mod engine;
 mod engine_audition;
 mod engine_audition_queue;
 mod engine_midi_audition;
+mod engine_preview_voice;
 pub mod events;
 pub mod metering;
 pub mod midi_audition;
