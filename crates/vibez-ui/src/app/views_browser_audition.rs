@@ -113,43 +113,48 @@ impl App {
             })
             .into();
 
+        let status = if self.state.browser.remote.preview_in_progress {
+            "FETCHING"
+        } else if self.state.browser.audition_loading
+            && self.state.browser.audition_playing
+            && self.state.browser.audition_playback_mode == Some(AuditionMode::Raw)
+        {
+            "WARPING"
+        } else if self.state.browser.audition_loading {
+            "PREPARING"
+        } else if self.state.browser.audition_queued {
+            "QUEUED"
+        } else if self.state.browser.audition_playing {
+            match self.state.browser.audition_playback_mode {
+                Some(AuditionMode::Raw)
+                    if self.state.browser.audition_mode == AuditionMode::Warp =>
+                {
+                    "WARPING"
+                }
+                Some(mode) => mode.label(),
+                None => "PLAYING",
+            }
+        } else if self.state.browser.waveform_error.is_some() {
+            "UNAVAILABLE"
+        } else if self.state.browser.waveform_audio.is_some()
+            || self.state.browser.midi_preview.is_some()
+        {
+            self.state.browser.audition_mode.label()
+        } else {
+            "SELECT"
+        };
+        let status_width = if status == "UNAVAILABLE" {
+            Length::Shrink
+        } else {
+            Length::Fixed(audition_status_width())
+        };
         let controls = row![
             play,
             stop,
-            text(if self.state.browser.remote.preview_in_progress {
-                "FETCHING"
-            } else if self.state.browser.audition_loading
-                && self.state.browser.audition_playing
-                && self.state.browser.audition_playback_mode == Some(AuditionMode::Raw)
-            {
-                "WARPING"
-            } else if self.state.browser.audition_loading {
-                "PREPARING"
-            } else if self.state.browser.audition_queued {
-                "QUEUED"
-            } else if self.state.browser.audition_playing {
-                match self.state.browser.audition_playback_mode {
-                    Some(AuditionMode::Raw)
-                        if self.state.browser.audition_mode == AuditionMode::Warp =>
-                    {
-                        "WARPING"
-                    }
-                    Some(mode) => mode.label(),
-                    None => "PLAYING",
-                }
-            } else if self.state.browser.waveform_error.is_some() {
-                "UNAVAILABLE"
-            } else if self.state.browser.waveform_audio.is_some()
-                || self.state.browser.midi_preview.is_some()
-            {
-                self.state.browser.audition_mode.label()
-            } else {
-                "SELECT"
-            })
-            .size(9)
-            .color(th::text_dim())
-            .width(Length::Fixed(audition_status_width()))
-            .wrapping(iced::widget::text::Wrapping::None),
+            text(status)
+                .size(9)
+                .color(th::text_dim())
+                .width(status_width),
             waveform
         ]
         .spacing(5)
