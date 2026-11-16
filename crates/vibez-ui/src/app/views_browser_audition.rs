@@ -154,6 +154,7 @@ impl App {
             text(status)
                 .size(9)
                 .color(th::text_dim())
+                .shaping(iced::widget::text::Shaping::Advanced)
                 .width(status_width),
             waveform
         ]
@@ -263,7 +264,7 @@ impl App {
 
 /// Wide enough for the longest status shown beside a waveform or strip, so
 /// the picture never moves when the status changes. UNAVAILABLE is longer,
-/// but it has no picture to move.
+/// but it has no picture to move. Measured with the status's own shaping.
 fn audition_status_width() -> f32 {
     crate::widgets::device_controls::text_width("PREPARING", 9.0, iced::Font::DEFAULT).ceil()
 }
