@@ -1249,3 +1249,38 @@ fn a_row_launch_lands_play_clips_on_the_boundary_and_at_end_clips_at_their_end()
     assert_samples(&output[1..29], &[0.25; 28]);
     assert_samples(&output[29..], &[0.75]);
 }
+#[test]
+fn an_at_end_launch_follows_a_loop_shortened_while_it_waits() {
+    let (mut engine, mut commands, mut events, a, _b) = setup();
+    // Four samples a beat: an 8-bar loop playing at beat 10.
+    let playing = clip(a, 1, &[0.25; 128], true);
+    let id = playing.clip_id;
+    launch(&mut commands, vec![playing], MusicalBoundary::Immediate);
+    engine.process(&mut [0.0; 40], 1);
+    launch(
+        &mut commands,
+        vec![at_end(clip(a, 2, &[0.5; 128], true))],
+        MusicalBoundary::OneBar,
+    );
+    engine.process(&mut [0.0; 1], 1);
+    let mut shortened = clip(a, 3, &[0.25; 96], true);
+    shortened.clip_id = id;
+    commands
+        .push(EngineCommand::RefreshClip(shortened))
+        .unwrap();
+    let mut output = [0.0; 63];
+    engine.process(&mut output, 1);
+    assert_samples(&output[..55], &[0.25; 55]);
+    assert_samples(&output[55..], &[0.5; 8]);
+    assert!(
+        std::iter::from_fn(|| events.pop().ok()).any(|event| matches!(
+            event,
+            EngineEvent::ClipTransitioned {
+                request_id: 2,
+                effective_at_samples: 96,
+                ..
+            }
+        )),
+        "the queued clip lands on the end of the shortened pass"
+    );
+}
