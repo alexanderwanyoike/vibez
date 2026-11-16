@@ -21,6 +21,7 @@ mod routed_notes;
 pub use effect_slot::EffectSlot;
 pub(crate) use effect_slot::MeterSide;
 use groove::collect_timed_note_events;
+pub(crate) use groove::frame_for_beat;
 pub use pan::{any_solo, balance_pan, equal_power_pan};
 use render_context::InstrumentRenderBlock;
 pub(crate) use render_context::InstrumentRenderContext;
