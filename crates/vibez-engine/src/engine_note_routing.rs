@@ -1,4 +1,4 @@
-//! Notes routed into a track from outside its clips: MIDI From, where a receiving track takes the notes its source track's instrument played this block, and the Browser's MIDI audition.
+//! Notes routed into a track from outside its clips, by MIDI From (a receiver takes what its source track's instrument played this block) or by the Browser's MIDI audition.
 
 use super::*;
 use crate::routing::ChannelIndex;
