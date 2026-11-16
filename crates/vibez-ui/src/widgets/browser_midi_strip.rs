@@ -1,6 +1,6 @@
 //! The selected MIDI file's notes as a compact piano-roll strip in the Browser Audition footer.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 
 use iced::mouse;
@@ -20,30 +20,43 @@ const VERTICAL_INSET: f32 = 2.0;
 
 pub struct BrowserMidiStrip {
     pub strip: Option<Arc<MidiStrip>>,
-    /// Changes whenever a different file's strip is shown.
-    pub identity: u64,
     pub playhead_fraction: Option<f32>,
 }
 
 pub struct BrowserMidiStripState {
     cache: canvas::Cache,
-    /// (strip identity, theme epoch): a palette swap repaints the strip too.
-    fingerprint: Cell<(u64, u64)>,
+    /// The strip the cache holds, kept alive so a newer strip can never
+    /// reuse its address and pass for it.
+    drawn: RefCell<Option<Arc<MidiStrip>>>,
+    /// A palette swap repaints the strip too.
+    epoch: Cell<u64>,
 }
 
 impl Default for BrowserMidiStripState {
     fn default() -> Self {
         Self {
             cache: canvas::Cache::new(),
-            fingerprint: Cell::new((u64::MAX, u64::MAX)),
+            drawn: RefCell::new(None),
+            epoch: Cell::new(u64::MAX),
         }
     }
 }
 
 impl BrowserMidiStripState {
     /// Whether `strip` at theme `epoch` differs from what the cache holds.
-    fn redraws(&self, _strip: Option<&Arc<MidiStrip>>, _epoch: u64) -> bool {
-        false
+    fn redraws(&self, strip: Option<&Arc<MidiStrip>>, epoch: u64) -> bool {
+        let mut drawn = self.drawn.borrow_mut();
+        let same = match (drawn.as_ref(), strip) {
+            (Some(drawn), Some(strip)) => Arc::ptr_eq(drawn, strip),
+            (None, None) => true,
+            _ => false,
+        };
+        if same && self.epoch.get() == epoch {
+            return false;
+        }
+        *drawn = strip.cloned();
+        self.epoch.set(epoch);
+        true
     }
 }
 
@@ -58,10 +71,8 @@ impl canvas::Program<Message> for BrowserMidiStrip {
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
-        let fingerprint = (self.identity, theme::epoch());
-        if state.fingerprint.get() != fingerprint {
+        if state.redraws(self.strip.as_ref(), theme::epoch()) {
             state.cache.clear();
-            state.fingerprint.set(fingerprint);
         }
 
         let geometry = state.cache.draw(renderer, bounds.size(), |frame| {

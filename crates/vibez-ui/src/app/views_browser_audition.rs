@@ -82,7 +82,6 @@ impl App {
             let preview = self.state.browser.midi_preview.as_ref();
             canvas(crate::widgets::browser_midi_strip::BrowserMidiStrip {
                 strip: preview.map(|preview| Arc::clone(&preview.strip)),
-                identity: preview.map_or(0, |preview| Arc::as_ptr(&preview.strip) as u64),
                 playhead_fraction: self
                     .state
                     .browser
