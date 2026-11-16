@@ -269,6 +269,12 @@ impl Rig {
         }
     }
 
+    fn blocks(&mut self, count: usize) {
+        for _ in 0..count {
+            self.block();
+        }
+    }
+
     fn run_until(&mut self, mut done: impl FnMut(&Self) -> bool) {
         for _ in 0..10_000 {
             if done(self) {
@@ -309,12 +315,27 @@ impl Rig {
     }
 }
 
-fn assert_one_sustained_note(rig: &Rig, down: u64, up: u64) {
-    assert_eq!(
-        rig.heard(),
-        vec![(down, PITCH, true), (up, PITCH, false)],
-        "the held key must sound once from {down} until its release at {up}"
-    );
+/// Arms a take of `length`, presses with `press`, holds with `hold`, then
+/// releases, on both render paths. The key must sound once from press to
+/// release.
+fn assert_held_key_sustains(
+    length: Option<u64>,
+    press: impl Fn(&mut Rig) -> u64,
+    hold: impl Fn(&mut Rig),
+) {
+    for batch in [false, true] {
+        let mut rig = Rig::new(batch);
+        rig.arm(length);
+        let down = press(&mut rig);
+        hold(&mut rig);
+        let up = rig.key(false);
+        rig.blocks(40);
+        assert_eq!(
+            rig.heard(),
+            vec![(down, PITCH, true), (up, PITCH, false)],
+            "the held key must sound once from {down} until its release at {up}"
+        );
+    }
 }
 
 /// Press inside a sixteenth so it rounds forward by `ahead` samples.
@@ -343,108 +364,72 @@ fn press_rounding_backward(rig: &mut Rig) -> u64 {
 
 #[test]
 fn free_length_take_sustains_a_held_note_that_quantizes_forward() {
-    for batch in [false, true] {
-        let mut rig = Rig::new(batch);
-        rig.arm(None);
-        let down = press_rounding_forward(&mut rig, 1_400);
-        for _ in 0..20 {
-            rig.block();
-        }
-        let up = rig.key(false);
-        for _ in 0..40 {
-            rig.block();
-        }
-        assert_one_sustained_note(&rig, down, up);
-    }
+    assert_held_key_sustains(
+        None,
+        |rig| press_rounding_forward(rig, 1_400),
+        |rig| rig.blocks(20),
+    );
 }
 
 #[test]
 fn free_length_take_sustains_a_held_note_across_a_bar_line() {
-    for batch in [false, true] {
-        let mut rig = Rig::new(batch);
-        rig.arm(None);
+    assert_held_key_sustains(
+        None,
         // Just after a sixteenth, so quantizing moves it back onto it.
-        let down = press_rounding_backward(&mut rig);
+        press_rounding_backward,
         // Hold across the first bar line (start + 96000).
-        rig.run_until(|rig| rig.engine.performance_position > rig.start.unwrap() + 96_000 + 4_096);
-        let up = rig.key(false);
-        for _ in 0..40 {
-            rig.block();
-        }
-        assert_one_sustained_note(&rig, down, up);
-    }
+        |rig| {
+            rig.run_until(|rig| {
+                rig.engine.performance_position > rig.start.unwrap() + 96_000 + 4_096
+            })
+        },
+    );
 }
 
 #[test]
 fn fixed_length_overdub_sustains_a_held_note_across_the_loop_wrap() {
-    for batch in [false, true] {
-        let mut rig = Rig::new(batch);
-        rig.arm(Some(96_000));
-        let down = press_rounding_backward(&mut rig);
+    assert_held_key_sustains(
+        Some(96_000),
+        press_rounding_backward,
         // Hold across the wrap and well into the second pass, past where the
         // first pass pressed the key.
-        rig.run_until(|rig| rig.engine.performance_position > rig.start.unwrap() + 96_000 + 30_000);
-        let up = rig.key(false);
-        for _ in 0..40 {
-            rig.block();
-        }
-        assert_one_sustained_note(&rig, down, up);
-    }
+        |rig| {
+            rig.run_until(|rig| {
+                rig.engine.performance_position > rig.start.unwrap() + 96_000 + 30_000
+            })
+        },
+    );
 }
 
 /// Many refreshes alone do not release the live voice.
 #[test]
 fn control_refreshes_within_a_bar_keep_a_note_that_quantizes_back() {
-    for batch in [false, true] {
-        let mut rig = Rig::new(batch);
-        rig.arm(None);
-        let down = press_rounding_backward(&mut rig);
-        for _ in 0..40 {
-            rig.block();
-        }
-        let up = rig.key(false);
-        for _ in 0..40 {
-            rig.block();
-        }
-        assert_one_sustained_note(&rig, down, up);
-    }
+    assert_held_key_sustains(None, press_rounding_backward, |rig| rig.blocks(40));
 }
 
 /// A key held through count-in and the record start boundary sustains.
 #[test]
 fn control_a_note_held_through_count_in_and_record_start_sustains() {
-    for batch in [false, true] {
-        let mut rig = Rig::new(batch);
-        rig.arm(None);
-        for _ in 0..100 {
-            rig.block();
-        }
-        let down = rig.key(true);
-        rig.run_until(|rig| {
-            rig.start
-                .is_some_and(|start| rig.engine.performance_position > start + 20_000)
-        });
-        let up = rig.key(false);
-        for _ in 0..40 {
-            rig.block();
-        }
-        assert_one_sustained_note(&rig, down, up);
-    }
+    assert_held_key_sustains(
+        None,
+        |rig| {
+            rig.blocks(100);
+            rig.key(true)
+        },
+        |rig| {
+            rig.run_until(|rig| {
+                rig.start
+                    .is_some_and(|start| rig.engine.performance_position > start + 20_000)
+            })
+        },
+    );
 }
 
 #[test]
 fn free_length_take_sustains_a_held_note_that_quantizes_far_forward() {
-    for batch in [false, true] {
-        let mut rig = Rig::new(batch);
-        rig.arm(None);
-        let down = press_rounding_forward(&mut rig, 2_990);
-        for _ in 0..20 {
-            rig.block();
-        }
-        let up = rig.key(false);
-        for _ in 0..40 {
-            rig.block();
-        }
-        assert_one_sustained_note(&rig, down, up);
-    }
+    assert_held_key_sustains(
+        None,
+        |rig| press_rounding_forward(rig, 2_990),
+        |rig| rig.blocks(20),
+    );
 }
