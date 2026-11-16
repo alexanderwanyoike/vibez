@@ -13,6 +13,7 @@ use crate::state::{AuditionMode, SampleBrowserMode};
 use crate::theme as th;
 use crate::widgets::control_style;
 use crate::widgets::device_chrome::tiny_button;
+use crate::widgets::fitted_label::FittedLabel;
 
 impl App {
     pub(super) fn view_browser_audition_footer(&self) -> Element<'_, Message> {
@@ -21,15 +22,6 @@ impl App {
         let selected_midi = self.state.browser.mode == SampleBrowserMode::Local
             && selected_local.is_some_and(|entry| DragMedia::of(&entry.source) == DragMedia::Midi);
         let selected_label = match self.state.browser.mode {
-            SampleBrowserMode::Local if selected_midi => selected_local
-                .map(|entry| {
-                    let player = crate::domains::midi_audition::audition_player(
-                        self.state.arrangement.selected_track,
-                        &self.state.project_tracks.tracks,
-                    );
-                    format!("{} · {player}", entry.name)
-                })
-                .unwrap_or_default(),
             SampleBrowserMode::Local => selected_local
                 .map(|entry| entry.name.clone())
                 .unwrap_or_else(|| "No source selected".into()),
@@ -206,12 +198,7 @@ impl App {
                 follow_toggle,
                 raw,
                 warp,
-                text(selected_label)
-                    .size(10)
-                    .color(th::text_dim())
-                    .width(Length::Fill)
-                    .align_x(iced::alignment::Horizontal::Right)
-                    .wrapping(iced::widget::text::Wrapping::None)
+                self.view_audition_source_label(selected_label, selected_midi)
             ]
             .spacing(5)
             .align_y(iced::Alignment::Center),
@@ -234,6 +221,35 @@ impl App {
             left: 10.0,
         })
         .width(Length::Fill)
+        .into()
+    }
+
+    /// The selected source's name; a MIDI file's is cut to fit beside who
+    /// will play it, so the header stays one line.
+    fn view_audition_source_label(&self, name: String, midi: bool) -> Element<'_, Message> {
+        if !midi {
+            return text(name)
+                .size(10)
+                .color(th::text_dim())
+                .width(Length::Fill)
+                .align_x(iced::alignment::Horizontal::Right)
+                .wrapping(iced::widget::text::Wrapping::None)
+                .into();
+        }
+        let player = crate::domains::midi_audition::audition_player(
+            self.state.arrangement.selected_track,
+            &self.state.project_tracks.tracks,
+        );
+        row![
+            FittedLabel::name(name, 10.0, th::text_dim()).view(14.0),
+            text(player)
+                .size(10)
+                .color(th::text_muted())
+                .wrapping(iced::widget::text::Wrapping::None)
+        ]
+        .spacing(6)
+        .width(Length::Fill)
+        .align_y(iced::Alignment::Center)
         .into()
     }
 }
