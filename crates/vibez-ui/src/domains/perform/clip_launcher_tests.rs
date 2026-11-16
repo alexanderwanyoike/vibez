@@ -737,3 +737,43 @@ fn a_stop_lands_where_the_playing_clip_would_launch() {
         "the clip's current options win over the playing snapshot"
     );
 }
+
+/// An 11-bar clip whose loop covers its first 8 bars, as left by shortening a
+/// recorded take's loop in the piano roll.
+fn eleven_bar_clip_with_an_eight_bar_loop(start_marker_beats: f64) -> LauncherClip {
+    let track = TrackId::new();
+    let mut clip =
+        super::super::clip_record::empty_midi_clip(ClipId::new(), track, 0, "Take".into(), 44.0);
+    let note_clip = &mut Arc::make_mut(&mut clip.timeline).ensure(track).note_clips[0];
+    note_clip.loop_end_beats = 32.0;
+    note_clip.start_marker_beats = start_marker_beats;
+    clip
+}
+
+#[test]
+fn a_launched_loop_repeats_on_its_loop_region_not_the_clip_end() {
+    let clip = eleven_bar_clip_with_an_eight_bar_loop(0.0);
+
+    assert_eq!(clip.length_and_loop(4.0), (128, true));
+    assert_eq!(clip.prepare(1, 4.0).length_samples, 128);
+}
+
+#[test]
+fn a_launched_loop_started_inside_its_region_still_repeats_on_the_region() {
+    let clip = eleven_bar_clip_with_an_eight_bar_loop(4.0);
+
+    assert_eq!(clip.length_and_loop(4.0), (128, true));
+}
+
+#[test]
+fn a_launched_audio_loop_repeats_on_its_loop_region_not_the_clip_end() {
+    let mut clip = eleven_bar_clip_with_an_eight_bar_loop(0.0);
+    let content = Arc::make_mut(&mut clip.timeline).ensure(clip.track_id);
+    content.note_clips.clear();
+    let mut audio = crate::state::UiClip::test_clip(0, 176);
+    audio.loop_enabled = true;
+    audio.loop_end = 128;
+    content.clips.push(audio);
+
+    assert_eq!(clip.length_and_loop(4.0), (128, true));
+}

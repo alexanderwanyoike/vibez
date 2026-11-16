@@ -736,9 +736,13 @@ impl LauncherClip {
 
     pub fn length_and_loop(&self, samples_per_beat: f64) -> (u64, bool) {
         match self.part() {
-            Some(SlotPart::Audio(clip)) => (clip.duration.max(1), clip.loop_enabled),
+            Some(SlotPart::Audio(clip)) => {
+                (clip.timeline().launch_period().max(1), clip.loop_enabled)
+            }
             Some(SlotPart::Midi(clip)) => (
-                (clip.duration_beats * samples_per_beat).round().max(1.0) as u64,
+                (clip.timeline().launch_period() * samples_per_beat)
+                    .round()
+                    .max(1.0) as u64,
                 clip.loop_enabled,
             ),
             None => (1, true),
