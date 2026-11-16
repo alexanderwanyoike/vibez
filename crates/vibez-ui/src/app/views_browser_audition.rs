@@ -6,6 +6,7 @@ use iced::{Element, Length, Theme};
 
 use super::views_browser_style::*;
 use super::*;
+use crate::domains::browser::DragMedia;
 use crate::icons;
 use crate::message::Message;
 use crate::state::{AuditionMode, SampleBrowserMode};
@@ -17,7 +18,18 @@ impl App {
     pub(super) fn view_browser_audition_footer(&self) -> Element<'_, Message> {
         let selected_local = self.selected_sample_browser_entry();
         let selected_dropbox = self.selected_dropbox_entry();
+        let selected_midi = self.state.browser.mode == SampleBrowserMode::Local
+            && selected_local.is_some_and(|entry| DragMedia::of(&entry.source) == DragMedia::Midi);
         let selected_label = match self.state.browser.mode {
+            SampleBrowserMode::Local if selected_midi => selected_local
+                .map(|entry| {
+                    let player = crate::domains::midi_audition::audition_player(
+                        self.state.arrangement.selected_track,
+                        &self.state.project_tracks.tracks,
+                    );
+                    format!("{} · {player}", entry.name)
+                })
+                .unwrap_or_default(),
             SampleBrowserMode::Local => selected_local
                 .map(|entry| entry.name.clone())
                 .unwrap_or_else(|| "No source selected".into()),
@@ -74,25 +86,40 @@ impl App {
             Message::SetAuditionMode(AuditionMode::Warp),
         );
 
-        let waveform: Element<'_, Message> = container(
+        let picture: Element<'_, Message> = if selected_midi {
+            let preview = self.state.browser.midi_preview.as_ref();
+            canvas(crate::widgets::browser_midi_strip::BrowserMidiStrip {
+                strip: preview.map(crate::domains::midi_audition::MidiPreview::strip),
+                identity: preview.map_or(0, |preview| Arc::as_ptr(&preview.pattern) as u64),
+                playhead_fraction: self
+                    .state
+                    .browser
+                    .midi_audition_playhead(self.state.transport.samples_per_beat()),
+            })
+            .width(Length::Fill)
+            .height(Length::Fixed(26.0))
+            .into()
+        } else {
             canvas(crate::widgets::browser_waveform::BrowserWaveform {
                 audio: self.state.browser.waveform_audio.clone(),
                 playhead_fraction: self.state.browser.audition_playhead_fraction(),
             })
             .width(Length::Fill)
-            .height(Length::Fixed(26.0)),
-        )
-        .width(Length::Fill)
-        .padding([0, 4])
-        .style(|_theme: &Theme| container::Style {
-            background: Some(th::display_bg().into()),
-            border: iced::Border {
-                radius: 6.0.into(),
+            .height(Length::Fixed(26.0))
+            .into()
+        };
+        let waveform: Element<'_, Message> = container(picture)
+            .width(Length::Fill)
+            .padding([0, 4])
+            .style(|_theme: &Theme| container::Style {
+                background: Some(th::display_bg().into()),
+                border: iced::Border {
+                    radius: 6.0.into(),
+                    ..Default::default()
+                },
                 ..Default::default()
-            },
-            ..Default::default()
-        })
-        .into();
+            })
+            .into();
 
         let controls = row![
             play,
@@ -120,7 +147,9 @@ impl App {
                 }
             } else if self.state.browser.waveform_error.is_some() {
                 "UNAVAILABLE"
-            } else if self.state.browser.waveform_audio.is_some() {
+            } else if self.state.browser.waveform_audio.is_some()
+                || self.state.browser.midi_preview.is_some()
+            {
                 self.state.browser.audition_mode.label()
             } else {
                 "SELECT"
