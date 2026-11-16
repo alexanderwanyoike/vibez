@@ -75,6 +75,7 @@ impl AudioEngine {
             if let Some(instrument) = track.instrument.as_mut() {
                 instrument.note_on(pitch, velocity);
             }
+            track.hold_live_key(pitch);
         }
         self.present_live_input(track_id, BlockNote::on(0, pitch, velocity), allowance);
     }
@@ -89,6 +90,7 @@ impl AudioEngine {
             if let Some(instrument) = track.instrument.as_mut() {
                 instrument.note_off(pitch);
             }
+            track.release_live_key(pitch);
         }
         self.present_live_input(track_id, BlockNote::off(0, pitch), allowance);
     }

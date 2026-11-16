@@ -13,6 +13,7 @@ mod clip_launch;
 mod clip_loop_tests;
 mod effect_slot;
 mod groove;
+mod live_hold;
 mod note_repeat;
 mod pan;
 mod pitch_mask;
@@ -185,6 +186,9 @@ pub struct EngineTrack {
     /// The Clip whose note started each pitch in `active_notes`, so an edit
     /// of one Clip can release its own voices and leave the others.
     note_owners: [Option<ClipId>; 128],
+    /// Pitches a live key is holding down. The key owns the voice until it
+    /// is released, so Clip notes neither restart nor release them.
+    live_held: u128,
     /// Drum Rack pitches triggered by resident clips during this render block.
     /// Cosmetic feedback is deliberately lossy when the UI event ring is full.
     pending_note_activity: u128,
@@ -448,6 +452,30 @@ impl EngineTrack {
             &mut self.timed_note_ons,
             &mut self.timed_note_offs,
         );
+        live_hold::yield_to_live_keys(
+            &mut self.timed_note_ons,
+            &mut self.timed_note_offs,
+            self.active_notes,
+            self.live_held,
+        );
+    }
+
+    /// A live key takes over its pitch until released, so any Clip voice
+    /// there is no longer the Clip's to release.
+    pub(crate) fn hold_live_key(&mut self, pitch: u8) {
+        if let Some(bit) = 1u128.checked_shl(u32::from(pitch)) {
+            self.live_held |= bit;
+            self.active_notes &= !bit;
+            if let Some(owner) = self.note_owners.get_mut(usize::from(pitch)) {
+                *owner = None;
+            }
+        }
+    }
+
+    pub(crate) fn release_live_key(&mut self, pitch: u8) {
+        if let Some(bit) = 1u128.checked_shl(u32::from(pitch)) {
+            self.live_held &= !bit;
+        }
     }
 
     /// A track that skips rendering this block must not pass on last block's notes.
@@ -475,11 +503,13 @@ impl EngineTrack {
         instrument: Box<dyn Instrument>,
     ) -> Option<Box<dyn Instrument>> {
         self.note_epoch += 1;
+        self.live_held = 0;
         self.instrument.replace(instrument)
     }
 
     pub(crate) fn take_instrument(&mut self) -> Option<Box<dyn Instrument>> {
         self.note_epoch += 1;
+        self.live_held = 0;
         self.instrument.take()
     }
 
