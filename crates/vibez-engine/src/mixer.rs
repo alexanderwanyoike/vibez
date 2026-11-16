@@ -468,7 +468,7 @@ impl EngineTrack {
     /// A live key takes over its pitch until released, so any Clip voice
     /// there is no longer the Clip's to release.
     pub(crate) fn hold_live_key(&mut self, pitch: u8) {
-        if let Some(bit) = 1u128.checked_shl(u32::from(pitch)) {
+        if let Some(bit) = live_hold::pitch_bit(pitch) {
             self.live_held |= bit;
             self.live_owned |= bit;
             self.active_notes &= !bit;
@@ -479,7 +479,7 @@ impl EngineTrack {
     }
 
     pub(crate) fn release_live_key(&mut self, pitch: u8) {
-        if let Some(bit) = 1u128.checked_shl(u32::from(pitch)) {
+        if let Some(bit) = live_hold::pitch_bit(pitch) {
             self.live_held &= !bit;
         }
     }

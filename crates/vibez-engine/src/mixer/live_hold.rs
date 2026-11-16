@@ -6,6 +6,11 @@ use super::groove::TimedNoteOn;
 /// No MIDI pitch, marking a dropped event until the lists are compacted.
 const DROPPED: u8 = 128;
 
+/// The mask bit for `pitch`, or none past the MIDI range.
+pub(super) fn pitch_bit(pitch: u8) -> Option<u128> {
+    1u128.checked_shl(u32::from(pitch))
+}
+
 /// Drops this block's source note-ons for pitches a live key holds, and
 /// source note-offs for pitches a live key took over. A Clip being recorded
 /// plays back the note still held, and its copy would otherwise restart the
@@ -21,12 +26,13 @@ pub(super) fn yield_to_live_keys(
     let (mut on, mut off) = (0, 0);
     while on < ons.len() || off < offs.len() {
         if off < offs.len() && (on >= ons.len() || offs[off].0 <= ons[on].0) {
-            if (live_held | *live_owned) & (1u128 << offs[off].1) != 0 {
+            let bit = pitch_bit(offs[off].1).unwrap_or(0);
+            if (live_held | *live_owned) & bit != 0 {
                 offs[off].1 = DROPPED;
             }
             off += 1;
         } else {
-            let bit = 1u128 << ons[on].1;
+            let bit = pitch_bit(ons[on].1).unwrap_or(0);
             if live_held & bit != 0 {
                 ons[on].1 = DROPPED;
             } else {
