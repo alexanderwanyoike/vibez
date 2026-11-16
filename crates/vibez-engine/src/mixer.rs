@@ -516,8 +516,6 @@ impl EngineTrack {
 
     pub(crate) fn take_instrument(&mut self) -> Option<Box<dyn Instrument>> {
         self.note_epoch += 1;
-        self.live_held = 0;
-        self.live_owned = 0;
         self.instrument.take()
     }
 
