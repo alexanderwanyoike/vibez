@@ -8,11 +8,8 @@ use vibez_core::track::MediaSourceRef;
 use vibez_engine::midi_audition::MidiAuditionPattern;
 
 use crate::domains::midi_file_import::{MidiFileImport, MidiFileLayout};
+use crate::note_rows::NoteRows;
 use crate::state::ProjectTrack;
-
-/// A file spanning fewer pitches is drawn over an octave, so a bass line or
-/// a few drums keep the rows of a small piano roll.
-const MIN_STRIP_ROWS: u8 = 12;
 
 /// A selected MIDI file, read for the Audition footer.
 #[derive(Debug, Clone)]
@@ -38,11 +35,7 @@ impl MidiPreview {
     pub fn strip(&self) -> MidiStrip {
         let notes = self.pattern.notes();
         let length = self.pattern.length_beats();
-        let lowest = notes.iter().map(|note| note.pitch).min().unwrap_or(60);
-        let highest = notes.iter().map(|note| note.pitch).max().unwrap_or(60);
-        let spanned = highest - lowest + 1;
-        let rows = spanned.max(MIN_STRIP_ROWS);
-        let top_pitch = f32::from(highest) + f32::from((rows - spanned) / 2);
+        let rows = NoteRows::of(notes.iter().map(|note| note.pitch));
         let across = |beat: f64| (beat / length).clamp(0.0, 1.0) as f32;
         MidiStrip {
             notes: notes
@@ -50,8 +43,8 @@ impl MidiPreview {
                 .map(|note| StripNote {
                     start: across(note.start_beat),
                     end: across(note.end_beat()),
-                    depth: (top_pitch - f32::from(note.pitch)) / f32::from(rows),
-                    velocity: 0,
+                    depth: rows.depth(note.pitch),
+                    velocity: note.velocity,
                 })
                 .collect(),
             bar_lines: (1..)
@@ -59,7 +52,7 @@ impl MidiPreview {
                 .take_while(|&beat| beat < length)
                 .map(across)
                 .collect(),
-            rows: crate::note_rows::NoteRows::of([]),
+            rows,
         }
     }
 }
@@ -80,7 +73,7 @@ pub struct MidiStrip {
     pub notes: Vec<StripNote>,
     /// Each bar line after the first bar, as a fraction of the width.
     pub bar_lines: Vec<f32>,
-    pub rows: crate::note_rows::NoteRows,
+    pub rows: NoteRows,
 }
 
 /// The track whose instrument plays the audition, which is the selected
