@@ -500,8 +500,41 @@ impl BrowserState {
     }
 
     /// Where the playhead sits in the MIDI strip, at `samples_per_beat`.
-    pub fn midi_audition_playhead(&self, _samples_per_beat: f64) -> Option<f32> {
-        None
+    pub fn midi_audition_playhead(&self, samples_per_beat: f64) -> Option<f32> {
+        let pattern = self.audition_pattern.current()?;
+        if !self.audition_playing {
+            return None;
+        }
+        crate::domains::midi_audition::playhead_fraction(
+            pattern,
+            self.audition_position_frames,
+            samples_per_beat,
+            self.audition_playback_mode
+                .is_some_and(crate::state::AuditionMode::loops),
+        )
+    }
+
+    /// Shows `preview` if its file is still the selected one.
+    pub fn install_midi_preview(
+        &mut self,
+        preview: crate::domains::midi_audition::MidiPreview,
+    ) -> bool {
+        if self.selected_source.as_ref() != Some(&preview.source) {
+            return false;
+        }
+        self.waveform_loading = false;
+        self.waveform_error = None;
+        self.midi_preview = Some(preview);
+        true
+    }
+
+    pub fn midi_preview_for(
+        &self,
+        source: &MediaSourceRef,
+    ) -> Option<&crate::domains::midi_audition::MidiPreview> {
+        self.midi_preview
+            .as_ref()
+            .filter(|preview| &preview.source == source)
     }
 
     pub fn import_input_for_source(&self, source: &MediaSourceRef) -> AuditionImportInput {
@@ -651,6 +684,7 @@ impl BrowserState {
     }
 
     fn clear_waveform(&mut self) {
+        self.midi_preview = None;
         self.waveform_source = None;
         self.waveform_audio = None;
         self.waveform_loop_fit = None;

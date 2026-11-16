@@ -288,27 +288,24 @@ async fn a_midi_file_dropped_on_a_clip_slot_becomes_that_slots_clip() {
 }
 
 #[tokio::test]
-async fn choosing_a_midi_file_in_the_browser_selects_it_without_auditioning() {
+async fn choosing_a_midi_file_in_the_browser_says_where_it_can_be_dragged() {
     let directory = tempfile::tempdir().unwrap();
     let source = MediaSourceRef::LocalFile {
         path: drum_phrase(directory.path()),
     };
-    for enabled in [true, false] {
-        let mut app = app();
-        app.state.browser.audition_enabled = enabled;
+    let mut app = app();
+    app.state.browser.audition_enabled = false;
 
-        run_until_idle(&mut app, Message::ClickLocalBrowserEntry(source.clone())).await;
-        run_until_idle(&mut app, Message::PreviewLocalEntry(source.clone())).await;
+    run_until_idle(&mut app, Message::ClickLocalBrowserEntry(source.clone())).await;
 
-        let browser = &app.state.browser;
-        assert_eq!(browser.selected_source.as_ref(), Some(&source));
-        assert!(!browser.waveform_loading && !browser.audition_loading);
-        assert_eq!(browser.waveform_error, None);
-        assert_eq!(
-            app.state.status_text,
-            "Drag Rebeater P3.mid onto a MIDI track, empty Arrange or a MIDI track's Clip slot"
-        );
-    }
+    let browser = &app.state.browser;
+    assert_eq!(browser.selected_source.as_ref(), Some(&source));
+    assert!(!browser.waveform_loading && !browser.audition_loading);
+    assert_eq!(browser.waveform_error, None);
+    assert_eq!(
+        app.state.status_text,
+        "Drag Rebeater P3.mid onto a MIDI track, empty Arrange or a MIDI track's Clip slot"
+    );
 }
 
 #[tokio::test]

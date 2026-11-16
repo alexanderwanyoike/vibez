@@ -251,6 +251,10 @@ impl App {
         let Some(source) = browser.selected_source.clone() else {
             return Task::none();
         };
+        if let Some(preview) = browser.midi_preview_for(&source).cloned() {
+            self.start_midi_audition(&preview);
+            return Task::none();
+        }
         match browser.waveform_for_source(&source) {
             Some(raw) => self.play_browser_mode(source, raw),
             None => Task::none(),
@@ -267,6 +271,7 @@ impl App {
         audio: Arc<DecodedAudio>,
         playback_mode: AuditionMode,
     ) {
+        self.state.browser.audition_pattern.retire();
         self.state.browser.audition_audio.hand(Arc::clone(&audio));
         self.send_command(EngineCommand::StartAudition {
             audio,

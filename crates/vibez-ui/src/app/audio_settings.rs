@@ -3,7 +3,6 @@
 use iced::Task;
 use vibez_audio_io::audio_host::{AudioBackend, AudioHost};
 use vibez_audio_io::audio_stream::{AudioOutputStream, OutputStreamConfig};
-use vibez_engine::commands::EngineCommand;
 use vibez_engine::engine::AudioEngine;
 
 use crate::domains::audio_settings::{AudioDeviceChoice, AudioSampleRate};
@@ -457,7 +456,7 @@ impl App {
                 self.state.audio_settings.buffer_size = buffer_size;
                 self.state.transport.sample_rate = actual_sample_rate;
                 self.state.audio_stream_health = AudioStreamHealth::Running;
-                self.send_command(EngineCommand::SetSampleRate(actual_sample_rate));
+                self.apply_engine_sample_rate(actual_sample_rate);
                 let conversion = at_previous_rate.map_or_else(Task::none, |project| {
                     self.convert_project_sample_rate(project)
                 });

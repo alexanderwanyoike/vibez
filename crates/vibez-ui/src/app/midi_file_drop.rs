@@ -7,7 +7,6 @@ use iced::Task;
 use vibez_core::id::TrackId;
 use vibez_core::midi::{InstrumentKind, TrackKind};
 use vibez_core::midi_file::MidiFile;
-use vibez_core::track::MediaSourceRef;
 use vibez_project::TimelineLocation;
 
 use super::App;
@@ -18,7 +17,7 @@ use crate::domains::midi_file_landing::{MidiLanding, MidiLandingCtx};
 use crate::message::{BrowserImportTarget, Message};
 use crate::state::{ArrangementTimeline, UiNoteClip};
 
-async fn read_midi_file_async(path: PathBuf) -> Result<MidiFileImport, String> {
+pub(super) async fn read_midi_file_async(path: PathBuf) -> Result<MidiFileImport, String> {
     tokio::task::spawn_blocking(move || {
         let name = path
             .file_stem()
@@ -59,16 +58,6 @@ impl App {
             }
         });
         self.browser_import_request.attach(task)
-    }
-
-    /// A MIDI file in the Browser has nothing to audition, so choosing it
-    /// only selects it and says where it can be dragged.
-    pub(super) fn select_midi_file(&mut self, source: MediaSourceRef) {
-        self.state.status_text = format!(
-            "Drag {} onto a MIDI track, empty Arrange or a MIDI track's Clip slot",
-            source.display_name()
-        );
-        self.state.browser.select_source(source);
     }
 
     pub(super) fn on_midi_file_read(
