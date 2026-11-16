@@ -1,4 +1,4 @@
-//! A selected MIDI file previews as the Clip a drop lands, plays on the selected MIDI track's instrument, and lays out a strip with bar lines.
+//! A selected MIDI file previews as the Clip a drop lands, laid out as a strip with bar lines, and the footer names who plays it.
 
 use super::*;
 use std::path::PathBuf;
@@ -111,30 +111,13 @@ fn midi_track(instrument: bool) -> ProjectTrack {
 }
 
 #[test]
-fn the_selected_midi_track_with_an_instrument_plays_the_audition() {
-    let tracks = vec![midi_track(true)];
-
-    assert_eq!(
-        audition_target(Some(tracks[0].id), &tracks),
-        Some(tracks[0].id)
-    );
-}
-
-#[test]
-fn the_preview_voice_plays_when_the_selection_cannot() {
-    let audio = ProjectTrack::new(TrackId::new(), "Drums".into(), 0);
-    let bare = midi_track(false);
-    let tracks = vec![audio, bare];
-
-    assert_eq!(audition_target(Some(tracks[0].id), &tracks), None);
-    assert_eq!(audition_target(Some(tracks[1].id), &tracks), None);
-    assert_eq!(audition_target(None, &tracks), None);
-}
-
-#[test]
 fn the_footer_names_who_plays_the_audition() {
     let tracks = vec![midi_track(true)];
 
     assert_eq!(audition_player(Some(tracks[0].id), &tracks), "on Bass");
     assert_eq!(audition_player(None, &tracks), "on Preview voice");
+    assert_eq!(
+        audition_player(Some(TrackId::new()), &tracks),
+        "on Preview voice"
+    );
 }

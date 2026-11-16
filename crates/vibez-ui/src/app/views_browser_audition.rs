@@ -245,7 +245,7 @@ impl App {
                 .into();
         }
         let player = crate::domains::midi_audition::audition_player(
-            self.state.arrangement.selected_track,
+            super::midi_input::configured_target(&self.state),
             &self.state.project_tracks.tracks,
         );
         row![

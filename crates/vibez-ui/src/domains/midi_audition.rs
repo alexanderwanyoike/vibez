@@ -1,4 +1,4 @@
-//! The Browser's preview of a selected MIDI file, showing and playing the Clip a drop would land on the track whose instrument plays it.
+//! The Browser's preview of a selected MIDI file, showing and playing the Clip a drop would land.
 
 use std::sync::Arc;
 
@@ -76,20 +76,10 @@ pub struct MidiStrip {
     pub rows: NoteRows,
 }
 
-/// The track whose instrument plays the audition, which is the selected
-/// track when it can play MIDI; without one the preview voice plays it.
-pub fn audition_target(selected: Option<TrackId>, tracks: &[ProjectTrack]) -> Option<TrackId> {
-    let selected = selected?;
-    tracks
-        .iter()
-        .any(|track| track.id == selected && track.is_playable_midi_target())
-        .then_some(selected)
-}
-
 /// Who plays the audition, as the Audition footer names it.
-pub fn audition_player(selected: Option<TrackId>, tracks: &[ProjectTrack]) -> String {
-    let track = audition_target(selected, tracks)
-        .and_then(|target| tracks.iter().find(|track| track.id == target));
+/// `target` is the track whose instrument plays it, if any.
+pub fn audition_player(target: Option<TrackId>, tracks: &[ProjectTrack]) -> String {
+    let track = target.and_then(|target| tracks.iter().find(|track| track.id == target));
     match track {
         Some(track) => format!("on {}", track.name),
         None => "on Preview voice".into(),

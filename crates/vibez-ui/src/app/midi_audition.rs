@@ -9,7 +9,7 @@ use vibez_engine::commands::EngineCommand;
 
 use super::midi_file_drop::read_midi_file_async;
 use super::App;
-use crate::domains::midi_audition::{audition_target, MidiPreview};
+use crate::domains::midi_audition::MidiPreview;
 use crate::domains::midi_file_import::MidiFileImport;
 use crate::message::Message;
 
@@ -111,14 +111,12 @@ impl App {
         }
     }
 
-    /// Plays `preview` through the selected MIDI track's instrument, or the
-    /// preview voice, in the chosen Raw or Warp treatment.
+    /// Plays `preview` through the MIDI target's instrument, the one
+    /// external MIDI input plays, or else the preview voice, in the chosen
+    /// Raw or Warp treatment.
     pub(super) fn start_midi_audition(&mut self, preview: &MidiPreview) {
         let mode = self.state.browser.audition_mode;
-        let target = audition_target(
-            self.state.arrangement.selected_track,
-            &self.state.project_tracks.tracks,
-        );
+        let target = super::midi_input::configured_target(&self.state);
         self.state.browser.audition_audio.retire();
         self.state
             .browser
