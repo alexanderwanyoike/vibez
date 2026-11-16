@@ -52,7 +52,9 @@ impl MidiAuditionPattern {
         let first_beat = pos as f64 / samples_per_beat;
         let last_beat = pos.saturating_add(frames as u64) as f64 / samples_per_beat;
         // Every pass that could put `beat` inside the block; the exact
-        // sample test below keeps only those that do.
+        // sample test below keeps only those that do. Unlike
+        // `BeatClipTimeline::occurrences_of`, which walks every pass from the
+        // first, this costs the same however long a loop has been playing.
         let passes = |beat: f64| {
             if looped {
                 let first = ((first_beat - beat) / length).floor().max(0.0) as u64;
