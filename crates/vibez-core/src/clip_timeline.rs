@@ -110,6 +110,18 @@ impl FrameClipTimeline {
         self.is_looping().then(|| self.loop_end - self.start)
     }
 
+    /// How long a launched Clip plays before it repeats. Started inside its
+    /// loop it repeats on the loop, as a Session clip does, so the window end
+    /// cannot cut a pass short; an intro before the loop, or a loop longer
+    /// than the window, keeps the window.
+    pub fn launch_period(self) -> u64 {
+        if self.is_looping() && self.start >= self.loop_start {
+            (self.loop_end - self.loop_start).min(self.duration)
+        } else {
+            self.duration
+        }
+    }
+
     pub fn wraps(self) -> FrameOccurrences {
         FrameOccurrences {
             initial: None,
@@ -273,6 +285,15 @@ impl BeatClipTimeline {
 
     pub fn first_wrap(self) -> Option<f64> {
         self.is_looping().then_some(self.loop_end - self.start)
+    }
+
+    /// See [`FrameClipTimeline::launch_period`].
+    pub fn launch_period(self) -> f64 {
+        if self.is_looping() && self.start >= self.loop_start {
+            (self.loop_end - self.loop_start).min(self.duration)
+        } else {
+            self.duration
+        }
     }
 
     pub fn wraps(self) -> BeatOccurrences {
