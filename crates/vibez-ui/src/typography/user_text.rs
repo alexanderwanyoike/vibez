@@ -18,7 +18,29 @@ mod tests {
     use iced::{Font, Size};
 
     use super::USER_TEXT_SHAPING;
-    use crate::typography::{CLIP_TITLE, PERFORM_DISPLAY, PERFORM_TECH, TRACK_TITLE};
+    use crate::typography::{
+        CLIP_TITLE, PERFORM_DISPLAY, PERFORM_TECH, PLEX_MONO_MEDIUM_BYTES,
+        PLEX_MONO_SEMIBOLD_BYTES, PLEX_SANS_CONDENSED_MEDIUM_BYTES,
+        PLEX_SANS_CONDENSED_SEMIBOLD_BYTES, TRACK_TITLE,
+    };
+
+    /// Loads the faces the app bundles into the renderer's font system, as
+    /// the app does before its window opens, so names are shaped among the
+    /// same faces they are drawn with.
+    fn load_bundled_faces() {
+        static LOADED: std::sync::Once = std::sync::Once::new();
+        LOADED.call_once(|| {
+            let mut system = font_system().write().expect("font system lock");
+            for bytes in [
+                PLEX_SANS_CONDENSED_MEDIUM_BYTES,
+                PLEX_SANS_CONDENSED_SEMIBOLD_BYTES,
+                PLEX_MONO_MEDIUM_BYTES,
+                PLEX_MONO_SEMIBOLD_BYTES,
+            ] {
+                system.load_font(std::borrow::Cow::Borrowed(bytes));
+            }
+        });
+    }
 
     /// Whether `face` was loaded from the app's own bytes, not a system file.
     fn is_bundled(face: &cosmic_text::fontdb::FaceInfo) -> bool {
@@ -73,11 +95,14 @@ mod tests {
 
     #[test]
     fn japanese_and_chinese_names_draw_in_a_system_face() {
+        load_bundled_faces();
+        let mut checked = 0;
         for name in ["ドラム", "贝斯线"] {
             if !a_system_face_covers(name) {
                 eprintln!("no system face here draws {name}, so there is nothing to fall back to");
                 continue;
             }
+            checked += 1;
             for (role, font) in [
                 ("TRACK_TITLE", TRACK_TITLE),
                 ("CLIP_TITLE", CLIP_TITLE),
@@ -94,6 +119,11 @@ mod tests {
                     "{role} drew {name} as {glyphs:?}"
                 );
             }
+        }
+        // Windows and macOS ship CJK faces, so finding none there means the
+        // font system missed them, not that there is nothing to check.
+        if cfg!(any(windows, target_os = "macos")) {
+            assert!(checked > 0, "no system face was found for any name");
         }
     }
 }
