@@ -66,7 +66,12 @@ impl BrowserState {
                 beat: timing.beat_at(x - left),
                 compatible: compatible(track_id),
             }),
-            Some((PointerTarget::NewTrackRow | PointerTarget::NewTrackGutter, left)) => {
+            Some((PointerTarget::NewTrackGutter, _)) => {
+                Some(BrowserMsg::DragHoverEmptyArrangement {
+                    beat: timing.beat_at(0.0),
+                })
+            }
+            Some((PointerTarget::NewTrackRow, left)) => {
                 Some(BrowserMsg::DragHoverEmptyArrangement {
                     beat: timing.beat_at(x - left),
                 })

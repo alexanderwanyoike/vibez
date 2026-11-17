@@ -143,7 +143,7 @@ impl App {
     }
 
     /// Every drop target the view may have tagged: each track's lane, the
-    /// new-track row, and in the clip launcher the shown rows' Clip slots
+    /// new-track row and the strip under the headers beside it, and in the clip launcher the shown rows' Clip slots
     /// and new-track slots, plus row 0 its new-track header drops in.
     pub(super) fn pointer_targets(&self) -> Vec<PointerTarget> {
         let first_row = self.state.perform.clip_editor.first_row;
@@ -159,6 +159,7 @@ impl App {
             .map(PointerTarget::Lane)
             .chain([
                 PointerTarget::NewTrackRow,
+                PointerTarget::NewTrackGutter,
                 PointerTarget::NewTrackSlot { row: 0 },
             ])
             .chain(rows.clone().map(|row| PointerTarget::NewTrackSlot { row }))

@@ -691,13 +691,17 @@ impl App {
             Some(ghost) => new_track_lane(&ghost, geometry),
             None => drop_highlight(lane.into(), zone, CARD_ZONE_RADIUS, CARD_ZONE_INSET),
         };
-        row![header, new_track_drop_area(lane, grid, geometry)]
-            .height(Length::Fixed(NEW_TRACK_ROW_HEIGHT))
-            .into()
+        row![
+            new_track_gutter_area(header, grid, geometry),
+            new_track_drop_area(lane, grid, geometry),
+        ]
+        .height(Length::Fixed(NEW_TRACK_ROW_HEIGHT))
+        .into()
     }
 
-    /// The space under the new-track row, where a drop lands as on the
-    /// row's lane, its gutter `header_width` wide under the headers.
+    /// The space under the new-track row, which takes a drop as the row
+    /// does, the lane at the pointer's beat and the gutter `header_width`
+    /// wide under the headers at the lane's start.
     pub(super) fn view_new_track_space(
         &self,
         header_width: f32,
@@ -707,9 +711,14 @@ impl App {
         if self.state.browser.drag_source.is_none() {
             return space.into();
         }
+        let grid = self.state.view.arrange_grid;
         row![
-            iced::widget::Space::new(Length::Fixed(header_width), Length::Fill),
-            new_track_drop_area(space, self.state.view.arrange_grid, geometry),
+            new_track_gutter_area(
+                iced::widget::Space::new(Length::Fixed(header_width), Length::Fill),
+                grid,
+                geometry,
+            ),
+            new_track_drop_area(space, grid, geometry),
         ]
         .height(Length::Fill)
         .into()
@@ -737,6 +746,28 @@ fn new_track_drop_area<'a>(
     super::desktop_pointer::drop_target(
         area,
         crate::domains::desktop_pointer::PointerTarget::NewTrackRow,
+    )
+}
+
+/// `content` under the track headers taking a drop for a new track at the
+/// beat where the lane starts.
+fn new_track_gutter_area<'a>(
+    content: impl Into<Element<'a, Message>>,
+    grid: crate::state::GridConfig,
+    geometry: TimelineGeometry,
+) -> Element<'a, Message> {
+    let beat = grid
+        .snap_beat(geometry.x_to_beat(0.0), geometry.pixels_per_beat())
+        .max(0.0);
+    let area = mouse_area(content)
+        .on_move(move |_| Message::Browser(BrowserMsg::DragHoverEmptyArrangement { beat }))
+        .on_exit(Message::Browser(BrowserMsg::LeaveDragTarget(
+            crate::state::BrowserDropTarget::EmptyArrangement { beat: 0.0 },
+        )))
+        .on_release(Message::DropSampleOnEmptyArrangement);
+    super::desktop_pointer::drop_target(
+        area,
+        crate::domains::desktop_pointer::PointerTarget::NewTrackGutter,
     )
 }
 
