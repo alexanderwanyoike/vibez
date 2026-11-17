@@ -28,10 +28,9 @@ const BUNDLED_FONTS: [&[u8]; 5] = [
 ];
 
 /// Loads [`BUNDLED_FONTS`] into the renderer's process-wide font system,
-/// once, each face registered at the normal width. The app and the device
-/// galleries call it before their window opens, and tests call it so they
-/// shape and measure text in the faces the app draws with, whatever order
-/// they run in.
+/// once, each face registered at the normal width. Call it before a window
+/// opens, and in any test that shapes or measures text, so that test sees
+/// the faces the app draws with whatever order the tests run in.
 ///
 /// Plex Sans Condensed declares a condensed width, and cosmic-text only
 /// offers a face, or falls back for a character a face lacks, among faces
