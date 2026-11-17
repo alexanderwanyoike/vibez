@@ -96,12 +96,13 @@ impl App {
     }
 
     pub(super) fn route_view_message(&mut self, msg: ViewMsg) -> Task<Message> {
-        self.route_pointer_to_browser_drag(&msg);
-        self.route_view_message_after_drag(msg)
+        let drag = self.route_pointer_to_browser_drag(&msg);
+        Task::batch([drag, self.route_view_message_after_drag(msg)])
     }
 
-    /// Hands the pointer to the Browser drag.
-    fn route_pointer_to_browser_drag(&mut self, msg: &ViewMsg) {
+    /// Hands the pointer to the Browser drag; a drag that starts moving
+    /// reads its file for the ghost.
+    fn route_pointer_to_browser_drag(&mut self, msg: &ViewMsg) -> Task<Message> {
         let pending_drag_msg = match msg {
             ViewMsg::CursorMoved(x, y) if self.state.browser.pending_drag.is_some() => {
                 Some(BrowserMsg::PendingDragMoved { x: *x, y: *y })
@@ -121,12 +122,10 @@ impl App {
             _ => None,
         };
         let Some(browser_msg) = pending_drag_msg else {
-            return;
+            return Task::none();
         };
         let action = self.state.browser.update(browser_msg);
-        if let Some(status) = action.status {
-            self.state.status_text = status;
-        }
+        self.apply_browser_action(action)
     }
 
     fn route_view_message_after_drag(&mut self, msg: ViewMsg) -> Task<Message> {
