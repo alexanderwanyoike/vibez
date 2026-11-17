@@ -1,6 +1,8 @@
 //! Another app's drag, followed by polling the pointer, since the window
 //! sees no pointer motion until the drop.
 
+use std::sync::Arc;
+
 use iced::{Point, Task};
 
 use super::App;
@@ -37,9 +39,8 @@ pub(super) enum PointerPoll {
     #[default]
     Unasked,
     Asking,
-    #[cfg(not(any(target_os = "macos", windows)))]
     Ready {
-        window: Box<super::desktop_pointer_x11::PointerWindow>,
+        window: Arc<PointerWindow>,
         /// The window's scale factor, which with the interface scale turns
         /// physical pixels into the layout's.
         scale: f32,
@@ -96,7 +97,6 @@ impl App {
                 self.pointer_poll = PointerPoll::Asking;
                 find_pointer_window()
             }
-            #[cfg(not(any(target_os = "macos", windows)))]
             PointerPoll::Ready {
                 window,
                 scale,
@@ -124,20 +124,21 @@ impl App {
         }
     }
 
-    /// Keeps the X window a poll reads the pointer against, or gives up
+    /// Keeps the window a poll reads the pointer against, or gives up
     /// polling where there is none.
-    pub(super) fn on_desktop_pointer_window(&mut self, window: Option<u32>, scale: f32) {
-        self.pointer_poll = PointerPoll::Unavailable;
-        #[cfg(not(any(target_os = "macos", windows)))]
-        if let Some(window) = window.and_then(super::desktop_pointer_x11::PointerWindow::connect) {
-            self.pointer_poll = PointerPoll::Ready {
-                window: Box::new(window),
+    pub(super) fn on_desktop_pointer_window(
+        &mut self,
+        window: Option<Arc<PointerWindow>>,
+        scale: f32,
+    ) {
+        self.pointer_poll = match window {
+            Some(window) => PointerPoll::Ready {
+                window,
                 scale,
                 last: None,
-            };
-        }
-        #[cfg(any(target_os = "macos", windows))]
-        let _ = (window, scale);
+            },
+            None => PointerPoll::Unavailable,
+        };
     }
 
     /// Every drop target the view may have tagged: each track's lane, the
@@ -168,20 +169,44 @@ impl App {
     }
 }
 
-/// The app's X window and scale factor, once iced reports them.
+/// The app's window, where the platform can read the pointer against it,
+/// and its scale factor, once iced reports them.
 fn find_pointer_window() -> Task<Message> {
     iced::window::get_latest().and_then(|id| {
-        iced::window::run_with_handle(id, x11_window).then(move |window| {
-            iced::window::get_scale_factor(id)
-                .map(move |scale| Message::DesktopPointerWindow { window, scale })
+        iced::window::run_with_handle(id, |handle| {
+            PointerWindow::from_handle(handle).map(Arc::new)
+        })
+        .then(move |window| {
+            iced::window::get_scale_factor(id).map(move |scale| Message::DesktopPointerWindow {
+                window: window.clone(),
+                scale,
+            })
         })
     })
 }
 
-#[cfg(not(any(target_os = "macos", windows)))]
-use super::desktop_pointer_x11::x11_window;
-
-#[cfg(any(target_os = "macos", windows))]
-fn x11_window(_handle: iced::window::raw_window_handle::WindowHandle<'_>) -> Option<u32> {
-    None
+/// A point in AppKit's window space, in points up from the bottom left, as
+/// physical pixels down from the top left of content `height` points tall.
+/// It lives here rather than in the macOS module so every platform's tests
+/// check it.
+#[cfg(any(test, target_os = "macos"))]
+pub(super) fn top_left_pixels(x: f64, y: f64, height: f64, backing_scale: f64) -> (f32, f32) {
+    (
+        (x * backing_scale) as f32,
+        ((height - y) * backing_scale) as f32,
+    )
 }
+
+#[cfg(not(any(target_os = "macos", windows)))]
+use super::desktop_pointer_x11 as platform;
+
+#[cfg(windows)]
+use super::desktop_pointer_windows as platform;
+
+#[cfg(target_os = "macos")]
+use super::desktop_pointer_macos as platform;
+
+/// The platform's pointer source, built from the window handle, which reads
+/// the pointer relative to the window in physical pixels. On Wayland
+/// `from_handle` finds none.
+pub(crate) use platform::PointerWindow;
