@@ -50,8 +50,13 @@ def landed(tracks: list) -> bool:
 def main() -> int:
     path = Path(sys.argv[1])
     # Auto-save waits two seconds after the last edit, then writes.
+    tracks = []
     for _ in range(30):
-        tracks = summary(load(path))
+        try:
+            tracks = summary(load(path))
+        except sqlite3.OperationalError:
+            # A save in flight can hold the file for a moment.
+            tracks = []
         if landed(tracks):
             print(json.dumps(tracks, indent=2))
             return 0
