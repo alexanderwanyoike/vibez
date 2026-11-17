@@ -1,6 +1,7 @@
 //! The pointer read with Win32, which answers even while another app's OLE
 //! drag holds the mouse.
 
+use iced::window::raw_window_handle::{RawWindowHandle, WindowHandle};
 use windows_sys::Win32::Foundation::{HWND, POINT};
 use windows_sys::Win32::Graphics::Gdi::ScreenToClient;
 use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
@@ -13,6 +14,14 @@ pub struct PointerWindow {
 }
 
 impl PointerWindow {
+    /// The window behind `handle`, when it is a Win32 one.
+    pub(super) fn from_handle(handle: WindowHandle<'_>) -> Option<Self> {
+        match handle.as_raw() {
+            RawWindowHandle::Win32(window) => Some(Self::from_hwnd(window.hwnd.get() as HWND)),
+            _ => None,
+        }
+    }
+
     pub(super) fn from_hwnd(hwnd: HWND) -> Self {
         Self {
             hwnd: hwnd as isize,

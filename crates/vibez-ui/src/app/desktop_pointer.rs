@@ -198,8 +198,11 @@ pub(super) fn top_left_pixels(x: f64, y: f64, height: f64, backing_scale: f64) -
 #[cfg(not(any(target_os = "macos", windows)))]
 use super::desktop_pointer_x11 as platform;
 
+#[cfg(windows)]
+use super::desktop_pointer_windows as platform;
+
 /// Where the pointer cannot be read yet, so a drop waits for the widgets.
-#[cfg(any(target_os = "macos", windows))]
+#[cfg(target_os = "macos")]
 mod platform {
     use iced::window::raw_window_handle::WindowHandle;
 
