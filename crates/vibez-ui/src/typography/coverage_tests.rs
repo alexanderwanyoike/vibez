@@ -1,8 +1,8 @@
 //! Every string literal in the UI must be drawable by the bundled Plex Sans
-//! Condensed faces. Those roles ask for a condensed width, and cosmic-text
-//! only falls back to faces of the width asked for, which few systems have,
-//! so a character the bundled faces lack draws as an empty box. Symbols go
-//! through the icon font instead.
+//! Condensed faces. A character they lack comes from whichever system face
+//! has it at that weight, which differs per platform and can be a symbol
+//! font (Windows once drew Marlett's window buttons for digits), so symbols
+//! go through the icon font instead.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

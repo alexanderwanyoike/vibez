@@ -1,10 +1,8 @@
 //! Bundled type roles used where the system fallback cannot express the
 //! intended interface hierarchy consistently across platforms.
 
-use iced::{
-    font::{Stretch, Weight},
-    Font,
-};
+use iced::advanced::graphics::text::{cosmic_text::fontdb, font_system};
+use iced::{font::Weight, Font};
 
 #[cfg(test)]
 mod coverage_tests;
@@ -30,32 +28,50 @@ pub const BUNDLED_FONTS: [&[u8]; 5] = [
 ];
 
 /// Loads [`BUNDLED_FONTS`] into the renderer's process-wide font system,
-/// once. The app and the device galleries call it before their window
-/// opens, and tests call it so they shape and measure text in the faces the
-/// app draws with, whatever order they run in.
+/// once, each face registered at the normal width. The app and the device
+/// galleries call it before their window opens, and tests call it so they
+/// shape and measure text in the faces the app draws with, whatever order
+/// they run in.
+///
+/// Plex Sans Condensed declares a condensed width, and cosmic-text only
+/// offers a face, or falls back for a character a face lacks, among faces
+/// of the width a text asks for. A role asking for the condensed width would
+/// draw every script Plex lacks as empty boxes, and one asking for the
+/// normal width would never reach the condensed faces, so the faces are
+/// registered at the width the roles ask for.
 pub fn load_bundled_fonts() {
-    use std::sync::Once;
+    use std::sync::{Arc, Once};
 
     static LOADED: Once = Once::new();
     LOADED.call_once(|| {
-        let mut system = iced::advanced::graphics::text::font_system()
-            .write()
-            .expect("font system lock");
+        let mut system = font_system().write().expect("font system lock");
+        let db = system.raw().db_mut();
         for bytes in BUNDLED_FONTS {
-            system.load_font(std::borrow::Cow::Borrowed(bytes));
+            for id in db.load_font_source(fontdb::Source::Binary(Arc::new(bytes))) {
+                register_at_normal_width(db, id);
+            }
         }
     });
 }
 
-/// The Plex Sans Condensed faces declare a condensed width, and cosmic-text
-/// only offers faces whose width equals the one asked for, so a role that
-/// asks for the normal width never reaches them and draws in whatever the
-/// platform falls back to. A family is only used at a weight it has a face
-/// for, so every role's weight needs a bundled face too.
-const PLEX_SANS_CONDENSED: Font = Font {
-    stretch: Stretch::Condensed,
-    ..Font::with_name("IBM Plex Sans Condensed")
-};
+fn register_at_normal_width(db: &mut fontdb::Database, id: fontdb::ID) {
+    let Some(face) = db
+        .face(id)
+        .filter(|face| face.stretch != fontdb::Stretch::Normal)
+        .cloned()
+    else {
+        return;
+    };
+    db.remove_face(id);
+    db.push_face_info(fontdb::FaceInfo {
+        stretch: fontdb::Stretch::Normal,
+        ..face
+    });
+}
+
+/// A family is only used at a weight it has a face for, so every role's
+/// weight needs a bundled face.
+const PLEX_SANS_CONDENSED: Font = Font::with_name("IBM Plex Sans Condensed");
 pub const PERFORM_DISPLAY: Font = Font {
     weight: Weight::Medium,
     ..PLEX_SANS_CONDENSED
