@@ -535,7 +535,15 @@ impl BrowserState {
                     &mut action,
                 );
             }
-            BrowserMsg::DragHoverNewTrackSlot { .. } => {}
+            BrowserMsg::DragHoverNewTrackSlot { row } => {
+                if self.drag_source.is_none() {
+                    return action;
+                }
+                self.hover(
+                    crate::state::BrowserDropTarget::NewTrackSlot { row },
+                    &mut action,
+                );
+            }
             BrowserMsg::DesktopFileHovered(path) => {
                 let dragging = self.drag_source.clone();
                 action.status = self.hover_desktop_file(path);

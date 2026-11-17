@@ -526,7 +526,17 @@ impl App {
             BrowserImportTarget::LauncherClipAt { track_id, row } => {
                 self.add_audio_launcher_clip(track_id, row, payload)
             }
-            BrowserImportTarget::LauncherNewTrackAt { .. } => Task::none(),
+            BrowserImportTarget::LauncherNewTrackAt { row } => {
+                let Some(track_id) = self.ensure_audio_track_for_import(None) else {
+                    self.state.status_text =
+                        crate::domains::arrangement::PROJECT_TRACKS_FULL.into();
+                    return Task::none();
+                };
+                self.state
+                    .perform
+                    .sync_project_tracks(&self.state.project_tracks.tracks);
+                self.add_audio_launcher_clip(track_id, row, payload)
+            }
             BrowserImportTarget::ArrangementClip(preferred_track) => {
                 let Some(track_id) = self.ensure_audio_track_for_import(preferred_track) else {
                     self.state.status_text =

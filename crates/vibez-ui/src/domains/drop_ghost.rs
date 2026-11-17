@@ -197,6 +197,7 @@ impl BrowserState {
                 compatible: true,
             } => GhostPlace::Lane { track_id, beat },
             BrowserDropTarget::EmptyArrangement { beat } => GhostPlace::NewTrack { beat },
+            BrowserDropTarget::NewTrackSlot { row } => GhostPlace::NewTrackSlot { row },
             _ => return None,
         };
         Some(DropGhost {
@@ -215,8 +216,12 @@ impl BrowserState {
 
     /// The launcher Clip the ghost shows as in a new column's slot.
     pub fn drop_ghost_slot(&self) -> Option<&LauncherClip> {
-        let _ = self.current_drag_ghost();
-        None
+        let ghost = self.current_drag_ghost()?;
+        matches!(
+            self.drag_target,
+            Some(BrowserDropTarget::NewTrackSlot { .. })
+        )
+        .then_some(&ghost.slot)
     }
 
     fn current_drag_ghost(&self) -> Option<&DragGhost> {

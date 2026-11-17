@@ -715,7 +715,18 @@ impl App {
                     "Select a sample in the Browser, then add it to a Clip slot".into();
                 self.state.browser.open = true;
             }
-            Message::ImportLauncherClipOnNewTrack { .. } => {}
+            Message::ImportLauncherClipOnNewTrack { row } => {
+                let source = self.state.browser.drag_source.take();
+                self.state.browser.cancel_media_drag();
+                if let Some(source) = source
+                    .filter(|_| self.state.perform.layout == vibez_project::PerformLayout::Clips)
+                {
+                    return self.dispatch_drop_for_target(
+                        source,
+                        crate::message::BrowserImportTarget::LauncherNewTrackAt { row },
+                    );
+                }
+            }
             Message::NewProject => {
                 return self.route_new_project();
             }
