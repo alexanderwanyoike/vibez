@@ -13,24 +13,18 @@ const TITLE_SIZE: f32 = 11.0;
 const TITLE_FONT: Font = crate::typography::CLIP_TITLE;
 /// Space between the title text and either end of the strip.
 const TITLE_PADDING: f32 = 6.0;
-const LOOP_ICON_SIZE: f32 = 10.0;
-/// Width of the loop icon plus its gap before the name.
-const LOOP_ICON_ROOM: f32 = 15.0;
-/// A looped clip's strip narrower than this shows no loop icon.
-const LOOP_ICON_MIN_WIDTH: f32 = 60.0;
+const ICON_SIZE: f32 = 10.0;
+/// Width of the leading icon plus its gap before the name.
+const ICON_ROOM: f32 = 15.0;
+/// A strip narrower than this shows no leading icon.
+const ICON_MIN_WIDTH: f32 = 60.0;
 /// Fewer letters than this before an ellipsis say nothing, so the strip
 /// stays empty instead.
 const MIN_KEPT_CHARS: usize = 3;
 
 /// What of `name` fits a title strip `strip_width` wide.
-fn fit_clip_title(name: &str, strip_width: f32, loop_icon_visible: bool) -> Option<String> {
-    let room = strip_width
-        - 2.0 * TITLE_PADDING
-        - if loop_icon_visible {
-            LOOP_ICON_ROOM
-        } else {
-            0.0
-        };
+fn fit_clip_title(name: &str, strip_width: f32, icon_visible: bool) -> Option<String> {
+    let room = strip_width - 2.0 * TITLE_PADDING - if icon_visible { ICON_ROOM } else { 0.0 };
     fit_text(name, room, TITLE_SIZE, TITLE_FONT, MIN_KEPT_CHARS)
 }
 
@@ -66,31 +60,31 @@ pub(super) fn draw_clip_title(
     frame: &mut canvas::Frame,
     name: &str,
     body: Rectangle,
-    looped: bool,
+    icon: Option<char>,
     color: Color,
     viewport_width: f32,
 ) {
     let Some(layout) = clip_title_layout(body.x, body.y, body.width, viewport_width) else {
         return;
     };
-    let loop_icon = looped && layout.region.width > LOOP_ICON_MIN_WIDTH;
-    let title = fit_clip_title(name, layout.region.width, loop_icon);
-    if !loop_icon && title.is_none() {
+    let icon = icon.filter(|_| layout.region.width > ICON_MIN_WIDTH);
+    let title = fit_clip_title(name, layout.region.width, icon.is_some());
+    if icon.is_none() && title.is_none() {
         return;
     }
     frame.with_clip(layout.region, |title_frame| {
         let mut position = layout.text;
-        if loop_icon {
+        if let Some(icon) = icon {
             title_frame.fill_text(canvas::Text {
-                content: icons::REPEAT.to_string(),
+                content: icon.to_string(),
                 position,
                 color,
-                size: LOOP_ICON_SIZE.into(),
+                size: ICON_SIZE.into(),
                 font: icons::ICON_FONT,
                 vertical_alignment: Vertical::Center,
                 ..Default::default()
             });
-            position.x += LOOP_ICON_ROOM;
+            position.x += ICON_ROOM;
         }
         if let Some(title) = title {
             title_frame.fill_text(canvas::Text {
@@ -109,7 +103,7 @@ pub(super) fn draw_clip_title(
 #[cfg(test)]
 mod tests {
     use super::{
-        clip_title_layout, fit_clip_title, LOOP_ICON_ROOM, TITLE_FONT, TITLE_PADDING, TITLE_SIZE,
+        clip_title_layout, fit_clip_title, ICON_ROOM, TITLE_FONT, TITLE_PADDING, TITLE_SIZE,
     };
     use crate::widgets::device_controls::text_width;
 
@@ -128,8 +122,8 @@ mod tests {
     }
 
     #[test]
-    fn the_loop_icon_takes_its_room_once() {
-        let width = name_width(NAME) + 2.0 * TITLE_PADDING + LOOP_ICON_ROOM;
+    fn the_leading_icon_takes_its_room_once() {
+        let width = name_width(NAME) + 2.0 * TITLE_PADDING + ICON_ROOM;
 
         assert_eq!(fit_clip_title(NAME, width, true), Some(NAME.into()));
     }

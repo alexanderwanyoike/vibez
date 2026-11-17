@@ -4,6 +4,7 @@ use iced::mouse;
 use iced::widget::canvas;
 use iced::{Rectangle, Renderer};
 
+use crate::icons;
 use crate::theme;
 
 use super::clip_colors::{clip_colors, ClipColors};
@@ -482,7 +483,14 @@ impl TrackClipCanvas {
                 }
             }
         }
-        draw_clip_front(frame, body, &colors, &clip.name, looped, w);
+        draw_clip_front(
+            frame,
+            body,
+            &colors,
+            &clip.name,
+            looped.then_some(icons::REPEAT),
+            w,
+        );
 
         // Diagonal stripe overlay when the clip's warp is
         // stale relative to the current project tempo. Low
@@ -576,7 +584,14 @@ impl TrackClipCanvas {
             frame.fill_rectangle(mark.position(), mark.size(), colors.ink);
         }
 
-        draw_clip_front(frame, body, &colors, &note_clip.name, looping, w);
+        draw_clip_front(
+            frame,
+            body,
+            &colors,
+            &note_clip.name,
+            looping.then_some(icons::REPEAT),
+            w,
+        );
     }
 }
 
