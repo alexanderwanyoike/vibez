@@ -86,14 +86,9 @@ impl App {
     /// view what is under it whenever it moves.
     pub(super) fn poll_desktop_pointer(&mut self) -> Task<Message> {
         if !self.state.browser.polls_desktop_pointer() {
-            // Each drag asks afresh, so a window moved to another scale, or
-            // an answer that never came, holds for one drag at most.
-            if !matches!(
-                self.pointer_poll,
-                PointerPoll::Unasked | PointerPoll::Unavailable
-            ) {
-                self.pointer_poll = PointerPoll::Unasked;
-            }
+            // Each drag asks afresh, so a window moved to another scale, an
+            // answer that never came or a failed connection lasts one drag.
+            self.pointer_poll = PointerPoll::Unasked;
             return Task::none();
         }
         match &mut self.pointer_poll {
