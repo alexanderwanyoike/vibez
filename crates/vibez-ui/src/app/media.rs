@@ -53,6 +53,9 @@ struct BrowserNavigableResult {
     visible_rows: usize,
 }
 
+/// What a drop says when its Section was deleted while the file was read.
+const SECTION_DROP_GONE: &str = "Section drop target no longer exists";
+
 impl App {
     pub(super) fn select_adjacent_browser_result(&mut self, direction: i8) -> Task<Message> {
         if !self.state.browser.open || direction == 0 {
@@ -530,6 +533,10 @@ impl App {
                 section_id,
                 position_samples,
             } => {
+                if self.state.perform.sections.by_id(section_id).is_none() {
+                    self.state.status_text = SECTION_DROP_GONE.into();
+                    return Task::none();
+                }
                 let Some(track_id) = self.ensure_audio_track_for_import(None) else {
                     self.state.status_text =
                         crate::domains::arrangement::PROJECT_TRACKS_FULL.into();
@@ -849,7 +856,7 @@ impl App {
                 .clips
                 .push(clip);
         } else {
-            self.state.status_text = "Section drop target no longer exists".into();
+            self.state.status_text = SECTION_DROP_GONE.into();
             return Task::none();
         }
         self.refresh_playing_section_after_edit(section_id);
