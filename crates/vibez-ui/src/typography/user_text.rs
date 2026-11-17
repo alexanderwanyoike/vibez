@@ -3,7 +3,9 @@
 
 use iced::widget::text::Shaping;
 
-/// The shaping for any text that shows a Track, Clip or Section name.
+/// The shaping for any text that shows a Track, Clip or Section name,
+/// alone or inside a longer line such as a status message, a dialog title
+/// or a picker's options.
 /// Names can be in any script, and only advanced shaping falls back to a
 /// system face for characters the interface font lacks; iced's default
 /// basic shaping draws them as empty boxes.
