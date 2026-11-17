@@ -99,10 +99,11 @@ mod tests {
         assert!(text_width(&fitted, 13.0, Font::DEFAULT) <= width);
     }
 
-    /// Family and weight of every face the renderer's font system shapes
-    /// `content` with. The system fonts stay in, so a role that misses its
-    /// bundled face shows whichever fallback this platform picks.
-    fn drawn_faces(content: &str, font: Font) -> Vec<(String, u16)> {
+    /// Family, weight and glyph of every glyph the renderer's font system
+    /// shapes `content` with. The system fonts stay in, so a role that misses
+    /// its bundled face shows whichever fallback this platform picks. Glyph 0
+    /// is the empty box a face draws for a character it lacks.
+    fn shaped_glyphs(content: &str, font: Font) -> Vec<(String, u16, u16)> {
         use iced::advanced::graphics::text::{cosmic_text, font_system, to_attributes};
 
         load_bundled_fonts();
@@ -116,20 +117,56 @@ mod tests {
             cosmic_text::Shaping::Advanced,
         );
         buffer.shape_until_scroll(raw, false);
-        let mut faces: Vec<(String, u16)> = buffer
+        buffer
             .layout_runs()
-            .flat_map(|run| run.glyphs.iter().map(|glyph| glyph.font_id))
-            .map(|id| {
-                let face = raw.db().face(id).expect("shaped face is loaded");
+            .flat_map(|run| run.glyphs.iter())
+            .map(|glyph| {
+                let face = raw.db().face(glyph.font_id).expect("shaped face is loaded");
                 let family = face
                     .families
                     .first()
                     .map_or_else(|| face.post_script_name.clone(), |(name, _)| name.clone());
-                (family, face.weight.0)
+                (family, face.weight.0, glyph.glyph_id)
             })
+            .collect()
+    }
+
+    /// Family and weight of every face `content` is shaped with.
+    fn drawn_faces(content: &str, font: Font) -> Vec<(String, u16)> {
+        let mut faces: Vec<(String, u16)> = shaped_glyphs(content, font)
+            .into_iter()
+            .map(|(family, weight, _)| (family, weight))
             .collect();
         faces.dedup();
         faces
+    }
+
+    /// Whether a face the app does not bundle has a glyph for every char of
+    /// `content`.
+    fn a_system_face_covers(content: &str) -> bool {
+        use iced::advanced::graphics::text::font_system;
+
+        load_bundled_fonts();
+        let mut system = font_system().write().expect("font system lock");
+        let raw = system.raw();
+        let system_faces: Vec<_> = raw
+            .db()
+            .faces()
+            .filter(|face| {
+                !face
+                    .families
+                    .iter()
+                    .any(|(name, _)| name.starts_with("IBM Plex") || name.as_str() == "lucide")
+            })
+            .map(|face| face.id)
+            .collect();
+        system_faces.into_iter().any(|id| {
+            raw.get_font(id).is_some_and(|font| {
+                content
+                    .chars()
+                    .all(|c| font.rustybuzz().glyph_index(c).is_some())
+            })
+        })
     }
 
     #[test]
@@ -166,5 +203,28 @@ mod tests {
             .collect();
 
         assert_eq!(drawn, bundled);
+    }
+
+    #[test]
+    fn a_japanese_name_in_a_plex_role_draws_in_a_system_face() {
+        let name = "ドラム";
+        if !a_system_face_covers(name) {
+            eprintln!("no system face here draws {name}, so there is nothing to fall back to");
+            return;
+        }
+
+        for (role, font) in [
+            ("PERFORM_DISPLAY", PERFORM_DISPLAY),
+            ("PERFORM_LABEL", PERFORM_LABEL),
+        ] {
+            let glyphs = shaped_glyphs(name, font);
+
+            assert!(
+                glyphs
+                    .iter()
+                    .all(|(family, _, glyph)| *glyph != 0 && !family.starts_with("IBM Plex")),
+                "{role} drew {name} as {glyphs:?}"
+            );
+        }
     }
 }
