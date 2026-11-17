@@ -87,13 +87,13 @@ fn the_new_track_row_and_slots_are_hovered_as_their_widgets_would() {
 #[test]
 fn leaving_every_target_clears_the_one_the_drag_had() {
     let mut browser = hovering();
-    let nothing = browser.pointer_messages(None, 0.0, timing(), |_| true);
-    assert!(nothing.is_empty());
-
     browser.update(BrowserMsg::DragHoverNewTrackSlot { row: 0 });
-    let left = browser.pointer_messages(None, 0.0, timing(), |_| true);
 
-    assert!(matches!(left[..], [BrowserMsg::ClearDragTarget]));
+    for message in browser.pointer_messages(None, 0.0, timing(), |_| true) {
+        browser.update(message);
+    }
+
+    assert!(browser.drag_target.is_none());
 }
 
 #[test]
@@ -111,8 +111,6 @@ fn only_a_desktop_drag_still_hovering_is_polled() {
 
 #[test]
 fn a_drop_where_no_tagged_target_was_found_waits_for_the_widgets_to_report_one() {
-    // Device cards and pads are not tagged, so after the drop the widget
-    // under the released pointer reports itself and takes the file.
     let mut browser = hovering();
     for message in browser.pointer_messages(None, 0.0, timing(), |_| true) {
         browser.update(message);

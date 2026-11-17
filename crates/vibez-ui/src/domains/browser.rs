@@ -78,6 +78,9 @@ pub enum BrowserMsg {
     /// The pointer moved while a file from another app is dragged, after the
     /// widgets under it reported any target.
     DesktopPointerMoved,
+    /// A poll found the pointer of another app's drag over no tagged target,
+    /// which may still be over an untagged device card.
+    DesktopPointerOffTargets,
     ClearDragTarget,
     /// The cursor left `target`; another target it entered meanwhile stays.
     LeaveDragTarget(crate::state::BrowserDropTarget),
@@ -568,6 +571,14 @@ impl BrowserState {
                 Some(crate::state::DesktopDrop::Dropped) => self.miss_desktop_drop(&mut action),
                 _ => {}
             },
+            BrowserMsg::DesktopPointerOffTargets => {
+                if self.desktop_drop == Some(crate::state::DesktopDrop::PointerSeen) {
+                    self.desktop_drop = Some(crate::state::DesktopDrop::Hovering);
+                }
+                if self.drag_target.is_some() {
+                    action.status = self.clear_drag_target();
+                }
+            }
             BrowserMsg::ClearDragTarget => {
                 action.status = self.clear_drag_target();
             }

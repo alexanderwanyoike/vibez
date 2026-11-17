@@ -45,8 +45,8 @@ impl BrowserState {
     }
 
     /// What the widget under a pointer polled at `x` would have reported:
-    /// its hover followed by the pointer moving, or leaving the target it
-    /// had. `under` is the target there and its left edge; `compatible`
+    /// its hover followed by the pointer moving, or that no tagged target is
+    /// there. `under` is the target there and its left edge; `compatible`
     /// says whether a track's lane takes the drag.
     pub fn pointer_messages(
         &self,
@@ -72,17 +72,8 @@ impl BrowserState {
             Some((PointerTarget::ClipSlot { track_id, row }, _)) => {
                 Some(BrowserMsg::DragHoverClipSlot { track_id, row })
             }
-            // Only tagged targets are found, so finding none says nothing
-            // about the untagged device cards, which take the drop once the
-            // released pointer reaches them.
-            None => {
-                return self
-                    .drag_target
-                    .is_some()
-                    .then_some(BrowserMsg::ClearDragTarget)
-                    .into_iter()
-                    .collect();
-            }
+            // Why finding nothing leaves the drop free: docs/PATTERNS.md, 9.
+            None => return vec![BrowserMsg::DesktopPointerOffTargets],
         };
         hover
             .into_iter()
