@@ -30,10 +30,10 @@ pub const BUNDLED_FONTS: [&[u8]; 5] = [
 ];
 
 /// Loads [`BUNDLED_FONTS`] into the renderer's process-wide font system,
-/// once, so tests shape and measure text in the faces the app draws with,
-/// whatever order they run in.
-#[cfg(test)]
-pub(crate) fn load_bundled_fonts() {
+/// once. The app and the device galleries call it before their window
+/// opens, and tests call it so they shape and measure text in the faces the
+/// app draws with, whatever order they run in.
+pub fn load_bundled_fonts() {
     use std::sync::Once;
 
     static LOADED: Once = Once::new();

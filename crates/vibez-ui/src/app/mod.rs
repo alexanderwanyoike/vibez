@@ -127,7 +127,8 @@ pub fn run() -> iced::Result {
         64,
     )
     .ok();
-    let app = iced::application(App::title, App::update_and_refresh_clips, App::view)
+    crate::typography::load_bundled_fonts();
+    iced::application(App::title, App::update_and_refresh_clips, App::view)
         .theme(App::theme)
         .scale_factor(App::scale_factor)
         .antialiasing(true)
@@ -151,10 +152,7 @@ pub fn run() -> iced::Result {
             }
             settings
         })
-        .window_size((1400.0, 900.0));
-    crate::typography::BUNDLED_FONTS
-        .into_iter()
-        .fold(app, |app, bytes| app.font(bytes))
+        .window_size((1400.0, 900.0))
         .run_with(App::new)
 }
 
