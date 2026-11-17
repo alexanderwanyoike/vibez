@@ -189,8 +189,10 @@ fn find_pointer_window() -> Task<Message> {
 /// physical pixels down from the top left of content `height` points tall.
 #[cfg(any(test, target_os = "macos"))]
 pub(super) fn top_left_pixels(x: f64, y: f64, height: f64, backing_scale: f64) -> (f32, f32) {
-    let _ = (x, y, height, backing_scale);
-    todo!()
+    (
+        (x * backing_scale) as f32,
+        ((height - y) * backing_scale) as f32,
+    )
 }
 
 #[cfg(not(any(target_os = "macos", windows)))]
