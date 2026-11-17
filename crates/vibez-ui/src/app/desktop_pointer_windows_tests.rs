@@ -1,7 +1,8 @@
 //! The Win32 pointer source reads the cursor against the client area.
 
+use windows_sys::Win32::Foundation::POINT;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DestroyWindow, SetCursorPos, WS_POPUP,
+    CreateWindowExW, DestroyWindow, GetCursorPos, WS_POPUP,
 };
 
 use super::desktop_pointer_windows::PointerWindow;
@@ -27,16 +28,18 @@ fn the_cursor_is_read_relative_to_the_windows_client_area() {
         )
     };
     assert!(!hwnd.is_null(), "a window to read against");
-    // SAFETY: moving the cursor touches no memory of ours.
-    assert_ne!(
-        unsafe { SetCursorPos(130, 215) },
-        0,
-        "a desktop to point at"
-    );
+    // Reading the cursor where it is, rather than moving it, leaves it alone
+    // for whoever runs the tests.
+    let mut cursor = POINT { x: 0, y: 0 };
+    // SAFETY: the call writes only the point it is given.
+    assert_ne!(unsafe { GetCursorPos(&mut cursor) }, 0, "a cursor to read");
 
     let pointer = PointerWindow::from_hwnd(hwnd).pointer();
 
     // SAFETY: this thread made the window and nothing else holds it.
     unsafe { DestroyWindow(hwnd) };
-    assert_eq!(pointer, Some((30.0, 15.0)));
+    assert_eq!(
+        pointer,
+        Some(((cursor.x - 100) as f32, (cursor.y - 200) as f32))
+    );
 }
