@@ -187,6 +187,8 @@ fn find_pointer_window() -> Task<Message> {
 
 /// A point in AppKit's window space, in points up from the bottom left, as
 /// physical pixels down from the top left of content `height` points tall.
+/// It lives here rather than in the macOS module so every platform's tests
+/// check it.
 #[cfg(any(test, target_os = "macos"))]
 pub(super) fn top_left_pixels(x: f64, y: f64, height: f64, backing_scale: f64) -> (f32, f32) {
     (
@@ -204,6 +206,6 @@ use super::desktop_pointer_windows as platform;
 #[cfg(target_os = "macos")]
 use super::desktop_pointer_macos as platform;
 
-/// The platform's pointer source: built from the window handle, it reads
-/// the pointer relative to the window in physical pixels.
+/// The platform's pointer source, built from the window handle, which reads
+/// the pointer relative to the window in physical pixels. Wayland has none.
 pub(crate) use platform::PointerWindow;

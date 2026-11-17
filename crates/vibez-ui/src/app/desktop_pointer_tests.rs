@@ -1,4 +1,5 @@
-//! A pointer polled during another app's drag shows the ghost and lands the drop.
+//! A pointer polled during another app's drag shows the ghost and lands the
+//! drop, and the platform's reading arrives in the pixels the poll expects.
 
 use std::path::{Path, PathBuf};
 
