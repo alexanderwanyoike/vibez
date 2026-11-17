@@ -448,7 +448,9 @@ impl App {
                 .into()
         };
         workspace = workspace.push(container(toolbar).padding([if compact { 4 } else { 10 }, 12]));
-        if self.state.project_tracks.tracks.is_empty() {
+        // A drag gets a column beside the last track to drop a new one in.
+        let new_track_column = self.state.browser.drag_source.is_some();
+        if self.state.project_tracks.tracks.is_empty() && !new_track_column {
             workspace = workspace.push(
                 center(
                     column![
@@ -469,15 +471,17 @@ impl App {
         } else {
             let first_track = self.state.perform.clip_editor.first_track;
             let first_row = self.state.perform.clip_editor.first_row;
-            let visible_tracks = ((width - 54.0) / 145.0).floor().max(4.0) as usize;
-            let shown_tracks = self
+            let visible_tracks =
+                ((width - 54.0) / 145.0).floor().max(4.0) as usize - usize::from(new_track_column);
+            let shown_tracks = (self
                 .state
                 .project_tracks
                 .tracks
                 .len()
                 .saturating_sub(first_track)
                 .min(visible_tracks)
-                .max(4);
+                + usize::from(new_track_column))
+            .max(4);
             let lane_width = (width - 46.0) / shown_tracks as f32;
             let header_height = if compact { 26.0 } else { 42.0 };
             let mut numbers = column![iced::widget::Space::new(1, header_height)].spacing(0);
@@ -813,6 +817,15 @@ impl App {
                 }
                 grid = grid.push(lane);
             }
+            if new_track_column {
+                grid = grid.push(self.view_new_track_column(
+                    first_row,
+                    header_height,
+                    slot_height,
+                    lane_width,
+                    compact,
+                ));
+            }
             workspace = workspace.push(
                 crate::widgets::quiet_scroll::vertical(
                     container(grid).padding([0, 12]).width(Length::Fill),
@@ -839,7 +852,90 @@ impl App {
     }
 }
 
+/// `content` as the place a drop adds a track with its Clip in `row`.
+/// Moving re-reports the slot, so leaving one slot for the next never
+/// clears both.
+fn new_track_slot<'a>(content: impl Into<Element<'a, Message>>, row: u32) -> Element<'a, Message> {
+    mouse_area(content)
+        .on_move(move |_| Message::Browser(BrowserMsg::DragHoverNewTrackSlot { row }))
+        .on_exit(Message::Browser(BrowserMsg::LeaveDragTarget(
+            crate::state::BrowserDropTarget::NewTrackSlot { row },
+        )))
+        .on_release(Message::ImportLauncherClipOnNewTrack { row })
+        .into()
+}
+
 impl App {
+    /// The column beside the last track where a drop adds a track, the
+    /// hovered slot showing the ghost.
+    fn view_new_track_column(
+        &self,
+        first_row: u32,
+        header_height: f32,
+        slot_height: f32,
+        lane_width: f32,
+        compact: bool,
+    ) -> Element<'_, Message> {
+        let ghost = self.state.browser.drop_ghost(self.state.transport.bpm);
+        let label = match (&ghost, self.state.browser.drag_media()) {
+            (Some(ghost), _) => ghost.media.new_track().label(),
+            (None, Some(crate::domains::browser::DragMedia::Midi)) => "New MIDI track",
+            (None, _) => "New audio track",
+        };
+        let ghost_row = match ghost.map(|ghost| ghost.place) {
+            Some(crate::domains::drop_ghost::GhostPlace::NewTrackSlot { row }) => Some(row),
+            _ => None,
+        };
+        // The header holds no slot, so a drop there takes the first row.
+        let mut column = iced::widget::Column::new().push(new_track_slot(
+            container(
+                text(label)
+                    .font(PERFORM_LABEL)
+                    .size(11)
+                    .color(if ghost_row.is_some() {
+                        th::text()
+                    } else {
+                        th::text_dim()
+                    }),
+            )
+            .padding([3.0, crate::widgets::clip_slot::TILE_GAP / 2.0])
+            .width(Length::Fill)
+            .height(header_height),
+            0,
+        ));
+        for offset in 0..6u32 {
+            let row = first_row + offset;
+            let cell: Element<'_, Message> = match self.state.browser.drop_ghost_slot() {
+                Some(slot) if ghost_row == Some(row) => {
+                    canvas(crate::widgets::clip_slot::ClipSlot {
+                        clip: Some(slot),
+                        cell: (slot.track_id, row),
+                        drag_source: None,
+                        empty_action: Message::ImportLauncherClipOnNewTrack { row },
+                        color: th::accent(),
+                        key: "",
+                        selected: false,
+                        recording: false,
+                        audio_recording: None,
+                        progress: None,
+                        playing: false,
+                        queued: false,
+                        compact,
+                    })
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .into()
+                }
+                _ => iced::widget::Space::new(Length::Fill, Length::Fill).into(),
+            };
+            column = column.push(new_track_slot(
+                container(cell).width(Length::Fill).height(slot_height),
+                row,
+            ));
+        }
+        column.width(Length::Fixed(lane_width)).into()
+    }
+
     fn view_clip_cell_action(
         &self,
         icon: char,
