@@ -7,6 +7,7 @@ use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::track::MediaSourceRef;
 
+use crate::domains::browser::DragMedia;
 use crate::domains::midi_file_import::{MidiClipTrack, MidiFileImport, MidiFileLayout};
 use crate::domains::perform::LauncherClip;
 use crate::state::{
@@ -115,6 +116,15 @@ pub enum NewTrack {
 }
 
 impl NewTrack {
+    /// The track a drop of `media` adds, before its file says whether the
+    /// notes are drums.
+    pub fn of(media: DragMedia) -> Self {
+        match media {
+            DragMedia::Audio => Self::Audio,
+            DragMedia::Midi => Self::Midi { drum_rack: false },
+        }
+    }
+
     /// What the new track's header says while the ghost waits in it.
     pub fn label(self) -> &'static str {
         match self {
@@ -205,6 +215,12 @@ impl BrowserState {
             length_beats: read.media.length_beats(self.audition_mode, project_bpm)?,
             media: &read.media,
         })
+    }
+
+    /// The ghost waiting on the lane of a track the drop adds.
+    pub fn new_track_drop_ghost(&self, project_bpm: f64) -> Option<DropGhost<'_>> {
+        self.drop_ghost(project_bpm)
+            .filter(|ghost| matches!(ghost.place, GhostPlace::NewTrack { .. }))
     }
 
     /// The ghost waiting on `track_id`'s lane.

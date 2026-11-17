@@ -879,11 +879,15 @@ impl App {
         compact: bool,
     ) -> Element<'_, Message> {
         let ghost = self.state.browser.drop_ghost(self.state.transport.bpm);
-        let label = match (&ghost, self.state.browser.drag_media()) {
-            (Some(ghost), _) => ghost.media.new_track().label(),
-            (None, Some(crate::domains::browser::DragMedia::Midi)) => "New MIDI track",
-            (None, _) => "New audio track",
-        };
+        let label = ghost
+            .map(|ghost| ghost.media.new_track())
+            .or_else(|| {
+                self.state
+                    .browser
+                    .drag_media()
+                    .map(crate::domains::drop_ghost::NewTrack::of)
+            })
+            .map_or("", crate::domains::drop_ghost::NewTrack::label);
         let ghost_row = match ghost.map(|ghost| ghost.place) {
             Some(crate::domains::drop_ghost::GhostPlace::NewTrackSlot { row }) => Some(row),
             _ => None,
