@@ -11,9 +11,11 @@ use crate::timeline_geometry::TimelineGeometry;
 pub enum PointerTarget {
     /// A track's lane, in Arrange or the selected Section.
     Lane(TrackId),
-    /// The lane of the row where a drop adds a track.
+    /// The lane of the row where a drop adds a track, and the empty space
+    /// below it.
     NewTrackRow,
-    /// A slot of the clip launcher's new-track column.
+    /// A slot of the clip launcher's new-track column with the empty space
+    /// right of it, and for the last row shown the space below the rows.
     NewTrackSlot { row: u32 },
     /// An empty Clip slot of a track that takes the drag.
     ClipSlot { track_id: TrackId, row: u32 },

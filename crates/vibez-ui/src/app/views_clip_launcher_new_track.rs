@@ -29,6 +29,22 @@ fn new_track_slot_target<'a>(
     )
 }
 
+/// The new-track column's slot for `row`, `width` wide, with the empty
+/// space right of it taking its drops too.
+fn new_track_slot<'a>(
+    content: impl Into<Element<'a, Message>>,
+    width: f32,
+    row: u32,
+) -> Element<'a, Message> {
+    new_track_slot_target(
+        iced::widget::row![
+            container(content).width(Length::Fixed(width)),
+            iced::widget::horizontal_space(),
+        ],
+        row,
+    )
+}
+
 impl App {
     /// The column beside the last track where a drop adds a track, the
     /// hovered slot showing the ghost.
@@ -51,7 +67,7 @@ impl App {
             _ => None,
         };
         // The header holds no slot, so a drop there takes the first row.
-        let mut column = iced::widget::Column::new().push(new_track_slot_target(
+        let mut column = iced::widget::Column::new().push(new_track_slot(
             container(
                 text(label)
                     .font(PERFORM_LABEL)
@@ -65,6 +81,7 @@ impl App {
             .padding([3.0, crate::widgets::clip_slot::TILE_GAP / 2.0])
             .width(Length::Fill)
             .height(header_height),
+            lane_width,
             0,
         ));
         for offset in 0..super::views_clip_launcher::LAUNCHER_ROWS {
@@ -92,11 +109,21 @@ impl App {
                 }
                 _ => iced::widget::Space::new(Length::Fill, Length::Fill).into(),
             };
-            column = column.push(new_track_slot_target(
+            column = column.push(new_track_slot(
                 container(cell).width(Length::Fill).height(slot_height),
+                lane_width,
                 row,
             ));
         }
-        column.width(Length::Fixed(lane_width)).into()
+        column.width(Length::Fill).into()
     }
+}
+
+/// The space under the launcher's rows, where a drop takes the slot of the
+/// nearest row shown, the last.
+pub(super) fn below_new_track_column<'a>(first_row: u32) -> Element<'a, Message> {
+    new_track_slot_target(
+        iced::widget::Space::new(Length::Fill, Length::Fill),
+        first_row + super::views_clip_launcher::LAUNCHER_ROWS - 1,
+    )
 }

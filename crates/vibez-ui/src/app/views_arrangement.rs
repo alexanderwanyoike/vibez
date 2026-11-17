@@ -590,7 +590,13 @@ impl App {
             }
         }
 
-        let track_body = quiet_scroll::vertical(track_rows).height(Length::Fill);
+        // The scroll shrinks to its rows so the space left below them can
+        // take a drop.
+        let track_body = column![
+            quiet_scroll::vertical(track_rows),
+            self.view_new_track_space(TRACK_HEADER_TOTAL_WIDTH, geometry),
+        ]
+        .height(Length::Fill);
         let channel_footer =
             container(quiet_scroll::vertical(channel_rows)).max_height(CHANNEL_FOOTER_MAX_HEIGHT);
 
@@ -691,6 +697,25 @@ impl App {
         row![header, new_track_drop_area(lane, grid, geometry)]
             .height(Length::Fixed(NEW_TRACK_ROW_HEIGHT))
             .into()
+    }
+
+    /// The space under the new-track row, where a drop lands as on the
+    /// row's lane, its gutter `header_width` wide under the headers.
+    pub(super) fn view_new_track_space(
+        &self,
+        header_width: f32,
+        geometry: TimelineGeometry,
+    ) -> Element<'_, Message> {
+        let space = iced::widget::Space::new(Length::Fill, Length::Fill);
+        if self.state.browser.drag_source.is_none() {
+            return space.into();
+        }
+        row![
+            iced::widget::Space::new(Length::Fixed(header_width), Length::Fill),
+            new_track_drop_area(space, self.state.view.arrange_grid, geometry),
+        ]
+        .height(Length::Fill)
+        .into()
     }
 }
 
