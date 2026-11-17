@@ -1,5 +1,4 @@
-//! A drag reads its file once, through the router, and its ghost lands
-//! exactly where and as long as the Clip its drop makes.
+//! A drag's ghost, read through the router, matches the Clip its drop lands.
 
 use std::path::{Path, PathBuf};
 

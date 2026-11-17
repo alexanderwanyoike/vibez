@@ -1,6 +1,4 @@
-//! The ghost a drag shows: read once, placed where a release would land,
-//! as long as the Clip the drop makes, and gone once the drag leaves, is
-//! turned away, cancelled or dropped.
+//! The ghost a drag shows of the Clip its release would make.
 
 use std::path::PathBuf;
 

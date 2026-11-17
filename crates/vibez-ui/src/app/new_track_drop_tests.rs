@@ -1,5 +1,4 @@
-//! A file dropped on Perform's empty space makes the track it needs: a new
-//! column's Clip slot in the clip launcher, or a new lane in a Section.
+//! A file dropped on Perform's empty space gets a new track for its Clip.
 
 use std::path::{Path, PathBuf};
 
