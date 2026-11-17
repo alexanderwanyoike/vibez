@@ -715,6 +715,18 @@ impl App {
                     "Select a sample in the Browser, then add it to a Clip slot".into();
                 self.state.browser.open = true;
             }
+            Message::ImportLauncherClipOnNewTrack { row } => {
+                let source = self.state.browser.drag_source.take();
+                self.state.browser.cancel_media_drag();
+                if let Some(source) = source
+                    .filter(|_| self.state.perform.layout == vibez_project::PerformLayout::Clips)
+                {
+                    return self.dispatch_drop_for_target(
+                        source,
+                        crate::message::BrowserImportTarget::LauncherNewTrackAt { row },
+                    );
+                }
+            }
             Message::NewProject => {
                 return self.route_new_project();
             }
@@ -930,6 +942,12 @@ impl App {
             // -- Engine events --
             Message::Tick => {
                 return self.handle_tick();
+            }
+            Message::DesktopPointerWindow { window, scale } => {
+                self.on_desktop_pointer_window(window, scale);
+            }
+            Message::DesktopPointerProbed { x, under } => {
+                return self.on_desktop_pointer_probed(x, under);
             }
             Message::EngineMetering { peak_l, peak_r } => {
                 self.state.peak_l = peak_l;

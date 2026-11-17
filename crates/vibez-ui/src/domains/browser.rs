@@ -67,6 +67,9 @@ pub enum BrowserMsg {
         track_id: TrackId,
         row: u32,
     },
+    DragHoverNewTrackSlot {
+        row: u32,
+    },
     /// A file from another app entered the window.
     DesktopFileHovered(PathBuf),
     DesktopFileDropped(PathBuf),
@@ -75,11 +78,17 @@ pub enum BrowserMsg {
     /// The pointer moved while a file from another app is dragged, after the
     /// widgets under it reported any target.
     DesktopPointerMoved,
+    /// A poll found the pointer of another app's drag over no tagged target,
+    /// which may still be over an untagged device card.
+    DesktopPointerOffTargets,
     ClearDragTarget,
     /// The cursor left `target`; another target it entered meanwhile stays.
     LeaveDragTarget(crate::state::BrowserDropTarget),
     CancelDrag(String),
     EndDragSample,
+    /// What was read of the dragged file for its ghost; a failed read shows
+    /// no ghost, and the drop still says why if it fails again.
+    DragGhostRead(Result<Box<crate::domains::drop_ghost::DragGhostRead>, String>),
     LocalRootWatchEvent(LocalRootWatchEvent),
     ReconcileLocalRoot {
         root: PathBuf,
@@ -129,6 +138,9 @@ pub struct BrowserAction {
     pub scan_root: Option<(PathBuf, u64)>,
     /// Release the drag here, as a button release over it would.
     pub release: Option<crate::state::BrowserDropTarget>,
+    /// Read the file a drag just started carrying, off the UI thread, for
+    /// its ghost.
+    pub read_drag_ghost: Option<MediaSourceRef>,
 }
 
 /// What a drag carries, which decides the tracks it lands on.
@@ -201,6 +213,9 @@ impl crate::state::BrowserDropTarget {
             }
             Target::DevicePanel { drop, .. } => drop.hover_status(),
             Target::ClipSlot { row, .. } => format!("Clip slot in row {}", row + 1),
+            Target::NewTrackSlot { row } => {
+                format!("New {kind} track, Clip slot in row {}", row + 1)
+            }
         }
     }
 
@@ -426,6 +441,7 @@ impl BrowserState {
             BrowserMsg::PendingDragMoved { x, y } => {
                 if self.move_pending_drag(x, y) {
                     action.status = Some(self.moving_status());
+                    action.read_drag_ghost = self.drag_source.clone();
                 }
             }
             BrowserMsg::DragHoverTrack {
@@ -522,7 +538,25 @@ impl BrowserState {
                     &mut action,
                 );
             }
-            BrowserMsg::DesktopFileHovered(path) => action.status = self.hover_desktop_file(path),
+            BrowserMsg::DragHoverNewTrackSlot { row } => {
+                if self.drag_source.is_none() {
+                    return action;
+                }
+                self.hover(
+                    crate::state::BrowserDropTarget::NewTrackSlot { row },
+                    &mut action,
+                );
+            }
+            BrowserMsg::DesktopFileHovered(path) => {
+                let hovering = Some(crate::state::DesktopDrop::Hovering);
+                let was_hovering = self.desktop_drop == hovering;
+                action.status = self.hover_desktop_file(path);
+                // A hover that starts the drag, or restarts a waiting drop
+                // that cleared its ghost, reads the file.
+                if self.desktop_drop == hovering && !was_hovering {
+                    action.read_drag_ghost = self.drag_source.clone();
+                }
+            }
             BrowserMsg::DesktopFileDropped(path) => self.drop_desktop_file(&path, &mut action),
             BrowserMsg::DesktopDragLeft => {
                 if self.drags_from_desktop() {
@@ -537,6 +571,14 @@ impl BrowserState {
                 Some(crate::state::DesktopDrop::Dropped) => self.miss_desktop_drop(&mut action),
                 _ => {}
             },
+            BrowserMsg::DesktopPointerOffTargets => {
+                if self.desktop_drop == Some(crate::state::DesktopDrop::PointerSeen) {
+                    self.desktop_drop = Some(crate::state::DesktopDrop::Hovering);
+                }
+                if self.drag_target.is_some() {
+                    action.status = self.clear_drag_target();
+                }
+            }
             BrowserMsg::ClearDragTarget => {
                 action.status = self.clear_drag_target();
             }
@@ -544,6 +586,8 @@ impl BrowserState {
                 self.cancel_media_drag();
                 action.status = Some(reason);
             }
+            BrowserMsg::DragGhostRead(Ok(read)) => self.install_ghost_cache(*read),
+            BrowserMsg::DragGhostRead(Err(_)) => {}
             BrowserMsg::EndDragSample => {
                 if self.drag_source.is_some() {
                     self.cancel_media_drag();

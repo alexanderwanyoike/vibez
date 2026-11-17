@@ -392,8 +392,20 @@ impl App {
         Task::none()
     }
 
-    /// Route cross-domain effects requested by the browser domain.
+    /// Route cross-domain effects requested by the browser domain; a drag's
+    /// read runs beside whatever else the action asks for.
     pub(super) fn apply_browser_action(
+        &mut self,
+        mut action: crate::domains::browser::BrowserAction,
+    ) -> Task<Message> {
+        let ghost_read = action
+            .read_drag_ghost
+            .take()
+            .map_or_else(Task::none, |source| self.read_drag_ghost(source));
+        Task::batch([ghost_read, self.apply_browser_effects(action)])
+    }
+
+    fn apply_browser_effects(
         &mut self,
         action: crate::domains::browser::BrowserAction,
     ) -> Task<Message> {
@@ -687,7 +699,7 @@ impl App {
         } else {
             Task::none()
         };
-        Task::batch([export_task, auto_save_task])
+        Task::batch([export_task, auto_save_task, self.poll_desktop_pointer()])
     }
 }
 

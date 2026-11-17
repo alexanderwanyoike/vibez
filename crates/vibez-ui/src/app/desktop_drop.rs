@@ -49,6 +49,9 @@ impl App {
             BrowserDropTarget::ClipSlot { track_id, row } => {
                 Message::ImportLauncherClip { track_id, row }
             }
+            BrowserDropTarget::NewTrackSlot { row } => {
+                Message::ImportLauncherClipOnNewTrack { row }
+            }
         };
         self.state.browser.end_desktop_drop();
         self.update(message)

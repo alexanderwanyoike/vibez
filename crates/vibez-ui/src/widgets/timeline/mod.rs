@@ -241,6 +241,7 @@ mod clips_draw;
 #[cfg(test)]
 mod clips_tests;
 mod drag_preview;
+mod drop_ghost;
 mod fade_drag;
 mod lane_grid;
 mod lane_layers;
@@ -259,6 +260,7 @@ mod time_ruler;
 
 pub use clip_drag::ClipDragAction;
 pub use clips::*;
+pub use drop_ghost::{LaneGhost, NewTrackLane};
 pub use marquee::{build_row_spans, TrackRowSpan};
 pub use minimap::*;
 pub use note_summary::{NoteSpan, NoteSummary};
