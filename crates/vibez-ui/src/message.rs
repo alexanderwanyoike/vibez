@@ -153,6 +153,19 @@ pub enum Message {
 
     // Engine events
     Tick,
+    /// The app's window, where the pointer can be read against it, and its
+    /// scale factor.
+    DesktopPointerWindow {
+        window: Option<Arc<crate::app::PointerWindow>>,
+        scale: f32,
+    },
+    /// How far across the window a poll found the pointer during another
+    /// app's drag, and the drop target the view laid out under it.
+    DesktopPointerProbed {
+        x: f32,
+        /// The target there and its left edge.
+        under: Option<(crate::domains::desktop_pointer::PointerTarget, f32)>,
+    },
     EngineMetering {
         peak_l: f32,
         peak_r: f32,

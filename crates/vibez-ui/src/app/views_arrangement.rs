@@ -134,7 +134,10 @@ impl App {
                     )))
                     .on_release(Message::DropSampleOnEmptyArrangement);
             }
-            return area.into();
+            return super::desktop_pointer::drop_target(
+                area,
+                crate::domains::desktop_pointer::PointerTarget::NewTrackRow,
+            );
         }
 
         let playhead_beats = self.state.transport.position_beats();
@@ -433,7 +436,10 @@ impl App {
                     })
                     .on_exit(Message::Browser(BrowserMsg::ClearDragTarget));
             }
-            let clip_canvas: Element<'_, Message> = clip_canvas_area.into();
+            let clip_canvas = super::desktop_pointer::drop_target(
+                clip_canvas_area,
+                crate::domains::desktop_pointer::PointerTarget::Lane(track_id),
+            );
 
             let header =
                 mouse_area(header).on_right_press(Message::View(ViewMsg::ShowContextMenu {
@@ -693,6 +699,10 @@ impl App {
                 crate::state::BrowserDropTarget::EmptyArrangement { beat: 0.0 },
             )))
             .on_release(Message::DropSampleOnEmptyArrangement);
+        let zone = super::desktop_pointer::drop_target(
+            zone,
+            crate::domains::desktop_pointer::PointerTarget::NewTrackRow,
+        );
         row![header, zone]
             .height(Length::Fixed(NEW_TRACK_ROW_HEIGHT))
             .into()

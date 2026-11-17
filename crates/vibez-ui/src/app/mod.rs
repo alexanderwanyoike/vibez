@@ -39,6 +39,8 @@ struct App {
     state: AppState,
     sidechain_sync_inputs: Option<sidechain_sync::RoutingInputs>,
     track_meter_peaks: std::collections::HashMap<vibez_core::id::TrackId, (f32, f32)>,
+    /// Follows the pointer during another app's drag.
+    pointer_poll: desktop_pointer::PointerPoll,
     edge_shortcuts: EdgeShortcutState,
     cmd_tx: crate::domains::EngineCommandQueue,
     event_rx: Option<Consumer<EngineEvent>>,
@@ -278,6 +280,21 @@ mod window_policy;
 mod sample_retirement;
 
 mod desktop_drop;
+
+mod desktop_pointer;
+pub(crate) use desktop_pointer::PointerWindow;
+#[cfg(target_os = "macos")]
+mod desktop_pointer_macos;
+#[cfg(windows)]
+mod desktop_pointer_windows;
+#[cfg(all(test, windows))]
+mod desktop_pointer_windows_tests;
+#[cfg(not(any(target_os = "macos", windows)))]
+mod desktop_pointer_x11;
+mod drop_target_probe;
+
+#[cfg(test)]
+mod desktop_pointer_tests;
 
 mod drag_ghost;
 
@@ -544,6 +561,7 @@ impl App {
             device_presets: Default::default(),
             sidechain_sync_inputs: None,
             track_meter_peaks: Default::default(),
+            pointer_poll: Default::default(),
             plugin_instrument_rx,
             plugin_instrument_tx,
             plugin_window_manager,
