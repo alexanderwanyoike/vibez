@@ -201,24 +201,8 @@ use super::desktop_pointer_x11 as platform;
 #[cfg(windows)]
 use super::desktop_pointer_windows as platform;
 
-/// Where the pointer cannot be read yet, so a drop waits for the widgets.
 #[cfg(target_os = "macos")]
-mod platform {
-    use iced::window::raw_window_handle::WindowHandle;
-
-    #[derive(Debug)]
-    pub enum PointerWindow {}
-
-    impl PointerWindow {
-        pub(in super::super) fn from_handle(_handle: WindowHandle<'_>) -> Option<Self> {
-            None
-        }
-
-        pub(in super::super) fn pointer(&self) -> Option<(f32, f32)> {
-            match *self {}
-        }
-    }
-}
+use super::desktop_pointer_macos as platform;
 
 /// The platform's pointer source: built from the window handle, it reads
 /// the pointer relative to the window in physical pixels.
