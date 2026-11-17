@@ -48,7 +48,8 @@ pub(crate) fn load_bundled_fonts() {
 /// The Plex Sans Condensed faces declare a condensed width, and cosmic-text
 /// only offers faces whose width equals the one asked for, so a role that
 /// asks for the normal width never reaches them and draws in whatever the
-/// platform falls back to.
+/// platform falls back to. A family is only used at a weight it has a face
+/// for, so every role's weight needs a bundled face too.
 const PLEX_SANS_CONDENSED: Font = Font {
     stretch: Stretch::Condensed,
     ..Font::with_name("IBM Plex Sans Condensed")
