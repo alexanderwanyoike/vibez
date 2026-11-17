@@ -23,8 +23,9 @@ use crate::timeline_snap::SnapTargets;
 use crate::widgets::arrange_corner::{arrange_corner, arrangement_size_labels, song_length_label};
 use crate::widgets::quiet_scroll;
 use crate::widgets::timeline::{
-    build_row_spans, ArrangementMinimap, MinimapTrack, RulerWidget, TimeRulerWidget, TimelineClip,
-    TrackClipCanvas, ARRANGE_RULER_HEIGHT, OVERVIEW_HEIGHT, TIME_RULER_HEIGHT,
+    build_row_spans, ArrangementMinimap, LaneGhost, MinimapTrack, NewTrackLane, RulerWidget,
+    TimeRulerWidget, TimelineClip, TrackClipCanvas, ARRANGE_RULER_HEIGHT, OVERVIEW_HEIGHT,
+    TIME_RULER_HEIGHT,
 };
 use crate::widgets::track_header::{
     view_editable_channel_name, view_track_header, with_resize_edge, ChannelNameStyle,
@@ -33,6 +34,7 @@ use crate::widgets::track_header::{
 
 use super::*;
 use crate::domains::browser::DragMedia;
+use crate::domains::drop_ghost::GhostPlace;
 
 /// Expanded return or master automation scrolls inside this cap so the
 /// pinned footer can never squeeze the track list out of the window.
@@ -49,13 +51,22 @@ impl App {
         let timeline = self.state.arrangement.resolve_timeline().editor;
         if self.state.project_tracks.tracks.is_empty() {
             let browser_drag_active = self.state.browser.drag_source.is_some();
+            let ghost = self
+                .state
+                .browser
+                .drop_ghost(self.state.transport.bpm)
+                .filter(|ghost| matches!(ghost.place, GhostPlace::NewTrack { .. }));
+            // The ghost says where the drop lands, so the zone would only
+            // repeat it.
             let zone = match self.state.browser.drag_target {
-                Some(crate::state::BrowserDropTarget::EmptyArrangement { .. }) => {
+                Some(crate::state::BrowserDropTarget::EmptyArrangement { .. })
+                    if ghost.is_none() =>
+                {
                     self.state.browser.drop_zone()
                 }
                 _ => None,
             };
-            let prompt_text = if zone.is_some() {
+            let prompt_text = if zone.is_some() || ghost.is_some() {
                 ""
             } else if self.state.browser.drag_media() == Some(DragMedia::Midi) {
                 "Drop for a new MIDI track"
@@ -71,15 +82,37 @@ impl App {
             use crate::widgets::drop_highlight::{
                 drop_highlight, CARD_ZONE_INSET, CARD_ZONE_RADIUS,
             };
-            let mut area = mouse_area(drop_highlight(
-                container(centered)
-                    .width(Length::Fill)
-                    .height(Length::FillPortion(5))
-                    .style(|_theme: &Theme| container::Style {
-                        background: Some(th::bg_dark().into()),
-                        ..Default::default()
+            let geometry = self.state.view.viewport.geometry();
+            // The new track takes the top row; its lane starts at the area's
+            // left edge, where the hover measures beats from.
+            let content: Element<'_, Message> = match ghost {
+                Some(ghost) => column![
+                    container(
+                        text(ghost.media.new_track().label())
+                            .size(11)
+                            .color(th::text())
+                    )
+                    .padding([6, 8]),
+                    canvas(NewTrackLane {
+                        ghost: LaneGhost::new(&ghost, geometry.pixels_per_beat()),
+                        geometry,
                     })
-                    .into(),
+                    .width(Length::Fill)
+                    .height(Length::Fixed(54.0)),
+                ]
+                .into(),
+                None => centered.into(),
+            };
+            let surface = container(content)
+                .width(Length::Fill)
+                .height(Length::FillPortion(5))
+                .style(|_theme: &Theme| container::Style {
+                    background: Some(th::bg_dark().into()),
+                    ..Default::default()
+                })
+                .into();
+            let mut area = mouse_area(drop_highlight(
+                surface,
                 zone,
                 CARD_ZONE_RADIUS,
                 CARD_ZONE_INSET,
@@ -91,7 +124,6 @@ impl App {
             }));
             if browser_drag_active {
                 let grid = self.state.view.arrange_grid;
-                let geometry = self.state.view.viewport.geometry();
                 area = area
                     .on_move(move |point| {
                         let beat =
@@ -340,6 +372,12 @@ impl App {
             .with_snap_targets(snap_targets.clone())
             .with_clip_drag(timeline.clip_drag.as_ref().map(|drag| drag.preview.clone()))
             .with_drop_zone(self.state.browser.lane_drop_zone(track.id))
+            .with_drop_ghost(
+                self.state
+                    .browser
+                    .lane_drop_ghost(track.id, bpm)
+                    .map(|ghost| LaneGhost::new(&ghost, geometry.pixels_per_beat())),
+            )
             .with_drop_refusal(refusal.clone());
             if let Some(preview) = self.state.audio_recording.preview_for_track(track.id) {
                 let name = match preview.source {
@@ -431,7 +469,18 @@ impl App {
                 (false, Some(DragMedia::Midi)) => "New MIDI track",
                 (false, _) => "New audio track",
             };
-            let header = container(text("+").size(14).color(th::accent()))
+            let ghost = self
+                .state
+                .browser
+                .drop_ghost(bpm)
+                .filter(|ghost| matches!(ghost.place, GhostPlace::NewTrack { .. }));
+            let header_text = match &ghost {
+                Some(ghost) => text(ghost.media.new_track().label())
+                    .size(11)
+                    .color(th::text()),
+                None => text("+").size(14).color(th::accent()),
+            };
+            let header = container(header_text)
                 .width(Length::Fixed(
                     crate::widgets::track_header::TRACK_HEADER_TOTAL_WIDTH,
                 ))
@@ -455,25 +504,30 @@ impl App {
                 .height(Length::Fixed(54.0))
                 .center_x(Length::Fill)
                 .center_y(Length::Fixed(54.0));
-            let zone = mouse_area(drop_highlight(
-                lane.into(),
-                zone,
-                CARD_ZONE_RADIUS,
-                CARD_ZONE_INSET,
-            ))
-            .on_move(move |point| {
-                let beat = grid.snap_beat(
-                    empty_geometry.x_to_beat(point.x),
-                    empty_geometry.pixels_per_beat(),
-                );
-                Message::Browser(BrowserMsg::DragHoverEmptyArrangement {
-                    beat: beat.max(0.0),
+            let lane: Element<'_, Message> = match ghost {
+                Some(ghost) => canvas(NewTrackLane {
+                    ghost: LaneGhost::new(&ghost, empty_geometry.pixels_per_beat()),
+                    geometry: empty_geometry,
                 })
-            })
-            .on_exit(Message::Browser(BrowserMsg::LeaveDragTarget(
-                crate::state::BrowserDropTarget::EmptyArrangement { beat: 0.0 },
-            )))
-            .on_release(Message::DropSampleOnEmptyArrangement);
+                .width(Length::Fill)
+                .height(Length::Fixed(54.0))
+                .into(),
+                None => drop_highlight(lane.into(), zone, CARD_ZONE_RADIUS, CARD_ZONE_INSET),
+            };
+            let zone = mouse_area(lane)
+                .on_move(move |point| {
+                    let beat = grid.snap_beat(
+                        empty_geometry.x_to_beat(point.x),
+                        empty_geometry.pixels_per_beat(),
+                    );
+                    Message::Browser(BrowserMsg::DragHoverEmptyArrangement {
+                        beat: beat.max(0.0),
+                    })
+                })
+                .on_exit(Message::Browser(BrowserMsg::LeaveDragTarget(
+                    crate::state::BrowserDropTarget::EmptyArrangement { beat: 0.0 },
+                )))
+                .on_release(Message::DropSampleOnEmptyArrangement);
             track_rows = track_rows.push(row![header, zone].height(Length::Fixed(54.0)));
         }
 

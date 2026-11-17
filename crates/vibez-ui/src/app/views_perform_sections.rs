@@ -370,6 +370,17 @@ impl App {
                 .with_snap_targets(snap_targets.clone())
                 .with_clip_drag(editor.clip_drag.as_ref().map(|drag| drag.preview.clone()))
                 .with_drop_zone(self.state.browser.lane_drop_zone(track.id))
+                .with_drop_ghost(
+                    self.state
+                        .browser
+                        .lane_drop_ghost(track.id, self.state.transport.bpm)
+                        .map(|ghost| {
+                            crate::widgets::timeline::LaneGhost::new(
+                                &ghost,
+                                viewport.geometry().pixels_per_beat(),
+                            )
+                        }),
+                )
                 .with_drop_refusal(refusal.clone())
                 .with_vertical_track_scrolling();
                 if let Some(preview) = recording_preview.as_ref().filter(|preview| {

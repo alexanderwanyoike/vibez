@@ -321,6 +321,10 @@ impl TrackClipCanvas {
             }
         }
 
+        if let Some(ghost) = &self.drop_ghost {
+            ghost.draw(frame, self.geometry(), self.track_color, w, h);
+        }
+
         // Selection region tint. Only drawn on the lane the selection
         // originated on; ruler-drawn selections (track_id = None) still
         // show across every lane.
@@ -411,7 +415,12 @@ impl TrackClipCanvas {
                 .with_width(1.0),
         );
 
-        if let Some(zone) = self.drop_zone.as_ref().filter(|_| drop_hover) {
+        // The ghost says where the drop lands, so the zone would only repeat it.
+        if let Some(zone) = self
+            .drop_zone
+            .as_ref()
+            .filter(|_| drop_hover && self.drop_ghost.is_none())
+        {
             use crate::widgets::drop_highlight::{draw_zone, CARD_ZONE_INSET, CARD_ZONE_RADIUS};
             let origin = bounds.position() + whole_pixel_offset(bounds.position());
             let area = Rectangle::new(
