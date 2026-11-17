@@ -122,6 +122,8 @@ fn coverage(command: &EngineCommand) -> Coverage {
         | C::StartAudition { .. }
         | C::StopAudition
         | C::SetAuditionGain(_)
+        | C::StartMidiAudition { .. }
+        | C::SetAuditionVoice(_)
         | C::ExternalNoteOn { .. }
         | C::ExternalNoteOff { .. }
         | C::StartNoteRepeat { .. }
@@ -835,6 +837,23 @@ fn cases() -> Vec<Case> {
         }),
         case!("StopAudition", false, |_| C::StopAudition),
         case!("SetAuditionGain", false, |_| C::SetAuditionGain(0.5)),
+        case!("StartMidiAudition", false, |f| C::StartMidiAudition {
+            pattern: Arc::new(crate::midi_audition::MidiAuditionPattern::new(
+                vec![MidiNote {
+                    pitch: 60,
+                    velocity: 100,
+                    start_beat: 0.0,
+                    duration_beats: 1.0,
+                }],
+                4.0,
+            )),
+            target: Some(f.synth),
+            start: crate::commands::AuditionStart::Immediate,
+            looped: true,
+        }),
+        case!("SetAuditionVoice", false, |_| C::SetAuditionVoice(
+            vibez_instruments::create_instrument(InstrumentKind::SubtractiveSynth, 48_000.0)
+        )),
         case!("ExternalNoteOn", false, |f| C::ExternalNoteOn {
             track_id: f.synth,
             pitch: 60,

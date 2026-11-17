@@ -39,6 +39,7 @@ pub mod hardware_keys;
 pub mod instrument_card;
 pub mod labelled_choice;
 pub mod limiter;
+pub mod midi_audition;
 pub mod midi_file_import;
 pub mod midi_file_landing;
 pub mod midi_from;

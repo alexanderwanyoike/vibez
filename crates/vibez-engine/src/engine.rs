@@ -413,6 +413,7 @@ impl AudioEngine {
             capture.samples.fill(0.0);
         }
 
+        self.sequence_midi_audition(frames);
         self.process_multitrack(
             output,
             frames,
@@ -441,6 +442,9 @@ impl AudioEngine {
             self.sample_rate,
             &mut self.event_tx,
         );
+        self.audition
+            .midi
+            .render_preview_voice(output, frames, channels, self.audition.gain);
 
         // ---- 5. Advance transport and send events -----------------------
         let was_playing = self.transport.is_playing();
@@ -827,6 +831,14 @@ mod stuck_note_tests;
 #[cfg(test)]
 #[path = "engine_midi_from_tests.rs"]
 mod midi_from_tests;
+
+#[cfg(test)]
+#[path = "engine_midi_audition_tests.rs"]
+mod midi_audition_tests;
+
+#[cfg(test)]
+#[path = "engine_note_listener_test_support.rs"]
+mod note_listener_test_support;
 
 #[cfg(test)]
 #[path = "engine_transport_ring_tests.rs"]

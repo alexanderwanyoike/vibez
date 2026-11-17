@@ -24,9 +24,11 @@ mod routed_notes;
 pub use effect_slot::EffectSlot;
 pub(crate) use effect_slot::MeterSide;
 use groove::collect_timed_note_events;
+pub(crate) use groove::frame_for_beat;
 pub use pan::{any_solo, balance_pan, equal_power_pan};
 use render_context::InstrumentRenderBlock;
 pub(crate) use render_context::InstrumentRenderContext;
+pub(crate) use routed_notes::RoutedNotes;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PlaybackTimeline {
@@ -205,6 +207,8 @@ pub struct EngineTrack {
     /// instrument started will never end.
     note_epoch: u64,
     pub(crate) routed_notes: routed_notes::RoutedNotes,
+    /// The Browser's MIDI audition, played here and never recorded.
+    pub(crate) audition_notes: RoutedNotes<u64>,
 }
 
 impl EngineTrack {
@@ -305,6 +309,7 @@ impl EngineTrack {
         // Send all events with timing, then render the whole buffer at once
         let instrument = self.instrument.as_mut().unwrap();
         self.routed_notes.schedule(instrument.as_mut());
+        self.audition_notes.schedule(instrument.as_mut());
 
         for &(frame, pitch) in &self.timed_note_offs {
             instrument.note_off_at(pitch, frame);
@@ -375,6 +380,7 @@ impl EngineTrack {
         let mut note_on_index = 0;
         let mut note_off_index = 0;
         let mut routed = 0;
+        let mut auditioned = 0;
 
         for frame in 0..frames {
             let (repeat_triggers, repeat_count) =
@@ -411,6 +417,8 @@ impl EngineTrack {
             }
             self.routed_notes
                 .play_due(frame as u32, &mut routed, instrument.as_mut());
+            self.audition_notes
+                .play_due(frame as u32, &mut auditioned, instrument.as_mut());
 
             let start = frame * channels;
             let end = start + channels;

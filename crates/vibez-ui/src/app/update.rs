@@ -805,6 +805,7 @@ impl App {
             | Message::DropSampleOnDevicePanel { .. }
             | Message::LocalSamplePreviewReady(..)
             | Message::BrowserWaveformReady(..)
+            | Message::BrowserMidiPreviewReady { .. }
             | Message::BrowserAuditionReady { .. }
             | Message::ImportSelectedBrowserSampleToArrangement
             | Message::SelectAdjacentBrowserResult(..)

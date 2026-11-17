@@ -54,6 +54,7 @@ impl EngineTrack {
             played_this_block: false,
             note_epoch: 0,
             routed_notes: super::routed_notes::RoutedNotes::default(),
+            audition_notes: super::RoutedNotes::default(),
         }
     }
 

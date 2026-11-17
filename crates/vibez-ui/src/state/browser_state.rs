@@ -23,6 +23,53 @@ pub enum BrowserAuditionPlan {
     Warp { source_bpm: f64 },
 }
 
+/// A MIDI file handed to the Audition Bus and the track it plays on, fixed
+/// when it started.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MidiAuditionStart {
+    pub source: MediaSourceRef,
+    pub target: Option<TrackId>,
+}
+
+/// What the Audition footer says the Audition is doing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuditionStatus {
+    Fetching,
+    /// A Raw buffer plays while its Warp treatment is prepared.
+    Warping,
+    Preparing,
+    Queued,
+    Playing(Option<AuditionMode>),
+    /// The selected source could not be read, so its strip or waveform is
+    /// empty.
+    Unavailable,
+    /// A source is ready to audition in the selected treatment.
+    Ready(AuditionMode),
+    Select,
+}
+
+impl AuditionStatus {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Fetching => "FETCHING",
+            Self::Warping => "WARPING",
+            Self::Preparing => "PREPARING",
+            Self::Queued => "QUEUED",
+            Self::Playing(Some(mode)) | Self::Ready(mode) => mode.label(),
+            Self::Playing(None) => "PLAYING",
+            Self::Unavailable => "UNAVAILABLE",
+            Self::Select => "SELECT",
+        }
+    }
+
+    /// Whether the status keeps the footer's fixed width, so the waveform or
+    /// strip beside it never shifts. An unreadable source leaves that empty,
+    /// so its longer status may push it aside.
+    pub fn keeps_its_width(self) -> bool {
+        self != Self::Unavailable
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BrowserSearchScope {
     #[default]
@@ -106,17 +153,15 @@ pub struct BrowserState {
     /// and WARP completions carry it so stale results never start
     /// playback after the user stopped or superseded the request.
     pub audition_generation: u64,
-    /// UI-retained clone of the audio last handed to the engine's
-    /// Audition Bus. The engine voice must never hold the final
-    /// reference: dropping it inside the RT callback would free on
-    /// the audio thread and violate the allocation-free invariant.
-    pub audition_audio: Option<Arc<DecodedAudio>>,
-    /// Ring of the most recently superseded audition buffers. The
-    /// Audition Bus holds at most four voices (one active + three
-    /// outgoing fades), so keeping the last four superseded Arcs
-    /// alive UI-side guarantees a re-trigger never leaves the engine
-    /// with the final reference either.
-    pub audition_audio_retired: [Option<Arc<DecodedAudio>>; 4],
+    /// The audio the Audition Bus plays, and the buffers its fading voices
+    /// may still hold.
+    pub audition_audio: super::EngineHeld<DecodedAudio, 4>,
+    /// The selected MIDI file's notes, shown in place of a waveform.
+    pub midi_preview: Option<crate::domains::midi_audition::MidiPreview>,
+    /// The MIDI file the Audition Bus plays, and the ones it may still hold.
+    pub audition_pattern: super::EngineHeld<vibez_engine::midi_audition::MidiAuditionPattern, 4>,
+    /// The MIDI file last handed to the Audition Bus.
+    pub midi_audition: Option<MidiAuditionStart>,
     pub audition_mode: AuditionMode,
     pub scan_in_progress: bool,
     pub mode: SampleBrowserMode,
@@ -178,8 +223,10 @@ impl Default for BrowserState {
             audition_position_frames: 0,
             audition_playback_mode: None,
             audition_generation: 0,
-            audition_audio: None,
-            audition_audio_retired: [None, None, None, None],
+            audition_audio: super::EngineHeld::default(),
+            midi_preview: None,
+            audition_pattern: super::EngineHeld::default(),
+            midi_audition: None,
             audition_mode: AuditionMode::default(),
             scan_in_progress: false,
             mode: SampleBrowserMode::default(),
@@ -497,9 +544,109 @@ impl BrowserState {
     }
 
     pub fn audition_playhead_fraction(&self) -> Option<f32> {
-        let frames = self.audition_audio.as_ref()?.num_frames();
+        let frames = self.audition_audio.current()?.num_frames();
         (self.audition_playing && frames > 0)
             .then(|| (self.audition_position_frames as f64 / frames as f64).clamp(0.0, 1.0) as f32)
+    }
+
+    pub fn audition_status(&self) -> AuditionStatus {
+        if self.remote.preview_in_progress {
+            AuditionStatus::Fetching
+        } else if self.audition_loading
+            && self.audition_playing
+            && self.audition_playback_mode == Some(AuditionMode::Raw)
+        {
+            AuditionStatus::Warping
+        } else if self.audition_loading {
+            AuditionStatus::Preparing
+        } else if self.audition_queued {
+            AuditionStatus::Queued
+        } else if self.audition_playing {
+            match self.audition_playback_mode {
+                Some(AuditionMode::Raw) if self.audition_mode == AuditionMode::Warp => {
+                    AuditionStatus::Warping
+                }
+                mode => AuditionStatus::Playing(mode),
+            }
+        } else if self.waveform_error.is_some() {
+            AuditionStatus::Unavailable
+        } else if self.waveform_audio.is_some() || self.midi_preview.is_some() {
+            AuditionStatus::Ready(self.audition_mode)
+        } else {
+            AuditionStatus::Select
+        }
+    }
+
+    /// Whether the selection is a local MIDI file, shown as notes rather
+    /// than a waveform.
+    pub fn selected_is_midi(&self) -> bool {
+        self.mode == SampleBrowserMode::Local
+            && self.selected_source.as_ref().is_some_and(|source| {
+                crate::domains::browser::DragMedia::of(source)
+                    == crate::domains::browser::DragMedia::Midi
+            })
+    }
+
+    /// The track that plays the shown MIDI file, given the MIDI target a new
+    /// audition would play on.
+    pub fn midi_audition_player(&self, target: Option<TrackId>) -> Option<TrackId> {
+        match &self.midi_audition {
+            Some(started)
+                if (self.audition_playing || self.audition_queued) && self.shows_started_midi() =>
+            {
+                started.target
+            }
+            _ => target,
+        }
+    }
+
+    /// Whether the MIDI file last handed to the Audition Bus is the one shown.
+    fn shows_started_midi(&self) -> bool {
+        self.audition_pattern.current().is_some()
+            && self.midi_preview.as_ref().is_some_and(|preview| {
+                self.midi_audition
+                    .as_ref()
+                    .is_some_and(|started| started.source == preview.source)
+            })
+    }
+
+    /// Where the playhead sits in the MIDI strip, at `samples_per_beat`.
+    pub fn midi_audition_playhead(&self, samples_per_beat: f64) -> Option<f32> {
+        let pattern = self.audition_pattern.current()?;
+        if !self.audition_playing || !self.shows_started_midi() {
+            return None;
+        }
+        crate::domains::midi_audition::playhead_fraction(
+            pattern,
+            self.audition_position_frames,
+            samples_per_beat,
+            self.audition_playback_mode
+                .is_some_and(crate::state::AuditionMode::loops),
+        )
+    }
+
+    /// Shows `preview` if its file is still the selected one.
+    pub fn install_midi_preview(
+        &mut self,
+        preview: crate::domains::midi_audition::MidiPreview,
+    ) -> bool {
+        if self.selected_source.as_ref() != Some(&preview.source) {
+            return false;
+        }
+
+        self.waveform_loading = false;
+        self.waveform_error = None;
+        self.midi_preview = Some(preview);
+        true
+    }
+
+    pub fn midi_preview_for(
+        &self,
+        source: &MediaSourceRef,
+    ) -> Option<&crate::domains::midi_audition::MidiPreview> {
+        self.midi_preview
+            .as_ref()
+            .filter(|preview| &preview.source == source)
     }
 
     pub fn import_input_for_source(&self, source: &MediaSourceRef) -> AuditionImportInput {
@@ -649,6 +796,7 @@ impl BrowserState {
     }
 
     fn clear_waveform(&mut self) {
+        self.midi_preview = None;
         self.waveform_source = None;
         self.waveform_audio = None;
         self.waveform_loop_fit = None;

@@ -1,4 +1,4 @@
-//! MIDI From in the engine: each receiving track takes the notes its source track's instrument played this block.
+//! Notes routed into a track from outside its clips, by MIDI From (a receiver takes what its source track's instrument played this block) or by the Browser's MIDI audition.
 
 use super::*;
 use crate::routing::ChannelIndex;
@@ -15,7 +15,39 @@ impl AudioEngine {
     pub(super) fn release_routed_notes(&mut self, channel_index: usize) {
         if let ChannelIndex::Track(track) = self.routing.channels[channel_index].binding {
             self.tracks[track].routed_notes.release();
+            self.tracks[track].audition_notes.release();
         }
+    }
+
+    pub(super) fn admit_audition_notes(&mut self, channel_index: usize, frames: u32) {
+        if let ChannelIndex::Track(track) = self.routing.channels[channel_index].binding {
+            self.audition
+                .midi
+                .admit_into(&mut self.tracks[track], frames);
+        }
+    }
+
+    /// Works out the Browser MIDI audition's notes for this block, before
+    /// any track renders.
+    pub(super) fn sequence_midi_audition(&mut self, frames: usize) {
+        let bpm = self.transport.bpm();
+        let samples_per_beat = if bpm > 0.0 {
+            f64::from(self.sample_rate) * 60.0 / bpm
+        } else {
+            0.0
+        };
+        let tracks = &self.tracks;
+        self.audition.midi.sequence(
+            frames,
+            self.transport.is_playing(),
+            samples_per_beat,
+            |id| {
+                tracks
+                    .iter()
+                    .any(|track| track.id == id && track.instrument.is_some())
+            },
+            &mut self.event_tx,
+        );
     }
 
     /// The routing order renders a source before its receiver, so the

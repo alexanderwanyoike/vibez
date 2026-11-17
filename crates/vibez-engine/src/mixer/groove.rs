@@ -255,7 +255,12 @@ fn push_note_off(
     }
 }
 
-fn frame_for_beat(beat: f64, pos: u64, frames: usize, samples_per_beat: f64) -> Option<u32> {
+pub(crate) fn frame_for_beat(
+    beat: f64,
+    pos: u64,
+    frames: usize,
+    samples_per_beat: f64,
+) -> Option<u32> {
     let sample = (beat * samples_per_beat).ceil();
     if !sample.is_finite() || sample < 0.0 {
         return None;
