@@ -7,19 +7,22 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use proc_macro2::{TokenStream, TokenTree};
+use syn::visit::Visit;
+
 use iced::advanced::graphics::text::cosmic_text;
 
 use super::{draws, loaded_faces, PLEX_SANS_CONDENSED_FAMILY};
 
 /// Literals drawn in the default font, which falls back across the system's
 /// faces, so they may hold characters Plex lacks. Each is a path under
-/// `src` and the literal as written.
+/// `src` and the text the literal holds.
 const DRAWN_IN_THE_DEFAULT_FONT: &[(&str, &str)] = &[
-    ("widgets/device_controls.rs", "\\u{25BE}"),
-    ("widgets/device_controls.rs", "\\u{25B8}"),
-    ("widgets/gain_device.rs", "\\u{25CF} Clip"),
-    ("app/views_arrangement.rs", "\\u{25CF}"),
-    ("app/views_clip_launcher.rs", "■"),
+    ("widgets/device_controls.rs", "\u{25BE}"),
+    ("widgets/device_controls.rs", "\u{25B8}"),
+    ("widgets/gain_device.rs", "\u{25CF} Clip"),
+    ("app/views_arrangement.rs", "\u{25CF}"),
+    ("app/views_clip_launcher.rs", "\u{25A0}"),
 ];
 
 /// The bundled Plex Sans Condensed faces, one per weight.
@@ -50,143 +53,70 @@ fn production_sources(dir: &Path, found: &mut Vec<PathBuf>) {
     }
 }
 
-/// A string literal as written between its quotes, the text it holds and
-/// the line it starts on.
-struct Literal {
-    written: String,
-    text: String,
-    line: usize,
+fn is_test_only(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        attr.path().is_ident("test")
+            || (attr.path().is_ident("cfg")
+                && attr
+                    .parse_args::<syn::Ident>()
+                    .is_ok_and(|flag| flag == "test"))
+    })
 }
 
-/// The string literals of `source` before its trailing `mod tests`, outside
-/// comments.
-fn string_literals(source: &str) -> Vec<Literal> {
-    let source = source.replace("\r\n", "\n");
-    let source = source
-        .find("\n#[cfg(test)]\nmod tests {")
-        .map_or(source.as_str(), |end| &source[..end]);
-    let chars: Vec<char> = source.chars().collect();
-    let mut literals = Vec::new();
-    let mut line = 1;
-    let mut i = 0;
-    while i < chars.len() {
-        match chars[i] {
-            '\n' => {
-                line += 1;
-                i += 1;
-            }
-            '/' if chars.get(i + 1) == Some(&'/') => {
-                while i < chars.len() && chars[i] != '\n' {
-                    i += 1;
-                }
-            }
-            '\'' => {
-                // A char literal, or a lifetime, which has no closing quote.
-                if chars.get(i + 1) == Some(&'\\') {
-                    i += 2;
-                    while i < chars.len() && chars[i] != '\'' {
-                        i += 1;
-                    }
-                    i += 1;
-                } else if chars.get(i + 2) == Some(&'\'') {
-                    i += 3;
-                } else {
-                    i += 1;
-                }
-            }
-            'r' if matches!(chars.get(i + 1), Some('"' | '#'))
-                && (i == 0 || !chars[i - 1].is_alphanumeric()) =>
-            {
-                let hashes = chars[i + 1..].iter().take_while(|c| **c == '#').count();
-                let open = i + 1 + hashes;
-                if chars.get(open) != Some(&'"') {
-                    i += 1;
-                    continue;
-                }
-                let start_line = line;
-                let mut end = open + 1;
-                while end < chars.len()
-                    && !(chars[end] == '"'
-                        && chars[end + 1..].iter().take_while(|c| **c == '#').count() >= hashes)
-                {
-                    if chars[end] == '\n' {
-                        line += 1;
-                    }
-                    end += 1;
-                }
-                let written: String = chars[open + 1..end.min(chars.len())].iter().collect();
-                literals.push(Literal {
-                    text: written.clone(),
-                    written,
-                    line: start_line,
-                });
-                i = end + 1 + hashes;
-            }
-            '"' => {
-                let start_line = line;
-                let mut written = String::new();
-                let mut text = String::new();
-                i += 1;
-                while i < chars.len() && chars[i] != '"' {
-                    let c = chars[i];
-                    written.push(c);
-                    if c == '\n' {
-                        line += 1;
-                    }
-                    if c != '\\' {
-                        text.push(c);
-                        i += 1;
-                        continue;
-                    }
-                    let escaped = chars.get(i + 1).copied().unwrap_or_default();
-                    written.push(escaped);
-                    i += 2;
-                    match escaped {
-                        'u' => {
-                            let mut hex = String::new();
-                            while i < chars.len() && chars[i] != '}' {
-                                written.push(chars[i]);
-                                if chars[i] != '{' {
-                                    hex.push(chars[i]);
-                                }
-                                i += 1;
-                            }
-                            written.push('}');
-                            i += 1;
-                            text.extend(
-                                u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32),
-                            );
-                        }
-                        '\n' => {
-                            line += 1;
-                            while i < chars.len() && chars[i].is_whitespace() {
-                                if chars[i] == '\n' {
-                                    line += 1;
-                                }
-                                i += 1;
-                            }
-                        }
-                        'n' | 't' | 'r' | '0' => text.push(' '),
-                        other => text.push(other),
+/// The text of every string literal outside test code and attributes,
+/// including those inside macro calls such as `format!` and `row!`.
+#[derive(Default)]
+struct StringLiterals(Vec<String>);
+
+impl StringLiterals {
+    fn tokens(&mut self, stream: TokenStream) {
+        for tree in stream {
+            match tree {
+                TokenTree::Group(group) => self.tokens(group.stream()),
+                TokenTree::Literal(literal) => {
+                    if let syn::Lit::Str(text) = syn::Lit::new(literal) {
+                        self.0.push(text.value());
                     }
                 }
-                i += 1;
-                literals.push(Literal {
-                    written,
-                    text,
-                    line: start_line,
-                });
+                TokenTree::Ident(_) | TokenTree::Punct(_) => {}
             }
-            _ => i += 1,
         }
     }
-    literals
+}
+
+impl<'ast> Visit<'ast> for StringLiterals {
+    fn visit_attribute(&mut self, _: &'ast syn::Attribute) {}
+
+    fn visit_item_mod(&mut self, item: &'ast syn::ItemMod) {
+        if !is_test_only(&item.attrs) {
+            syn::visit::visit_item_mod(self, item);
+        }
+    }
+
+    fn visit_item_fn(&mut self, item: &'ast syn::ItemFn) {
+        if !is_test_only(&item.attrs) {
+            syn::visit::visit_item_fn(self, item);
+        }
+    }
+
+    fn visit_item_impl(&mut self, item: &'ast syn::ItemImpl) {
+        if !is_test_only(&item.attrs) {
+            syn::visit::visit_item_impl(self, item);
+        }
+    }
+
+    fn visit_lit_str(&mut self, literal: &'ast syn::LitStr) {
+        self.0.push(literal.value());
+    }
+
+    fn visit_macro(&mut self, mac: &'ast syn::Macro) {
+        self.tokens(mac.tokens.clone());
+    }
 }
 
 #[test]
 fn every_ui_string_has_glyphs_in_the_bundled_plex_faces() {
     let faces = plex_condensed_faces();
-    let covered = |c: char| faces.iter().all(|face| draws(face, c));
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut sources = Vec::new();
     production_sources(&src, &mut sources);
@@ -200,20 +130,18 @@ fn every_ui_string_has_glyphs_in_the_bundled_plex_faces() {
             .to_string_lossy()
             .replace('\\', "/");
         let source = std::fs::read_to_string(&path).expect("source reads");
-        for literal in string_literals(&source) {
-            let missing: String = literal
-                .text
+        let file = syn::parse_file(&source).expect("source parses");
+        let mut literals = StringLiterals::default();
+        literals.visit_file(&file);
+        for text in literals.0 {
+            let missing: String = text
                 .chars()
-                .filter(|c| !c.is_ascii() && !covered(*c))
+                .filter(|c| !c.is_ascii() && !faces.iter().all(|face| draws(face, *c)))
                 .collect();
             if !missing.is_empty()
-                && !DRAWN_IN_THE_DEFAULT_FONT
-                    .contains(&(relative.as_str(), literal.written.as_str()))
+                && !DRAWN_IN_THE_DEFAULT_FONT.contains(&(relative.as_str(), text.as_str()))
             {
-                uncovered.push(format!(
-                    "{relative}:{}: \"{}\" lacks {missing:?}",
-                    literal.line, literal.written
-                ));
+                uncovered.push(format!("{relative}: {text:?} lacks {missing:?}"));
             }
         }
     }

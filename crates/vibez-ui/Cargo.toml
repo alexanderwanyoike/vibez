@@ -43,6 +43,9 @@ iced_runtime = { workspace = true }
 proptest = "1"
 # Writes the MIDI files the drop tests import.
 midly = { workspace = true }
+# Reads the crate's own sources, so the glyph coverage test sees every UI string literal.
+syn = { version = "2", features = ["full", "visit"] }
+proc-macro2 = "1"
 
 [target.'cfg(not(any(target_os = "macos", windows)))'.dependencies]
 x11rb = "0.13"
