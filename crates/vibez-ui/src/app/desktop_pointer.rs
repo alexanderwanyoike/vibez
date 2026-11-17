@@ -77,7 +77,7 @@ impl App {
             .pointer_messages(under, x, timing, |track_id| {
                 self.state
                     .find_track(track_id)
-                    .is_some_and(|track| self.state.browser.drag_lands_on(track.kind))
+                    .is_some_and(|track| self.state.browser.lane_refusal(track.kind).is_none())
             });
         Task::batch(messages.into_iter().map(|message| {
             let action = self.state.browser.update(message);
