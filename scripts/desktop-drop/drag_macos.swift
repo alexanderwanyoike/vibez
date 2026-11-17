@@ -1,5 +1,5 @@
-// Drags files into Vibez the way Finder does: an NSDraggingSession begun
-// from a window in this process, moved by synthetic mouse input.
+// Drags files into Vibez as Finder does, with an NSDraggingSession begun
+// from a window in this process and moved by synthetic mouse input.
 //
 // Usage: drag_macos <vibez pid> <screenshot folder> <interface scale> <step>...
 // where each step is four arguments, <file or "click"> <x> <y> <name>, with

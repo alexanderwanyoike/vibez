@@ -1,5 +1,5 @@
-// Drags files into Vibez the way Explorer does: an OLE DoDragDrop from a
-// window in this process, moved by synthetic mouse input.
+// Drags files into Vibez as Explorer does, with an OLE DoDragDrop from a
+// window in this process moved by synthetic mouse input.
 //
 // Usage: drag_windows.exe <vibez pid> <screenshot folder> <interface scale> <step>...
 // where each step is four arguments, <file or "click"> <x> <y> <name>, with
