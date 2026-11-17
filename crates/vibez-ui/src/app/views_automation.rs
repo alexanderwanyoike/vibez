@@ -65,11 +65,14 @@ impl App {
                 .state
                 .automation_ui
                 .is_overridden(track.id, lane.target);
-            let mut header_row = row![text(label).size(11).color(if overridden {
-                th::accent()
-            } else {
-                th::text_dim()
-            })]
+            let mut header_row = row![text(label)
+                .shaping(crate::typography::USER_TEXT_SHAPING)
+                .size(11)
+                .color(if overridden {
+                    th::accent()
+                } else {
+                    th::text_dim()
+                })]
             .spacing(4)
             .align_y(iced::Alignment::Center);
             if overridden {
@@ -209,23 +212,28 @@ impl App {
             let mut list = column![].spacing(1);
             for choice in choices.into_iter().take(MAX_PICKER_RESULTS) {
                 list = list.push(
-                    button(text(choice.label).size(11).color(th::text()))
-                        .on_press(Message::Automation(AutomationMsg::AddLane {
-                            track_id: track.id,
-                            target: choice.target,
-                        }))
-                        .width(Length::Fill)
-                        .padding([3, 10])
-                        .style(|_theme: &Theme, status| button::Style {
-                            background: matches!(
-                                status,
-                                button::Status::Hovered | button::Status::Pressed
-                            )
-                            .then(|| th::bg_hover().into()),
-                            text_color: th::text(),
-                            border: iced::Border::default(),
-                            ..Default::default()
-                        }),
+                    button(
+                        text(choice.label)
+                            .shaping(crate::typography::USER_TEXT_SHAPING)
+                            .size(11)
+                            .color(th::text()),
+                    )
+                    .on_press(Message::Automation(AutomationMsg::AddLane {
+                        track_id: track.id,
+                        target: choice.target,
+                    }))
+                    .width(Length::Fill)
+                    .padding([3, 10])
+                    .style(|_theme: &Theme, status| button::Style {
+                        background: matches!(
+                            status,
+                            button::Status::Hovered | button::Status::Pressed
+                        )
+                        .then(|| th::bg_hover().into()),
+                        text_color: th::text(),
+                        border: iced::Border::default(),
+                        ..Default::default()
+                    }),
                 );
             }
             if hidden > 0 {

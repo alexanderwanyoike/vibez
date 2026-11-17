@@ -430,6 +430,7 @@ fn view_sends<'a>(
                         10.0,
                         iced::Font::DEFAULT
                     ))
+                    .shaping(crate::typography::USER_TEXT_SHAPING)
                     .size(10)
                     .color(th::text_dim())
                     .wrapping(text::Wrapping::None)
