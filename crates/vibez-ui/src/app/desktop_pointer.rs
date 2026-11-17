@@ -15,6 +15,7 @@ pub(super) fn target_id(target: PointerTarget) -> iced::widget::container::Id {
     let name = match target {
         PointerTarget::Lane(track_id) => format!("lane/{}", track_id.raw()),
         PointerTarget::NewTrackRow => "new-track-row".to_string(),
+        PointerTarget::NewTrackGutter => "new-track-gutter".to_string(),
         PointerTarget::NewTrackSlot { row } => format!("new-track-slot/{row}"),
         PointerTarget::ClipSlot { track_id, row } => {
             format!("clip-slot/{}/{row}", track_id.raw())

@@ -348,3 +348,59 @@ async fn an_empty_launcher_takes_another_apps_drop_beside_or_below_its_new_colum
         assert_eq!(launcher_clip_row(&app, track.id), Some(row));
     }
 }
+
+/// A point in the strip under the track headers, `below` pixels under the
+/// new-track row.
+fn point_in_gutter_below_new_track_row(app: &App, below: f32) -> Point {
+    let row = new_track_row(app);
+    Point::new(row.x - 40.0, row.y + row.height + below)
+}
+
+#[tokio::test]
+async fn a_browser_drag_released_under_arranges_headers_adds_a_track_at_the_lanes_left_edge() {
+    let directory = tempfile::tempdir().unwrap();
+    let (mut app, existing) = arrange();
+    browser_drag(&mut app, drum_phrase(directory.path()));
+    let point = point_in_gutter_below_new_track_row(&app, 120.0);
+
+    release_browser_drag(&mut app, point).await;
+
+    let track = the_new_track(&app, existing);
+    let clips = &app.state.arrange_content(track.id).unwrap().note_clips;
+    assert_eq!(clips.len(), 1);
+    assert_eq!(clips[0].position_beats, 0.0);
+}
+
+#[tokio::test]
+async fn a_browser_drag_released_on_the_new_track_rows_header_adds_a_track_at_the_lanes_left_edge()
+{
+    let directory = tempfile::tempdir().unwrap();
+    let (mut app, existing) = arrange();
+    browser_drag(&mut app, drum_phrase(directory.path()));
+    let row = new_track_row(&app);
+    let point = Point::new(row.x - 40.0, row.center_y());
+
+    release_browser_drag(&mut app, point).await;
+
+    let track = the_new_track(&app, existing);
+    let clips = &app.state.arrange_content(track.id).unwrap().note_clips;
+    assert_eq!(clips.len(), 1);
+    assert_eq!(clips[0].position_beats, 0.0);
+}
+
+#[tokio::test]
+async fn another_apps_drop_under_a_sections_headers_lands_at_the_lanes_left_edge() {
+    let directory = tempfile::tempdir().unwrap();
+    let (mut app, existing, section_id) = tall_sections();
+
+    drop_from_another_app(
+        &mut app,
+        kick(directory.path()),
+        |app| point_in_gutter_below_new_track_row(app, 80.0),
+        GhostPlace::NewTrack { beat: 0.0 },
+    )
+    .await;
+
+    let track = the_new_track(&app, existing);
+    assert_eq!(section_clip_starts(&app, section_id, track.id), vec![0.0]);
+}

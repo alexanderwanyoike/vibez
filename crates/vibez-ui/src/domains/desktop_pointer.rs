@@ -14,6 +14,9 @@ pub enum PointerTarget {
     /// The lane of the row where a drop adds a track, and the empty space
     /// below it.
     NewTrackRow,
+    /// The strip under the track headers beside the new-track row and the
+    /// space below it, where a drop lands at the lane's left edge.
+    NewTrackGutter,
     /// A slot of the clip launcher's new-track column with the empty space
     /// right of it, and for the last row shown the space below the rows.
     NewTrackSlot { row: u32 },
@@ -63,7 +66,7 @@ impl BrowserState {
                 beat: timing.beat_at(x - left),
                 compatible: compatible(track_id),
             }),
-            Some((PointerTarget::NewTrackRow, left)) => {
+            Some((PointerTarget::NewTrackRow | PointerTarget::NewTrackGutter, left)) => {
                 Some(BrowserMsg::DragHoverEmptyArrangement {
                     beat: timing.beat_at(x - left),
                 })

@@ -139,3 +139,24 @@ fn a_drop_after_the_pointer_crossed_a_lane_to_an_untagged_target_waits_for_the_w
 
     assert!(browser.desktop_drop_waits_for_target());
 }
+
+#[test]
+fn the_gutter_under_the_headers_hovers_the_new_track_row_at_its_lanes_left_edge() {
+    let browser = hovering();
+
+    let messages = browser.pointer_messages(
+        Some((PointerTarget::NewTrackGutter, 0.0)),
+        150.0,
+        timing(),
+        |_| true,
+    );
+
+    let left_edge = timing().beat_at(0.0);
+    assert!(matches!(
+        messages[..],
+        [
+            BrowserMsg::DragHoverEmptyArrangement { beat },
+            BrowserMsg::DesktopPointerMoved,
+        ] if beat == left_edge
+    ));
+}
