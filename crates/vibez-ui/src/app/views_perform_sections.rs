@@ -248,6 +248,7 @@ impl App {
                 let has_content = clip_count > 0 || !content.automation.is_empty();
                 let track_id = track.id;
                 let name = text(track.name.clone())
+                    .shaping(crate::typography::USER_TEXT_SHAPING)
                     .size(12)
                     .font(crate::typography::TRACK_TITLE)
                     .color(if track.mute {

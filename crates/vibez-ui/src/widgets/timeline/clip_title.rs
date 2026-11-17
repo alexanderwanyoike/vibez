@@ -100,6 +100,7 @@ pub(super) fn draw_clip_title(
                 size: TITLE_SIZE.into(),
                 font: TITLE_FONT,
                 vertical_alignment: Vertical::Center,
+                shaping: crate::typography::USER_TEXT_SHAPING,
                 ..Default::default()
             });
         }

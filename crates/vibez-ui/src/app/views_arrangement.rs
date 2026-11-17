@@ -507,7 +507,11 @@ impl App {
             let dot = text("\u{25CF}").size(9).color(chan_color);
             let name_color = if selected { th::text() } else { th::text_dim() };
             let name: Element<'_, Message> = if is_master {
-                text(&channel.name).size(11).color(name_color).into()
+                text(&channel.name)
+                    .shaping(crate::typography::USER_TEXT_SHAPING)
+                    .size(11)
+                    .color(name_color)
+                    .into()
             } else {
                 view_editable_channel_name(
                     channel,

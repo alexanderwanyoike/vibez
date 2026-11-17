@@ -346,6 +346,7 @@ impl App {
         row![
             container(
                 text(clip.name())
+                    .shaping(crate::typography::USER_TEXT_SHAPING)
                     .size(10)
                     .color(th::text())
                     .wrapping(iced::widget::text::Wrapping::None),
