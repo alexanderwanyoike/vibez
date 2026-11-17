@@ -304,6 +304,11 @@ mod drag_ghost_tests;
 #[cfg(test)]
 mod new_track_drop_tests;
 
+#[cfg(test)]
+mod empty_space_drop_tests;
+#[cfg(test)]
+mod view_harness;
+
 mod midi_audition;
 mod midi_file_drop;
 

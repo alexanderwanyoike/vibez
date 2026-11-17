@@ -144,7 +144,7 @@ impl App {
     /// Every drop target the view may have tagged: each track's lane, the
     /// new-track row, and in the clip launcher the shown rows' Clip slots
     /// and new-track slots, plus row 0 its new-track header drops in.
-    fn pointer_targets(&self) -> Vec<PointerTarget> {
+    pub(super) fn pointer_targets(&self) -> Vec<PointerTarget> {
         let first_row = self.state.perform.clip_editor.first_row;
         let rows = first_row..first_row + super::views_clip_launcher::LAUNCHER_ROWS;
         let tracks = self

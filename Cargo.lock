@@ -5474,6 +5474,7 @@ dependencies = [
  "dirs 5.0.1",
  "iced",
  "iced_runtime",
+ "iced_tiny_skia",
  "midly",
  "notify",
  "objc2 0.6.3",

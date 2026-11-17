@@ -43,6 +43,9 @@ iced_runtime = { workspace = true }
 proptest = "1"
 # Writes the MIDI files the drop tests import.
 midly = { workspace = true }
+# Lays the real view out without a window, so tests can point at it. The
+# version iced's own renderer already pulls in.
+iced_tiny_skia = { version = "0.13", default-features = false }
 
 [target.'cfg(not(any(target_os = "macos", windows)))'.dependencies]
 x11rb = "0.13"
