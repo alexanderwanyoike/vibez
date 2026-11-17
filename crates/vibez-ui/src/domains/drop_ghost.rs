@@ -165,12 +165,12 @@ pub struct DragGhostRead {
 /// What a drag has read, and the clip launcher Clip it shows as, built once
 /// so the slot's thumbnail is drawn once.
 #[derive(Debug, Clone)]
-pub struct DragGhost {
+pub struct GhostCache {
     pub read: DragGhostRead,
     slot: LauncherClip,
 }
 
-impl DragGhost {
+impl GhostCache {
     fn new(read: DragGhostRead) -> Self {
         let track_id = TrackId::new();
         let mut timeline = ArrangementTimeline::default();
@@ -240,7 +240,7 @@ impl BrowserState {
         .then_some(&ghost.slot)
     }
 
-    fn current_drag_ghost(&self) -> Option<&DragGhost> {
+    fn current_drag_ghost(&self) -> Option<&GhostCache> {
         self.drag_ghost
             .as_ref()
             .filter(|ghost| self.drag_source.as_ref() == Some(&ghost.read.source))
@@ -250,7 +250,7 @@ impl BrowserState {
     /// drag in flight; a read that finishes after its drag ended is dropped.
     pub(super) fn install_drag_ghost(&mut self, read: DragGhostRead) {
         if self.drag_source.as_ref() == Some(&read.source) {
-            self.drag_ghost = Some(DragGhost::new(read));
+            self.drag_ghost = Some(GhostCache::new(read));
         }
     }
 }
