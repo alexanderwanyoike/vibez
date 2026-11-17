@@ -520,8 +520,8 @@ impl App {
         };
         self.state.browser.cancel_media_drag();
         let position_samples = self.state.transport.beats_to_samples(beat);
-        let target = match self.state.perform.selected_section {
-            Some(section_id) if self.state.view.workspace == crate::state::Workspace::Perform => {
+        let target = match self.active_timeline_location() {
+            vibez_project::TimelineLocation::Section(section_id) => {
                 BrowserImportTarget::SectionNewTrackAt {
                     section_id,
                     position_samples,
