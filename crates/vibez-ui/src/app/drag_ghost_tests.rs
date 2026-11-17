@@ -225,3 +225,37 @@ async fn a_drag_over_empty_arrange_shows_its_ghost_on_the_new_track() {
         "New MIDI track · Drum Rack"
     );
 }
+
+#[tokio::test]
+async fn a_browser_entry_dragged_past_the_click_slop_reads_its_file_for_the_ghost() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = MediaSourceRef::LocalFile {
+        path: drum_phrase(directory.path()),
+    };
+    let (mut app, track_id) = app_with_track(TrackKind::Midi);
+    let _ = app.update(Message::View(crate::domains::view::ViewMsg::CursorMoved(
+        100.0, 100.0,
+    )));
+    let _ = app.update(Message::BeginPendingBrowserDrag(
+        source,
+        "Rebeater P3.mid".into(),
+    ));
+
+    run_until_idle(
+        &mut app,
+        Message::View(crate::domains::view::ViewMsg::CursorMoved(400.0, 120.0)),
+    )
+    .await;
+    let _ = app.update(hover(track_id, 4.0));
+
+    assert_eq!(
+        ghost_span(&app),
+        (
+            GhostPlace::Lane {
+                track_id,
+                beat: 4.0
+            },
+            4.0
+        )
+    );
+}
