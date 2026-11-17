@@ -283,6 +283,10 @@ mod desktop_drop;
 
 mod desktop_pointer;
 pub(crate) use desktop_pointer::PointerWindow;
+#[cfg(windows)]
+mod desktop_pointer_windows;
+#[cfg(all(test, windows))]
+mod desktop_pointer_windows_tests;
 #[cfg(not(any(target_os = "macos", windows)))]
 mod desktop_pointer_x11;
 mod drop_target_probe;
