@@ -5,3 +5,88 @@ use iced::widget::text::Shaping;
 
 /// The shaping for any text that shows a Track, Clip or Section name.
 pub const USER_TEXT_SHAPING: Shaping = Shaping::Basic;
+
+#[cfg(test)]
+mod tests {
+    use iced::advanced::graphics::text::{cosmic_text, font_system, Paragraph};
+    use iced::advanced::text::Paragraph as _;
+    use iced::alignment::{Horizontal, Vertical};
+    use iced::widget::text::Wrapping;
+    use iced::{Font, Size};
+
+    use super::USER_TEXT_SHAPING;
+    use crate::typography::{CLIP_TITLE, PERFORM_DISPLAY, PERFORM_TECH, TRACK_TITLE};
+
+    /// Glyph id and whether the face is bundled with the app, for every
+    /// glyph of `name` laid out the way a name is drawn. Glyph 0 is the empty
+    /// box a face draws for a character it lacks.
+    fn shaped(name: &str, font: Font) -> Vec<(u16, bool)> {
+        let paragraph = Paragraph::with_text(iced::advanced::Text {
+            content: name,
+            bounds: Size::INFINITY,
+            size: 13.0.into(),
+            line_height: Default::default(),
+            font,
+            horizontal_alignment: Horizontal::Left,
+            vertical_alignment: Vertical::Top,
+            shaping: USER_TEXT_SHAPING,
+            wrapping: Wrapping::None,
+        });
+        let mut system = font_system().write().expect("font system lock");
+        let db = system.raw().db();
+        paragraph
+            .buffer()
+            .layout_runs()
+            .flat_map(|run| run.glyphs.iter())
+            .map(|glyph| {
+                let face = db.face(glyph.font_id).expect("shaped face is loaded");
+                let bundled = matches!(face.source, cosmic_text::fontdb::Source::Binary(_));
+                (glyph.glyph_id, bundled)
+            })
+            .collect()
+    }
+
+    /// Whether a system face has a glyph for every char of `name`.
+    fn a_system_face_covers(name: &str) -> bool {
+        let mut system = font_system().write().expect("font system lock");
+        let raw = system.raw();
+        let ids: Vec<_> = raw
+            .db()
+            .faces()
+            .filter(|face| !matches!(face.source, cosmic_text::fontdb::Source::Binary(_)))
+            .map(|face| face.id)
+            .collect();
+        ids.into_iter()
+            .filter_map(|id| raw.get_font(id))
+            .any(|face| {
+                name.chars()
+                    .all(|c| face.rustybuzz().glyph_index(c).is_some())
+            })
+    }
+
+    #[test]
+    fn japanese_and_chinese_names_draw_in_a_system_face() {
+        for name in ["ドラム", "贝斯线"] {
+            if !a_system_face_covers(name) {
+                eprintln!("no system face here draws {name}, so there is nothing to fall back to");
+                continue;
+            }
+            for (role, font) in [
+                ("TRACK_TITLE", TRACK_TITLE),
+                ("CLIP_TITLE", CLIP_TITLE),
+                ("PERFORM_DISPLAY", PERFORM_DISPLAY),
+                ("PERFORM_TECH", PERFORM_TECH),
+                ("DEFAULT", Font::DEFAULT),
+            ] {
+                let glyphs = shaped(name, font);
+
+                assert!(
+                    glyphs
+                        .iter()
+                        .all(|&(glyph, bundled)| glyph != 0 && !bundled),
+                    "{role} drew {name} as {glyphs:?}"
+                );
+            }
+        }
+    }
+}
