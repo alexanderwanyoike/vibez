@@ -45,7 +45,7 @@ proptest = "1"
 midly = { workspace = true }
 # Lays the real view out without a window, so tests can point at it. The
 # version iced's own renderer already pulls in.
-iced_tiny_skia = { version = "0.13", default-features = false }
+iced_tiny_skia = { workspace = true }
 
 [target.'cfg(not(any(target_os = "macos", windows)))'.dependencies]
 x11rb = "0.13"
