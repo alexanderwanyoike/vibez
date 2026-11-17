@@ -1,7 +1,9 @@
 //! The pointer read with Win32, which answers even while another app's OLE
 //! drag holds the mouse.
 
-use windows_sys::Win32::Foundation::HWND;
+use windows_sys::Win32::Foundation::{HWND, POINT};
+use windows_sys::Win32::Graphics::Gdi::ScreenToClient;
+use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
 
 /// The app's top-level window.
 #[derive(Debug)]
@@ -17,9 +19,15 @@ impl PointerWindow {
         }
     }
 
-    /// The pointer relative to the window's client area, in physical pixels.
+    /// The pointer relative to the window's client area, in physical pixels
+    /// when the process is per-monitor DPI aware, as winit makes it.
     pub(super) fn pointer(&self) -> Option<(f32, f32)> {
-        let _ = self.hwnd;
-        todo!()
+        let mut point = POINT { x: 0, y: 0 };
+        // SAFETY: each call writes only the point it is given, and a window
+        // destroyed meanwhile makes ScreenToClient fail rather than misbehave.
+        let read = unsafe {
+            GetCursorPos(&mut point) != 0 && ScreenToClient(self.hwnd as HWND, &mut point) != 0
+        };
+        read.then_some((point.x as f32, point.y as f32))
     }
 }
