@@ -36,6 +36,9 @@ use super::*;
 use crate::domains::browser::DragMedia;
 use crate::domains::drop_ghost::DropGhost;
 
+/// The height of the row where a drop adds a track.
+const NEW_TRACK_ROW_HEIGHT: f32 = 54.0;
+
 /// Expanded return or master automation scrolls inside this cap so the
 /// pinned footer can never squeeze the track list out of the window.
 const CHANNEL_FOOTER_MAX_HEIGHT: f32 = 240.0;
@@ -657,7 +660,7 @@ impl App {
         };
         let header = container(header_text)
             .width(Length::Fixed(header_width))
-            .height(Length::Fixed(54.0))
+            .height(Length::Fixed(NEW_TRACK_ROW_HEIGHT))
             .align_x(iced::alignment::Horizontal::Center)
             .align_y(iced::alignment::Vertical::Center)
             .style(|_theme: &Theme| container::Style {
@@ -672,9 +675,9 @@ impl App {
         use crate::widgets::drop_highlight::{drop_highlight, CARD_ZONE_INSET, CARD_ZONE_RADIUS};
         let lane = container(text(hint).size(12).color(th::text_muted()))
             .width(Length::Fill)
-            .height(Length::Fixed(54.0))
+            .height(Length::Fixed(NEW_TRACK_ROW_HEIGHT))
             .center_x(Length::Fill)
-            .center_y(Length::Fixed(54.0));
+            .center_y(Length::Fixed(NEW_TRACK_ROW_HEIGHT));
         let lane: Element<'_, Message> = match ghost {
             Some(ghost) => new_track_lane(&ghost, geometry),
             None => drop_highlight(lane.into(), zone, CARD_ZONE_RADIUS, CARD_ZONE_INSET),
@@ -690,7 +693,9 @@ impl App {
                 crate::state::BrowserDropTarget::EmptyArrangement { beat: 0.0 },
             )))
             .on_release(Message::DropSampleOnEmptyArrangement);
-        row![header, zone].height(Length::Fixed(54.0)).into()
+        row![header, zone]
+            .height(Length::Fixed(NEW_TRACK_ROW_HEIGHT))
+            .into()
     }
 }
 
@@ -701,6 +706,6 @@ fn new_track_lane<'a>(ghost: &DropGhost<'_>, geometry: TimelineGeometry) -> Elem
         geometry,
     })
     .width(Length::Fill)
-    .height(Length::Fixed(54.0))
+    .height(Length::Fixed(NEW_TRACK_ROW_HEIGHT))
     .into()
 }
