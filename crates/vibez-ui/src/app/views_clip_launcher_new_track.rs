@@ -14,7 +14,10 @@ use super::App;
 /// `content` as the place a drop adds a track with its Clip in `row`.
 /// Moving re-reports the slot, so leaving one slot for the next never
 /// clears both.
-fn new_track_slot<'a>(content: impl Into<Element<'a, Message>>, row: u32) -> Element<'a, Message> {
+fn new_track_slot_target<'a>(
+    content: impl Into<Element<'a, Message>>,
+    row: u32,
+) -> Element<'a, Message> {
     super::desktop_pointer::drop_target(
         mouse_area(content)
             .on_move(move |_| Message::Browser(BrowserMsg::DragHoverNewTrackSlot { row }))
@@ -48,7 +51,7 @@ impl App {
             _ => None,
         };
         // The header holds no slot, so a drop there takes the first row.
-        let mut column = iced::widget::Column::new().push(new_track_slot(
+        let mut column = iced::widget::Column::new().push(new_track_slot_target(
             container(
                 text(label)
                     .font(PERFORM_LABEL)
@@ -89,7 +92,7 @@ impl App {
                 }
                 _ => iced::widget::Space::new(Length::Fill, Length::Fill).into(),
             };
-            column = column.push(new_track_slot(
+            column = column.push(new_track_slot_target(
                 container(cell).width(Length::Fill).height(slot_height),
                 row,
             ));
