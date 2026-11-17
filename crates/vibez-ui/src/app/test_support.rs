@@ -61,6 +61,7 @@ pub(super) fn app() -> super::App {
         device_presets: Default::default(),
         sidechain_sync_inputs: None,
         track_meter_peaks: Default::default(),
+        pointer_poll: Default::default(),
         plugin_instrument_rx,
         plugin_instrument_tx,
         plugin_window_manager: None,

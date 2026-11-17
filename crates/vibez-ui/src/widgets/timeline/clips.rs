@@ -118,6 +118,8 @@ pub struct TrackClipCanvas {
     pub clip_drag: Option<ClipDragPreview>,
     /// The zone a Browser drag hovering this lane marks.
     pub drop_zone: Option<crate::domains::drop_zone::DropZone>,
+    /// The Clip a Browser drag would land on this lane.
+    pub drop_ghost: Option<super::LaneGhost>,
 }
 
 impl TrackClipCanvas {
@@ -271,6 +273,7 @@ impl TrackClipCanvas {
             snap_targets: Arc::default(),
             clip_drag: None,
             drop_zone: None,
+            drop_ghost: None,
         };
         lane_timing::finish(timing, lane_timing::Phase::Build);
         lane
@@ -301,6 +304,13 @@ impl TrackClipCanvas {
 
     pub fn with_drop_zone(mut self, zone: Option<crate::domains::drop_zone::DropZone>) -> Self {
         self.drop_zone = zone;
+        self
+    }
+
+    /// Shows the Clip a Browser drag would land here, in place of the
+    /// lane's drop zone.
+    pub fn with_drop_ghost(mut self, ghost: Option<super::LaneGhost>) -> Self {
+        self.drop_ghost = ghost;
         self
     }
 

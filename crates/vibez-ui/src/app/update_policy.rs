@@ -26,6 +26,7 @@ pub(super) fn drops_dragged_media(message: &Message) -> bool {
             | Message::DropSampleOnDrumRack { .. }
             | Message::DropSampleOnDevicePanel { .. }
             | Message::ImportLauncherClip { .. }
+            | Message::ImportLauncherClipOnNewTrack { .. }
     )
 }
 

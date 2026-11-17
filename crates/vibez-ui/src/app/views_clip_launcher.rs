@@ -18,6 +18,9 @@ use crate::widgets::control_style;
 
 use super::App;
 
+/// Clip slot rows the launcher shows at once.
+pub(super) const LAUNCHER_ROWS: u32 = 6;
+
 fn surface(_theme: &Theme) -> container::Style {
     container::Style {
         background: Some(th::bg_surface().into()),
@@ -448,7 +451,9 @@ impl App {
                 .into()
         };
         workspace = workspace.push(container(toolbar).padding([if compact { 4 } else { 10 }, 12]));
-        if self.state.project_tracks.tracks.is_empty() {
+        // A drag gets a column beside the last track to drop a new one in.
+        let new_track_column = self.state.browser.drag_source.is_some();
+        if self.state.project_tracks.tracks.is_empty() && !new_track_column {
             workspace = workspace.push(
                 center(
                     column![
@@ -470,18 +475,22 @@ impl App {
             let first_track = self.state.perform.clip_editor.first_track;
             let first_row = self.state.perform.clip_editor.first_row;
             let visible_tracks = ((width - 54.0) / 145.0).floor().max(4.0) as usize;
-            let shown_tracks = self
+            let tracks_shown = self
                 .state
                 .project_tracks
                 .tracks
                 .len()
                 .saturating_sub(first_track)
-                .min(visible_tracks)
-                .max(4);
+                .min(visible_tracks);
+            // The column sits beside the last track, so it shows only while
+            // that track is in view, and the lanes narrow to make room.
+            let new_track_column = new_track_column
+                && first_track + tracks_shown >= self.state.project_tracks.tracks.len();
+            let shown_tracks = (tracks_shown + usize::from(new_track_column)).max(4);
             let lane_width = (width - 46.0) / shown_tracks as f32;
             let header_height = if compact { 26.0 } else { 42.0 };
             let mut numbers = column![iced::widget::Space::new(1, header_height)].spacing(0);
-            for offset in 0..6u32 {
+            for offset in 0..LAUNCHER_ROWS {
                 numbers = numbers.push(
                     container(
                         text(format!("{:02}", first_row + offset + 1))
@@ -572,7 +581,7 @@ impl App {
                     .height(header_height)]
                 .spacing(0)
                 .width(Length::Fixed(lane_width));
-                for offset in 0..6u32 {
+                for offset in 0..LAUNCHER_ROWS {
                     let slot_row = first_row + offset;
                     let recording =
                         self.state
@@ -683,17 +692,22 @@ impl App {
                                 track_id: track.id,
                                 row: slot_row,
                             };
-                            mouse_area(slot_cell)
-                                .on_enter(Message::Browser(BrowserMsg::DragHoverClipSlot {
+                            super::desktop_pointer::drop_target(
+                                mouse_area(slot_cell)
+                                    .on_enter(Message::Browser(BrowserMsg::DragHoverClipSlot {
+                                        track_id: track.id,
+                                        row: slot_row,
+                                    }))
+                                    .on_exit(Message::Browser(BrowserMsg::LeaveDragTarget(slot)))
+                                    .on_release(Message::ImportLauncherClip {
+                                        track_id: track.id,
+                                        row: slot_row,
+                                    }),
+                                crate::domains::desktop_pointer::PointerTarget::ClipSlot {
                                     track_id: track.id,
                                     row: slot_row,
-                                }))
-                                .on_exit(Message::Browser(BrowserMsg::LeaveDragTarget(slot)))
-                                .on_release(Message::ImportLauncherClip {
-                                    track_id: track.id,
-                                    row: slot_row,
-                                })
-                                .into()
+                                },
+                            )
                         } else {
                             slot_cell.into()
                         };
@@ -812,6 +826,15 @@ impl App {
                     lane = lane.push(container(cell).height(slot_height));
                 }
                 grid = grid.push(lane);
+            }
+            if new_track_column {
+                grid = grid.push(self.view_new_track_column(
+                    first_row,
+                    header_height,
+                    slot_height,
+                    lane_width,
+                    compact,
+                ));
             }
             workspace = workspace.push(
                 crate::widgets::quiet_scroll::vertical(

@@ -220,6 +220,7 @@ impl AudioEngine {
                         continue;
                     }
                     self.admit_routed_notes(channel_index, frames as u32);
+                    self.admit_audition_notes(channel_index, frames as u32);
                     let prepared = self.routing.as_mut();
                     let Some(track) =
                         binding.get_mut(&mut self.tracks, &mut self.buses, &mut self.master)

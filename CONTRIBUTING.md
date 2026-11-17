@@ -42,6 +42,10 @@ and promotion PRs from those branches, where Clippy and Format run as well.
 Application/package builds and Windows executable-resource
 validation run only on version-tag releases. Manual release dispatch is removed
 so an arbitrary feature branch cannot publish release packages.
+The one exception is the Desktop drop check, which builds the app on Windows
+and macOS and drags real files into it, because only a running window shows
+that another app's drag reaches its drop targets. It runs on pull requests
+that touch the desktop drop or pointer code, and on demand.
 
 ## Releasing
 

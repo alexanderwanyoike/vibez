@@ -153,6 +153,19 @@ pub enum Message {
 
     // Engine events
     Tick,
+    /// The app's window, where the pointer can be read against it, and its
+    /// scale factor.
+    DesktopPointerWindow {
+        window: Option<Arc<crate::app::PointerWindow>>,
+        scale: f32,
+    },
+    /// How far across the window a poll found the pointer during another
+    /// app's drag, and the drop target the view laid out under it.
+    DesktopPointerProbed {
+        x: f32,
+        /// The target there and its left edge.
+        under: Option<(crate::domains::desktop_pointer::PointerTarget, f32)>,
+    },
     EngineMetering {
         peak_l: f32,
         peak_r: f32,
@@ -332,6 +345,14 @@ pub enum Message {
     /// dropped instead of starting playback.
     LocalSamplePreviewReady(MediaSourceRef, u64, Result<AnalysedBrowserAudio, String>),
     BrowserWaveformReady(MediaSourceRef, Result<AnalysedBrowserAudio, String>),
+    /// A MIDI file selected in the Browser was read; `play` asks for its
+    /// audition once read, under the audition request `generation`.
+    BrowserMidiPreviewReady {
+        source: MediaSourceRef,
+        generation: u64,
+        play: bool,
+        result: Result<crate::domains::midi_file_import::MidiFileImport, String>,
+    },
     BrowserAuditionReady {
         source: MediaSourceRef,
         generation: u64,
@@ -344,6 +365,11 @@ pub enum Message {
         position_samples: u64,
     },
     DropSampleOnEmptyArrangement,
+    /// Drops the Browser drag beside the clip launcher's last column: a new
+    /// track of the drag's kind, with its Clip in `row`.
+    ImportLauncherClipOnNewTrack {
+        row: u32,
+    },
     /// The producer's answer to how a multi-track MIDI file lands; `None`
     /// cancels the drop.
     ChooseMidiFileLayout(Option<crate::domains::midi_file_import::MidiFileLayout>),

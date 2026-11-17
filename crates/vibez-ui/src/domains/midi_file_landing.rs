@@ -28,8 +28,9 @@ pub enum MidiLanding {
         onto: Option<TrackId>,
         beat: f64,
     },
+    /// A Clip slot in `row`, on `onto` or on new tracks.
     Slot {
-        onto: TrackId,
+        onto: Option<TrackId>,
         row: u32,
     },
 }
@@ -73,15 +74,24 @@ impl MidiLanding {
                     beat: beat(position_samples),
                 })
             }
+            BrowserImportTarget::SectionNewTrackAt {
+                section_id,
+                position_samples,
+            } if ctx.perform.sections.by_id(section_id).is_some() => Ok(Self::Section {
+                section_id,
+                onto: None,
+                beat: beat(position_samples),
+            }),
             BrowserImportTarget::LauncherClipAt { track_id, row } if midi_track(track_id) => {
                 if !ctx.perform.launcher_slot_is_free(track_id, row) {
                     return Err(crate::domains::perform::LAUNCHER_SLOT_GONE.into());
                 }
                 Ok(Self::Slot {
-                    onto: track_id,
+                    onto: Some(track_id),
                     row,
                 })
             }
+            BrowserImportTarget::LauncherNewTrackAt { row } => Ok(Self::Slot { onto: None, row }),
             _ => Err(MIDI_FILE_TARGETS.into()),
         }
     }
@@ -89,8 +99,9 @@ impl MidiLanding {
     /// The track the Clips go on, or `None` for new tracks.
     pub fn onto(self) -> Option<TrackId> {
         match self {
-            Self::Arrange { onto, .. } | Self::Section { onto, .. } => onto,
-            Self::Slot { onto, .. } => Some(onto),
+            Self::Arrange { onto, .. } | Self::Section { onto, .. } | Self::Slot { onto, .. } => {
+                onto
+            }
         }
     }
 

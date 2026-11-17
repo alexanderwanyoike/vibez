@@ -5,6 +5,7 @@ use std::sync::Arc;
 mod browser_results;
 mod browser_state;
 mod clip_drag;
+mod engine_held;
 mod project_tracks;
 mod same_channels;
 mod snapshot;
@@ -18,6 +19,7 @@ use crate::widgets::clip_editor_view::StoredClipView;
 pub use browser_results::LocalResults;
 pub use browser_state::*;
 pub use clip_drag::*;
+pub use engine_held::EngineHeld;
 pub use snapshot::*;
 pub use ui_types::*;
 
@@ -35,10 +37,39 @@ pub enum AuditionMode {
 }
 
 impl AuditionMode {
+    /// Warp waits for the next bar while the project plays; Raw starts now.
+    pub fn engine_start(self) -> vibez_engine::commands::AuditionStart {
+        match self {
+            Self::Raw => vibez_engine::commands::AuditionStart::Immediate,
+            Self::Warp => vibez_engine::commands::AuditionStart::NextBar,
+        }
+    }
+
+    /// Warp loops in time with the project; Raw plays once.
+    pub fn loops(self) -> bool {
+        self == Self::Warp
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Self::Raw => "RAW",
             Self::Warp => "WARP",
+        }
+    }
+
+    /// How many beats `seconds` of audio lasts once imported this way at
+    /// `project_bpm`; WARP fits a loop to its whole bars, and audio with no
+    /// loop fit imports RAW.
+    pub fn imported_beats(
+        self,
+        seconds: f64,
+        loop_fit: Option<crate::warp::LoopGridFit>,
+        project_bpm: f64,
+    ) -> Option<f64> {
+        let raw = (project_bpm > 0.0).then_some(seconds * project_bpm / 60.0);
+        match self {
+            Self::Raw => raw,
+            Self::Warp => loop_fit.map(|fit| fit.bars as f64 * 4.0).or(raw),
         }
     }
 }
@@ -111,6 +142,11 @@ pub enum BrowserDropTarget {
     /// An empty Clip slot of a track that takes the drag.
     ClipSlot {
         track_id: TrackId,
+        row: u32,
+    },
+    /// The empty space beside the clip launcher's last column, where a drop
+    /// adds a track with its Clip in `row`.
+    NewTrackSlot {
         row: u32,
     },
     /// A device panel outside any instrument card, and what a drop there does.

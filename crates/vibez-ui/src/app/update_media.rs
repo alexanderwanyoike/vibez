@@ -328,8 +328,7 @@ impl App {
             return Task::none();
         }
         if DragMedia::of(&source) == DragMedia::Midi {
-            self.select_midi_file(source);
-            return Task::none();
+            return self.select_midi_file(source);
         }
         let changed = self.state.browser.select_source(source.clone());
         if changed {
@@ -354,8 +353,7 @@ impl App {
 
     pub(super) fn on_preview_local_entry(&mut self, source: MediaSourceRef) -> Task<Message> {
         if DragMedia::of(&source) == DragMedia::Midi {
-            self.select_midi_file(source);
-            return Task::none();
+            return self.preview_midi_file(source);
         }
         self.state.browser.select_source(source.clone());
         if let Some(raw) = self.state.browser.waveform_for_source(&source) {
@@ -416,6 +414,9 @@ impl App {
         let Some(source) = self.state.browser.selected_source.clone() else {
             return Task::none();
         };
+        if self.audition_read_midi_file(&source) {
+            return Task::none();
+        }
         let Some(raw) = self.state.browser.waveform_audio.clone() else {
             self.state.status_text = "Select a source to audition".into();
             return Task::none();
@@ -520,10 +521,16 @@ impl App {
         };
         self.state.browser.cancel_media_drag();
         let position_samples = self.state.transport.beats_to_samples(beat);
-        self.dispatch_drop_for_target(
-            source,
-            BrowserImportTarget::ArrangementNewTrackAt { position_samples },
-        )
+        let target = match self.active_timeline_location() {
+            vibez_project::TimelineLocation::Section(section_id) => {
+                BrowserImportTarget::SectionNewTrackAt {
+                    section_id,
+                    position_samples,
+                }
+            }
+            _ => BrowserImportTarget::ArrangementNewTrackAt { position_samples },
+        };
+        self.dispatch_drop_for_target(source, target)
     }
 
     pub(super) fn on_drop_sample_on_sampler(&mut self, track_id: TrackId) -> Task<Message> {

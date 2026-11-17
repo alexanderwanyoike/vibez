@@ -120,6 +120,27 @@ async fn audio_from_another_app_dropped_on_empty_arrange_gets_a_new_audio_track(
 }
 
 #[tokio::test]
+async fn drums_from_another_app_dropped_on_empty_arrange_get_a_new_drum_rack_track() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = drum_phrase(directory.path());
+    let mut app = app();
+    let _ = app.update(browser(BrowserMsg::DesktopFileHovered(path.clone())));
+    let _ = app.update(browser(BrowserMsg::DragHoverEmptyArrangement { beat: 4.0 }));
+
+    run_until_idle(&mut app, browser(BrowserMsg::DesktopFileDropped(path))).await;
+
+    let [track] = app.state.project_tracks.tracks.as_slice() else {
+        panic!("one new track");
+    };
+    assert!(track.kind.is_midi());
+    assert_eq!(
+        track.instrument_kind,
+        Some(vibez_core::midi::InstrumentKind::DrumRack)
+    );
+    assert_eq!(note_clip_starts(&app, track.id), vec![4.0]);
+}
+
+#[tokio::test]
 async fn a_waiting_drop_the_pointer_settles_away_from_is_cancelled() {
     let directory = tempfile::tempdir().unwrap();
     let path = drum_phrase(directory.path());

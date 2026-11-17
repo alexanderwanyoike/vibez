@@ -74,7 +74,10 @@ impl App {
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
-        } else if self.state.project_tracks.tracks.is_empty() {
+        // A drag shows the timeline even with no tracks, for its new-track row.
+        } else if self.state.project_tracks.tracks.is_empty()
+            && self.state.browser.drag_source.is_none()
+        {
             center(
                 column![
                     text("NO PROJECT TRACKS")
@@ -370,6 +373,17 @@ impl App {
                 .with_snap_targets(snap_targets.clone())
                 .with_clip_drag(editor.clip_drag.as_ref().map(|drag| drag.preview.clone()))
                 .with_drop_zone(self.state.browser.lane_drop_zone(track.id))
+                .with_drop_ghost(
+                    self.state
+                        .browser
+                        .lane_drop_ghost(track.id, self.state.transport.bpm)
+                        .map(|ghost| {
+                            crate::widgets::timeline::LaneGhost::new(
+                                &ghost,
+                                viewport.geometry().pixels_per_beat(),
+                            )
+                        }),
+                )
                 .with_drop_refusal(refusal.clone())
                 .with_vertical_track_scrolling();
                 if let Some(preview) = recording_preview.as_ref().filter(|preview| {
@@ -429,6 +443,10 @@ impl App {
                 } else {
                     focused_clip_canvas
                 };
+                let clip_lane = super::desktop_pointer::drop_target(
+                    clip_lane,
+                    crate::domains::desktop_pointer::PointerTarget::Lane(track_id),
+                );
                 track_rows = track_rows.push(
                     row![gutter, clip_lane]
                         .width(Length::Fill)
@@ -452,6 +470,11 @@ impl App {
                         );
                     }
                 }
+            }
+
+            if self.state.browser.drag_source.is_some() {
+                track_rows = track_rows
+                    .push(self.view_new_track_row(SECTION_TRACK_GUTTER_WIDTH, viewport.geometry()));
             }
 
             let body = crate::widgets::quiet_scroll::vertical(
