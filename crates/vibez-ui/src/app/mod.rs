@@ -282,6 +282,7 @@ mod sample_retirement;
 mod desktop_drop;
 
 mod desktop_pointer;
+pub(crate) use desktop_pointer::PointerWindow;
 #[cfg(not(any(target_os = "macos", windows)))]
 mod desktop_pointer_x11;
 mod drop_target_probe;

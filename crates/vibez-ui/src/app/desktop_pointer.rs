@@ -1,6 +1,8 @@
 //! Another app's drag, followed by polling the pointer, since the window
 //! sees no pointer motion until the drop.
 
+use std::sync::Arc;
+
 use iced::{Point, Task};
 
 use super::App;
@@ -37,9 +39,8 @@ pub(super) enum PointerPoll {
     #[default]
     Unasked,
     Asking,
-    #[cfg(not(any(target_os = "macos", windows)))]
     Ready {
-        window: Box<super::desktop_pointer_x11::PointerWindow>,
+        window: Arc<PointerWindow>,
         /// The window's scale factor, which with the interface scale turns
         /// physical pixels into the layout's.
         scale: f32,
@@ -96,7 +97,6 @@ impl App {
                 self.pointer_poll = PointerPoll::Asking;
                 find_pointer_window()
             }
-            #[cfg(not(any(target_os = "macos", windows)))]
             PointerPoll::Ready {
                 window,
                 scale,
@@ -124,20 +124,21 @@ impl App {
         }
     }
 
-    /// Keeps the X window a poll reads the pointer against, or gives up
+    /// Keeps the window a poll reads the pointer against, or gives up
     /// polling where there is none.
-    pub(super) fn on_desktop_pointer_window(&mut self, window: Option<u32>, scale: f32) {
-        self.pointer_poll = PointerPoll::Unavailable;
-        #[cfg(not(any(target_os = "macos", windows)))]
-        if let Some(window) = window.and_then(super::desktop_pointer_x11::PointerWindow::connect) {
-            self.pointer_poll = PointerPoll::Ready {
-                window: Box::new(window),
+    pub(super) fn on_desktop_pointer_window(
+        &mut self,
+        window: Option<Arc<PointerWindow>>,
+        scale: f32,
+    ) {
+        self.pointer_poll = match window {
+            Some(window) => PointerPoll::Ready {
+                window,
                 scale,
                 last: None,
-            };
-        }
-        #[cfg(any(target_os = "macos", windows))]
-        let _ = (window, scale);
+            },
+            None => PointerPoll::Unavailable,
+        };
     }
 
     /// Every drop target the view may have tagged: each track's lane, the
@@ -168,20 +169,44 @@ impl App {
     }
 }
 
-/// The app's X window and scale factor, once iced reports them.
+/// The app's window, where the platform can read the pointer against it,
+/// and its scale factor, once iced reports them.
 fn find_pointer_window() -> Task<Message> {
     iced::window::get_latest().and_then(|id| {
-        iced::window::run_with_handle(id, x11_window).then(move |window| {
-            iced::window::get_scale_factor(id)
-                .map(move |scale| Message::DesktopPointerWindow { window, scale })
+        iced::window::run_with_handle(id, |handle| {
+            PointerWindow::from_handle(handle).map(Arc::new)
+        })
+        .then(move |window| {
+            iced::window::get_scale_factor(id).map(move |scale| Message::DesktopPointerWindow {
+                window: window.clone(),
+                scale,
+            })
         })
     })
 }
 
 #[cfg(not(any(target_os = "macos", windows)))]
-use super::desktop_pointer_x11::x11_window;
+use super::desktop_pointer_x11 as platform;
 
+/// Where the pointer cannot be read yet, so a drop waits for the widgets.
 #[cfg(any(target_os = "macos", windows))]
-fn x11_window(_handle: iced::window::raw_window_handle::WindowHandle<'_>) -> Option<u32> {
-    None
+mod platform {
+    use iced::window::raw_window_handle::WindowHandle;
+
+    #[derive(Debug)]
+    pub enum PointerWindow {}
+
+    impl PointerWindow {
+        pub(in super::super) fn from_handle(_handle: WindowHandle<'_>) -> Option<Self> {
+            None
+        }
+
+        pub(in super::super) fn pointer(&self) -> Option<(f32, f32)> {
+            match *self {}
+        }
+    }
 }
+
+/// The platform's pointer source: built from the window handle, it reads
+/// the pointer relative to the window in physical pixels.
+pub(crate) use platform::PointerWindow;

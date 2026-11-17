@@ -153,9 +153,10 @@ pub enum Message {
 
     // Engine events
     Tick,
-    /// The app's X window, where there is one, and its scale factor.
+    /// The app's window, where the pointer can be read against it, and its
+    /// scale factor.
     DesktopPointerWindow {
-        window: Option<u32>,
+        window: Option<Arc<crate::app::PointerWindow>>,
         scale: f32,
     },
     /// How far across the window a poll found the pointer during another
