@@ -688,25 +688,34 @@ impl App {
             Some(ghost) => new_track_lane(&ghost, geometry),
             None => drop_highlight(lane.into(), zone, CARD_ZONE_RADIUS, CARD_ZONE_INSET),
         };
-        let zone = mouse_area(lane)
-            .on_move(move |point| {
-                let beat = grid.snap_beat(geometry.x_to_beat(point.x), geometry.pixels_per_beat());
-                Message::Browser(BrowserMsg::DragHoverEmptyArrangement {
-                    beat: beat.max(0.0),
-                })
-            })
-            .on_exit(Message::Browser(BrowserMsg::LeaveDragTarget(
-                crate::state::BrowserDropTarget::EmptyArrangement { beat: 0.0 },
-            )))
-            .on_release(Message::DropSampleOnEmptyArrangement);
-        let zone = super::desktop_pointer::drop_target(
-            zone,
-            crate::domains::desktop_pointer::PointerTarget::NewTrackRow,
-        );
-        row![header, zone]
+        row![header, new_track_drop_area(lane, grid, geometry)]
             .height(Length::Fixed(NEW_TRACK_ROW_HEIGHT))
             .into()
     }
+}
+
+/// `content` taking a drop for a new track at the beat under the pointer,
+/// its left edge where `geometry` starts.
+fn new_track_drop_area<'a>(
+    content: impl Into<Element<'a, Message>>,
+    grid: crate::state::GridConfig,
+    geometry: TimelineGeometry,
+) -> Element<'a, Message> {
+    let area = mouse_area(content)
+        .on_move(move |point| {
+            let beat = grid.snap_beat(geometry.x_to_beat(point.x), geometry.pixels_per_beat());
+            Message::Browser(BrowserMsg::DragHoverEmptyArrangement {
+                beat: beat.max(0.0),
+            })
+        })
+        .on_exit(Message::Browser(BrowserMsg::LeaveDragTarget(
+            crate::state::BrowserDropTarget::EmptyArrangement { beat: 0.0 },
+        )))
+        .on_release(Message::DropSampleOnEmptyArrangement);
+    super::desktop_pointer::drop_target(
+        area,
+        crate::domains::desktop_pointer::PointerTarget::NewTrackRow,
+    )
 }
 
 /// The lane of the track a drop adds, with `ghost` in it.
