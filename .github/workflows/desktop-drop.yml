@@ -3,8 +3,9 @@ name: Desktop drop
 # Drags a real MIDI file and a real WAV file into a running Vibez from
 # another process, with each platform's own drag API driven by synthetic
 # mouse input, and checks that they land. winit 0.30 reports no pointer
-# positions during such a drag on Windows or macOS, so this is the end to
-# end proof of the pointer poll there. The screenshots are uploaded.
+# positions during such a drag on Windows or macOS, and the helpers move the
+# pointer off Vibez the moment it drops, so a drop lands only where the
+# pointer poll found a target. The screenshots are uploaded.
 
 on:
   workflow_dispatch:
