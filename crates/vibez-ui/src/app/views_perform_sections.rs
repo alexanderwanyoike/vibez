@@ -477,16 +477,15 @@ impl App {
                     .push(self.view_new_track_row(SECTION_TRACK_GUTTER_WIDTH, viewport.geometry()));
             }
 
-            let body = crate::widgets::quiet_scroll::vertical(
+            let body = crate::widgets::quiet_scroll::vertical_above(
                 container(track_rows)
                     .width(Length::Fill)
                     .style(|_theme: &Theme| container::Style {
                         background: Some(th::bg_surface().into()),
                         ..Default::default()
                     }),
-            )
-            .width(Length::Fill)
-            .height(Length::Fill);
+                self.view_new_track_space(SECTION_TRACK_GUTTER_WIDTH, viewport.geometry()),
+            );
             let navigation_header = column![ruler_row, minimap_row]
                 .width(Length::Fill)
                 .height(Length::Fixed(section_navigation_header_height()));

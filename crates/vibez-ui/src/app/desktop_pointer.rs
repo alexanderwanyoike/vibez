@@ -15,6 +15,7 @@ pub(super) fn target_id(target: PointerTarget) -> iced::widget::container::Id {
     let name = match target {
         PointerTarget::Lane(track_id) => format!("lane/{}", track_id.raw()),
         PointerTarget::NewTrackRow => "new-track-row".to_string(),
+        PointerTarget::NewTrackGutter => "new-track-gutter".to_string(),
         PointerTarget::NewTrackSlot { row } => format!("new-track-slot/{row}"),
         PointerTarget::ClipSlot { track_id, row } => {
             format!("clip-slot/{}/{row}", track_id.raw())
@@ -142,9 +143,9 @@ impl App {
     }
 
     /// Every drop target the view may have tagged: each track's lane, the
-    /// new-track row, and in the clip launcher the shown rows' Clip slots
+    /// new-track row and the strip under the headers beside it, and in the clip launcher the shown rows' Clip slots
     /// and new-track slots, plus row 0 its new-track header drops in.
-    fn pointer_targets(&self) -> Vec<PointerTarget> {
+    pub(super) fn pointer_targets(&self) -> Vec<PointerTarget> {
         let first_row = self.state.perform.clip_editor.first_row;
         let rows = first_row..first_row + super::views_clip_launcher::LAUNCHER_ROWS;
         let tracks = self
@@ -158,6 +159,7 @@ impl App {
             .map(PointerTarget::Lane)
             .chain([
                 PointerTarget::NewTrackRow,
+                PointerTarget::NewTrackGutter,
                 PointerTarget::NewTrackSlot { row: 0 },
             ])
             .chain(rows.clone().map(|row| PointerTarget::NewTrackSlot { row }))

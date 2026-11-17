@@ -836,13 +836,15 @@ impl App {
                     compact,
                 ));
             }
-            workspace = workspace.push(
-                crate::widgets::quiet_scroll::vertical(
-                    container(grid).padding([0, 12]).width(Length::Fill),
-                )
-                .width(Length::Fill)
-                .height(Length::Fill),
-            );
+            let below: Element<'_, Message> = if new_track_column {
+                super::views_clip_launcher_new_track::below_new_track_column(first_row)
+            } else {
+                iced::widget::Space::new(Length::Fill, Length::Fill).into()
+            };
+            workspace = workspace.push(crate::widgets::quiet_scroll::vertical_above(
+                container(grid).padding([0, 12]).width(Length::Fill),
+                below,
+            ));
         }
         let footer = row![
             text(if keyboard_active {

@@ -14,7 +14,7 @@ use crate::domains::drop_ghost::{GhostPlace, NewTrack};
 use crate::state::{AuditionMode, ProjectTrack};
 
 /// A one-bar type 0 drum phrase at 96 PPQ: kick on 1, snare on 2.
-fn drum_phrase(directory: &Path) -> PathBuf {
+pub(super) fn drum_phrase(directory: &Path) -> PathBuf {
     let bytes: &[u8] = &[
         b'M', b'T', b'h', b'd', 0, 0, 0, 6, 0, 0, 0, 1, 0, 96, //
         b'M', b'T', b'r', b'k', 0, 0, 0, 20, //
@@ -27,7 +27,7 @@ fn drum_phrase(directory: &Path) -> PathBuf {
     path
 }
 
-fn kick(directory: &Path) -> PathBuf {
+pub(super) fn kick(directory: &Path) -> PathBuf {
     let path = directory.join("kick.wav");
     let audio = DecodedAudio {
         channels: vec![vec![0.5; 4_410]],
@@ -43,7 +43,7 @@ fn browser(message: BrowserMsg) -> Message {
 
 /// A clip launcher holding one audio track, which is not where drops on
 /// empty space land.
-fn launcher() -> (App, TrackId) {
+pub(super) fn launcher() -> (App, TrackId) {
     let mut app = app();
     app.state.browser.audition_mode = AuditionMode::Raw;
     app.state.view.workspace = crate::state::Workspace::Perform;
@@ -60,7 +60,7 @@ fn launcher() -> (App, TrackId) {
 }
 
 /// The Sections layout on a selected Section with one audio track.
-fn sections() -> (App, TrackId, SectionId) {
+pub(super) fn sections() -> (App, TrackId, SectionId) {
     let (mut app, existing) = launcher();
     app.state.perform.layout = vibez_project::PerformLayout::Sections;
     let section = crate::domains::perform::Section::new(0);
@@ -72,14 +72,14 @@ fn sections() -> (App, TrackId, SectionId) {
     (app, existing, section_id)
 }
 
-fn browser_drag(app: &mut App, path: PathBuf) {
+pub(super) fn browser_drag(app: &mut App, path: PathBuf) {
     app.state.browser.drag_label = path
         .file_name()
         .map(|name| name.to_string_lossy().into_owned());
     app.state.browser.drag_source = Some(MediaSourceRef::LocalFile { path });
 }
 
-fn the_new_track(app: &App, existing: TrackId) -> &ProjectTrack {
+pub(super) fn the_new_track(app: &App, existing: TrackId) -> &ProjectTrack {
     let added: Vec<_> = app
         .state
         .project_tracks
@@ -93,7 +93,7 @@ fn the_new_track(app: &App, existing: TrackId) -> &ProjectTrack {
     track
 }
 
-fn section_clip_starts(app: &App, section_id: SectionId, track_id: TrackId) -> Vec<f64> {
+pub(super) fn section_clip_starts(app: &App, section_id: SectionId, track_id: TrackId) -> Vec<f64> {
     let samples_per_beat = app.state.transport.samples_per_beat();
     let section = app.state.perform.sections.by_id(section_id).unwrap();
     section

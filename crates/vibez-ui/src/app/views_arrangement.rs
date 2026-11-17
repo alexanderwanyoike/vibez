@@ -590,7 +590,10 @@ impl App {
             }
         }
 
-        let track_body = quiet_scroll::vertical(track_rows).height(Length::Fill);
+        let track_body = quiet_scroll::vertical_above(
+            track_rows,
+            self.view_new_track_space(TRACK_HEADER_TOTAL_WIDTH, geometry),
+        );
         let channel_footer =
             container(quiet_scroll::vertical(channel_rows)).max_height(CHANNEL_FOOTER_MAX_HEIGHT);
 
@@ -688,25 +691,87 @@ impl App {
             Some(ghost) => new_track_lane(&ghost, geometry),
             None => drop_highlight(lane.into(), zone, CARD_ZONE_RADIUS, CARD_ZONE_INSET),
         };
-        let zone = mouse_area(lane)
-            .on_move(move |point| {
-                let beat = grid.snap_beat(geometry.x_to_beat(point.x), geometry.pixels_per_beat());
-                Message::Browser(BrowserMsg::DragHoverEmptyArrangement {
-                    beat: beat.max(0.0),
-                })
-            })
-            .on_exit(Message::Browser(BrowserMsg::LeaveDragTarget(
-                crate::state::BrowserDropTarget::EmptyArrangement { beat: 0.0 },
-            )))
-            .on_release(Message::DropSampleOnEmptyArrangement);
-        let zone = super::desktop_pointer::drop_target(
-            zone,
-            crate::domains::desktop_pointer::PointerTarget::NewTrackRow,
-        );
-        row![header, zone]
-            .height(Length::Fixed(NEW_TRACK_ROW_HEIGHT))
-            .into()
+        row![
+            new_track_gutter_area(header, grid, geometry),
+            new_track_drop_area(lane, grid, geometry),
+        ]
+        .height(Length::Fixed(NEW_TRACK_ROW_HEIGHT))
+        .into()
     }
+
+    /// The space under the new-track row, which takes a drop as the row
+    /// does, the lane at the pointer's beat and the gutter `header_width`
+    /// wide under the headers at the lane's start.
+    pub(super) fn view_new_track_space(
+        &self,
+        header_width: f32,
+        geometry: TimelineGeometry,
+    ) -> Element<'_, Message> {
+        let space = iced::widget::Space::new(Length::Fill, Length::Fill);
+        if self.state.browser.drag_source.is_none() {
+            return space.into();
+        }
+        let grid = self.state.view.arrange_grid;
+        row![
+            new_track_gutter_area(
+                iced::widget::Space::new(Length::Fixed(header_width), Length::Fill),
+                grid,
+                geometry,
+            ),
+            new_track_drop_area(space, grid, geometry),
+        ]
+        .height(Length::Fill)
+        .into()
+    }
+}
+
+/// `content` taking a drop for a new track at the beat under the pointer,
+/// its left edge where `geometry` starts.
+fn new_track_drop_area<'a>(
+    content: impl Into<Element<'a, Message>>,
+    grid: crate::state::GridConfig,
+    geometry: TimelineGeometry,
+) -> Element<'a, Message> {
+    new_track_drop(
+        content,
+        crate::domains::desktop_pointer::PointerTarget::NewTrackRow,
+        move |x| grid.snap_beat(geometry.x_to_beat(x), geometry.pixels_per_beat()),
+    )
+}
+
+/// `content` under the track headers taking a drop for a new track at the
+/// beat where the lane starts.
+fn new_track_gutter_area<'a>(
+    content: impl Into<Element<'a, Message>>,
+    grid: crate::state::GridConfig,
+    geometry: TimelineGeometry,
+) -> Element<'a, Message> {
+    let beat = grid.snap_beat(geometry.x_to_beat(0.0), geometry.pixels_per_beat());
+    new_track_drop(
+        content,
+        crate::domains::desktop_pointer::PointerTarget::NewTrackGutter,
+        move |_| beat,
+    )
+}
+
+/// `content` tagged `target`, taking a drop for a new track at the beat
+/// `beat_at` gives for the pointer's x.
+fn new_track_drop<'a>(
+    content: impl Into<Element<'a, Message>>,
+    target: crate::domains::desktop_pointer::PointerTarget,
+    beat_at: impl Fn(f32) -> f64 + 'a,
+) -> Element<'a, Message> {
+    let area = mouse_area(content)
+        .on_move(move |point| {
+            Message::Browser(BrowserMsg::DragHoverEmptyArrangement {
+                beat: beat_at(point.x).max(0.0),
+            })
+        })
+        .on_exit(Message::Browser(BrowserMsg::LeaveDragTarget(
+            crate::state::BrowserDropTarget::EmptyArrangement { beat: 0.0 },
+        )))
+        .on_release(Message::DropSampleOnEmptyArrangement);
+    super::desktop_pointer::drop_target(area, target)
 }
 
 /// The lane of the track a drop adds, with `ghost` in it.
