@@ -6,6 +6,8 @@ use iced::{
     Font,
 };
 
+#[cfg(test)]
+mod coverage_tests;
 mod fit;
 pub use fit::{fit_text, fit_text_middle};
 
