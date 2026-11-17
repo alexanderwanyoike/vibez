@@ -129,6 +129,11 @@ pub enum BrowserDropTarget {
         track_id: TrackId,
         row: u32,
     },
+    /// The empty space beside the clip launcher's last column, where a drop
+    /// adds a track with its Clip in `row`.
+    NewTrackSlot {
+        row: u32,
+    },
     /// A device panel outside any instrument card, and what a drop there does.
     DevicePanel {
         track_id: TrackId,

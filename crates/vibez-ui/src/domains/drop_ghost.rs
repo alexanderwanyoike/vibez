@@ -8,7 +8,10 @@ use vibez_core::id::{ClipId, TrackId};
 use vibez_core::track::MediaSourceRef;
 
 use crate::domains::midi_file_import::{MidiClipTrack, MidiFileImport, MidiFileLayout};
-use crate::state::{AuditionMode, BrowserDropTarget, BrowserState, UiClip, UiNoteClip};
+use crate::domains::perform::LauncherClip;
+use crate::state::{
+    ArrangementTimeline, AuditionMode, BrowserDropTarget, BrowserState, UiClip, UiNoteClip,
+};
 use crate::warp::LoopGridFit;
 
 /// A dragged file as its ghost shows it, read once per drag.
@@ -129,6 +132,9 @@ pub enum GhostPlace {
     Lane { track_id: TrackId, beat: f64 },
     /// On the lane of a track the drop adds, from `beat`.
     NewTrack { beat: f64 },
+    /// In `row`'s Clip slot of a track the drop adds beside the clip
+    /// launcher's last column.
+    NewTrackSlot { row: u32 },
 }
 
 /// The Clip a release would make and where it would land.
@@ -146,15 +152,44 @@ pub struct DragGhostRead {
     pub media: GhostMedia,
 }
 
+/// What a drag has read, and the clip launcher Clip it shows as, built once
+/// so the slot's thumbnail is drawn once.
+#[derive(Debug, Clone)]
+pub struct DragGhost {
+    pub read: DragGhostRead,
+    slot: LauncherClip,
+}
+
+impl DragGhost {
+    fn new(read: DragGhostRead) -> Self {
+        let track_id = TrackId::new();
+        let mut timeline = ArrangementTimeline::default();
+        let lane = timeline.ensure(track_id);
+        match &read.media {
+            // A launcher's audio Clip loops over the whole file.
+            GhostMedia::Audio { clip, .. } => lane.clips.push(UiClip {
+                loop_enabled: true,
+                ..(**clip).clone()
+            }),
+            GhostMedia::Midi { clip, .. } => lane.note_clips.push(clip.clone()),
+        }
+        let slot = LauncherClip {
+            id: ClipId::new(),
+            track_id,
+            row: 0,
+            timeline: Arc::new(timeline),
+            launch: Default::default(),
+        };
+        Self { read, slot }
+    }
+}
+
 impl BrowserState {
     /// The ghost of the drag in flight where a release would land it; none
     /// until the file has been read, and none where the target turns the
     /// drag away.
     pub fn drop_ghost(&self, project_bpm: f64) -> Option<DropGhost<'_>> {
-        let read = self.drag_ghost.as_ref()?;
-        if self.drag_source.as_ref() != Some(&read.source) {
-            return None;
-        }
+        let read = &self.current_drag_ghost()?.read;
         let place = match *self.drag_target.as_ref()? {
             BrowserDropTarget::ArrangementLane {
                 track_id,
@@ -178,11 +213,23 @@ impl BrowserState {
         })
     }
 
+    /// The launcher Clip the ghost shows as in a new column's slot.
+    pub fn drop_ghost_slot(&self) -> Option<&LauncherClip> {
+        let _ = self.current_drag_ghost();
+        None
+    }
+
+    fn current_drag_ghost(&self) -> Option<&DragGhost> {
+        self.drag_ghost
+            .as_ref()
+            .filter(|ghost| self.drag_source.as_ref() == Some(&ghost.read.source))
+    }
+
     /// Keeps what was read of `source` for the ghost while it is still the
     /// drag in flight; a read that finishes after its drag ended is dropped.
     pub(super) fn install_drag_ghost(&mut self, read: DragGhostRead) {
         if self.drag_source.as_ref() == Some(&read.source) {
-            self.drag_ghost = Some(read);
+            self.drag_ghost = Some(DragGhost::new(read));
         }
     }
 }

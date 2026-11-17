@@ -67,6 +67,9 @@ pub enum BrowserMsg {
         track_id: TrackId,
         row: u32,
     },
+    DragHoverNewTrackSlot {
+        row: u32,
+    },
     /// A file from another app entered the window.
     DesktopFileHovered(PathBuf),
     DesktopFileDropped(PathBuf),
@@ -207,6 +210,9 @@ impl crate::state::BrowserDropTarget {
             }
             Target::DevicePanel { drop, .. } => drop.hover_status(),
             Target::ClipSlot { row, .. } => format!("Clip slot in row {}", row + 1),
+            Target::NewTrackSlot { row } => {
+                format!("New {kind} track, Clip slot in row {}", row + 1)
+            }
         }
     }
 
@@ -529,6 +535,7 @@ impl BrowserState {
                     &mut action,
                 );
             }
+            BrowserMsg::DragHoverNewTrackSlot { .. } => {}
             BrowserMsg::DesktopFileHovered(path) => {
                 let dragging = self.drag_source.clone();
                 action.status = self.hover_desktop_file(path);

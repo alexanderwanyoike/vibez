@@ -715,6 +715,7 @@ impl App {
                     "Select a sample in the Browser, then add it to a Clip slot".into();
                 self.state.browser.open = true;
             }
+            Message::ImportLauncherClipOnNewTrack { .. } => {}
             Message::NewProject => {
                 return self.route_new_project();
             }

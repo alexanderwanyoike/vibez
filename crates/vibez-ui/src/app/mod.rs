@@ -284,6 +284,9 @@ mod drag_ghost;
 #[cfg(test)]
 mod drag_ghost_tests;
 
+#[cfg(test)]
+mod new_track_drop_tests;
+
 mod midi_file_drop;
 
 #[cfg(test)]

@@ -37,6 +37,8 @@ impl LaneGhost {
     pub fn new(ghost: &DropGhost<'_>, pixels_per_beat: f32) -> Self {
         let start_beats = match ghost.place {
             GhostPlace::Lane { beat, .. } | GhostPlace::NewTrack { beat } => beat,
+            // A launcher Clip starts its own timeline.
+            GhostPlace::NewTrackSlot { .. } => 0.0,
         };
         let (name, body) = match ghost.media {
             GhostMedia::Audio { clip, peaks, .. } => {

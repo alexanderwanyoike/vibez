@@ -344,6 +344,11 @@ pub enum Message {
         position_samples: u64,
     },
     DropSampleOnEmptyArrangement,
+    /// Drops the Browser drag beside the clip launcher's last column: a new
+    /// track of the drag's kind, with its Clip in `row`.
+    ImportLauncherClipOnNewTrack {
+        row: u32,
+    },
     /// The producer's answer to how a multi-track MIDI file lands; `None`
     /// cancels the drop.
     ChooseMidiFileLayout(Option<crate::domains::midi_file_import::MidiFileLayout>),

@@ -135,7 +135,7 @@ fn a_clip_slot_must_be_free_in_a_clips_project() {
     assert_eq!(
         project.resolve(slot.clone()),
         Ok(MidiLanding::Slot {
-            onto: project.midi,
+            onto: Some(project.midi),
             row: 1,
         })
     );
@@ -174,7 +174,7 @@ fn the_status_names_the_track_the_slot_or_the_count_of_new_tracks() {
         beat: 8.0,
     };
     let slot = MidiLanding::Slot {
-        onto: TrackId::new(),
+        onto: Some(TrackId::new()),
         row: 1,
     };
 

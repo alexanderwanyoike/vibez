@@ -129,7 +129,7 @@ pub struct BrowserState {
     pub desktop_drop: Option<DesktopDrop>,
     /// What the drag in flight has read of its file, kept for the drag's
     /// life so the ghost never reads it twice.
-    pub drag_ghost: Option<crate::domains::drop_ghost::DragGhostRead>,
+    pub drag_ghost: Option<crate::domains::drop_ghost::DragGhost>,
 }
 
 /// Where a file dragged in from another app is in its drop.
