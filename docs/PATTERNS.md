@@ -493,12 +493,14 @@ On X11 another app's drag holds the pointer, so widgets see no motion until
 the drop. A drop target that should answer during such a drag wraps itself in
 `desktop_pointer::drop_target(content, PointerTarget::…)`, a container with an
 id. While the drag hovers, the UI tick reads the pointer from the X server and
-`DropTargetProbe`, a widget `Operation`, finds the tagged container under it,
-allowing for scrolling. `BrowserState::pointer_messages` then sends the hover
-message the widget itself would have sent. A new kind of target adds a
-`PointerTarget` variant, tags its widget, and maps to its hover there. Device
-cards are not tagged: a drop with no tagged target under it waits, and the
-card under the released pointer takes it.
+`DropTargetProbe`, a widget `Operation`, looks for the ids
+`App::pointer_targets` lists and finds the one under the pointer, allowing for
+scrolling. `BrowserState::pointer_messages` then sends the hover message the
+widget itself would have sent. A new kind of target adds a `PointerTarget`
+variant, tags its widget, lists it in `pointer_targets`, and maps to its
+hover. Device cards and Drum Rack pads are not tagged, so a poll that finds
+no tagged target leaves the drop free, and the card under the released
+pointer takes it.
 
 ---
 
