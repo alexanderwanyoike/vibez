@@ -18,7 +18,7 @@ use crate::domains::midi_file_landing::{MidiLanding, MidiLandingCtx};
 use crate::message::{BrowserImportTarget, Message};
 use crate::state::{ArrangementTimeline, UiNoteClip};
 
-async fn read_midi_file_async(path: PathBuf) -> Result<MidiFileImport, String> {
+pub(super) async fn read_midi_file_async(path: PathBuf) -> Result<MidiFileImport, String> {
     tokio::task::spawn_blocking(move || {
         let name = path
             .file_stem()

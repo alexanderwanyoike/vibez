@@ -33,26 +33,75 @@ impl GhostMedia {
     /// The note Clip a one-Clip drop of `import` makes, and whether a new
     /// track for it holds a Drum Rack.
     pub fn midi(import: &MidiFileImport) -> Self {
-        let _ = import;
-        todo!()
+        let planned = import
+            .plan(None, 0.0, MidiFileLayout::OneClip)
+            .into_iter()
+            .next()
+            .expect("a one-Clip plan holds one Clip");
+        let drum_rack = matches!(
+            planned.track,
+            MidiClipTrack::New {
+                drum_rack: true,
+                ..
+            }
+        );
+        Self::Midi {
+            clip: planned.clip,
+            drum_rack,
+        }
     }
 
     /// How many beats the Clip a drop makes lasts.
     pub fn length_beats(&self, mode: AuditionMode, project_bpm: f64) -> Option<f64> {
-        let _ = (mode, project_bpm);
-        todo!()
+        match self {
+            Self::Audio { clip, loop_fit, .. } => {
+                let rate = clip.audio.sample_rate;
+                if rate == 0 {
+                    return None;
+                }
+                mode.imported_beats(clip.duration as f64 / rate as f64, *loop_fit, project_bpm)
+            }
+            Self::Midi { clip, .. } => Some(clip.duration_beats),
+        }
     }
 
     /// The track a drop on empty space makes for this media.
     pub fn new_track(&self) -> NewTrack {
-        todo!()
+        match self {
+            Self::Audio { .. } => NewTrack::Audio,
+            Self::Midi { drum_rack, .. } => NewTrack::Midi {
+                drum_rack: *drum_rack,
+            },
+        }
     }
 }
 
 /// The whole of `audio` as one Clip named `name`, for a ghost to draw.
 pub fn audio_clip(name: String, source: MediaSourceRef, audio: Arc<DecodedAudio>) -> UiClip {
-    let _ = (name, source, audio);
-    todo!()
+    let duration = audio.num_frames() as u64;
+    UiClip {
+        id: ClipId::new(),
+        name,
+        audio,
+        source,
+        position: 0,
+        source_offset: 0,
+        start_marker: 0,
+        duration,
+        loop_enabled: false,
+        loop_start: 0,
+        loop_end: duration,
+        gain_db: Default::default(),
+        fades: Default::default(),
+        playback_direction: Default::default(),
+        transient_markers: Default::default(),
+        warp_markers: Default::default(),
+        transpose: Default::default(),
+        original_bpm: None,
+        warped: false,
+        warped_to_bpm: None,
+        original_audio: None,
+    }
 }
 
 /// The kind of track a drop on empty space adds.
@@ -65,7 +114,11 @@ pub enum NewTrack {
 impl NewTrack {
     /// What the new track's header says while the ghost waits in it.
     pub fn label(self) -> &'static str {
-        todo!()
+        match self {
+            Self::Audio => "New audio track",
+            Self::Midi { drum_rack: false } => "New MIDI track",
+            Self::Midi { drum_rack: true } => "New MIDI track · Drum Rack",
+        }
     }
 }
 
@@ -98,8 +151,24 @@ impl BrowserState {
     /// until the file has been read, and none where the target turns the
     /// drag away.
     pub fn drop_ghost(&self, project_bpm: f64) -> Option<DropGhost<'_>> {
-        let _ = project_bpm;
-        None
+        let read = self.drag_ghost.as_ref()?;
+        if self.drag_source.as_ref() != Some(&read.source) {
+            return None;
+        }
+        let place = match *self.drag_target.as_ref()? {
+            BrowserDropTarget::ArrangementLane {
+                track_id,
+                beat,
+                compatible: true,
+            } => GhostPlace::Lane { track_id, beat },
+            BrowserDropTarget::EmptyArrangement { beat } => GhostPlace::NewTrack { beat },
+            _ => return None,
+        };
+        Some(DropGhost {
+            place,
+            length_beats: read.media.length_beats(self.audition_mode, project_bpm)?,
+            media: &read.media,
+        })
     }
 
     /// The ghost waiting on `track_id`'s lane.
@@ -112,7 +181,9 @@ impl BrowserState {
     /// Keeps what was read of `source` for the ghost while it is still the
     /// drag in flight; a read that finishes after its drag ended is dropped.
     pub(super) fn install_drag_ghost(&mut self, read: DragGhostRead) {
-        let _ = read;
+        if self.drag_source.as_ref() == Some(&read.source) {
+            self.drag_ghost = Some(read);
+        }
     }
 }
 

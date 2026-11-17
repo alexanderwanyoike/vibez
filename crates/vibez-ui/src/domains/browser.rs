@@ -432,6 +432,7 @@ impl BrowserState {
             BrowserMsg::PendingDragMoved { x, y } => {
                 if self.move_pending_drag(x, y) {
                     action.status = Some(self.moving_status());
+                    action.read_drag_ghost = self.drag_source.clone();
                 }
             }
             BrowserMsg::DragHoverTrack {
@@ -528,7 +529,13 @@ impl BrowserState {
                     &mut action,
                 );
             }
-            BrowserMsg::DesktopFileHovered(path) => action.status = self.hover_desktop_file(path),
+            BrowserMsg::DesktopFileHovered(path) => {
+                let dragging = self.drag_source.clone();
+                action.status = self.hover_desktop_file(path);
+                if self.drags_from_desktop() && self.drag_source != dragging {
+                    action.read_drag_ghost = self.drag_source.clone();
+                }
+            }
             BrowserMsg::DesktopFileDropped(path) => self.drop_desktop_file(&path, &mut action),
             BrowserMsg::DesktopDragLeft => {
                 if self.drags_from_desktop() {
