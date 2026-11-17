@@ -88,7 +88,7 @@ impl LaneGhost {
                 colors.ink,
             ),
         }
-        draw_clip_front(frame, body, &colors, &self.name, false, w);
+        draw_clip_front(frame, body, &colors, &self.name, None, w);
     }
 }
 

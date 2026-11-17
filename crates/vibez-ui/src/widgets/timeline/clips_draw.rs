@@ -4,6 +4,7 @@ use iced::mouse;
 use iced::widget::canvas;
 use iced::{Rectangle, Renderer};
 
+use crate::icons;
 use crate::theme;
 
 use super::clip_colors::{clip_colors, ClipColors};
@@ -69,6 +70,16 @@ fn waveform_peak_for_pixel(
     peaks
         .get(pixel.saturating_mul(peaks.len()) / rendered_pixels.max(1))
         .copied()
+}
+
+/// A recording preview leads its title with the record circle the transport
+/// shows.
+fn title_icon(is_recording_preview: bool, looped: bool) -> Option<char> {
+    if is_recording_preview {
+        Some(icons::CIRCLE)
+    } else {
+        looped.then_some(icons::REPEAT)
+    }
 }
 
 /// How a Clip's peaks map onto the lane's pixels.
@@ -558,7 +569,14 @@ impl TrackClipCanvas {
                 }
             }
         }
-        draw_clip_front(frame, body, &colors, &clip.name, looped, w);
+        draw_clip_front(
+            frame,
+            body,
+            &colors,
+            &clip.name,
+            title_icon(is_recording_preview, looped),
+            w,
+        );
 
         // Diagonal stripe overlay when the clip's warp is
         // stale relative to the current project tempo. Low
@@ -649,13 +667,31 @@ impl TrackClipCanvas {
             colors.ink,
         );
 
-        draw_clip_front(frame, body, &colors, &note_clip.name, looping, w);
+        draw_clip_front(
+            frame,
+            body,
+            &colors,
+            &note_clip.name,
+            title_icon(is_recording_preview, looping),
+            w,
+        );
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{visible_pixel_columns, waveform_peak_for_pixel, whole_pixel_offset, PeakScale};
+    use super::{
+        title_icon, visible_pixel_columns, waveform_peak_for_pixel, whole_pixel_offset, PeakScale,
+    };
+    use crate::icons;
+
+    #[test]
+    fn a_recording_preview_leads_with_the_record_circle_and_a_looped_clip_with_its_loop() {
+        assert_eq!(title_icon(true, false), Some(icons::CIRCLE));
+        assert_eq!(title_icon(true, true), Some(icons::CIRCLE));
+        assert_eq!(title_icon(false, true), Some(icons::REPEAT));
+        assert_eq!(title_icon(false, false), None);
+    }
 
     fn spans(peak_span_frames: usize) -> PeakScale {
         PeakScale::Spans {
