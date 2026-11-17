@@ -469,6 +469,19 @@ impl App {
         Some(id)
     }
 
+    /// A new audio track for an import into Perform, which shows it at once;
+    /// `None`, saying so, when the project holds no more tracks.
+    fn new_audio_track_for_perform_import(&mut self) -> Option<TrackId> {
+        let Some(track_id) = self.ensure_audio_track_for_import(None) else {
+            self.state.status_text = crate::domains::arrangement::PROJECT_TRACKS_FULL.into();
+            return None;
+        };
+        self.state
+            .perform
+            .sync_project_tracks(&self.state.project_tracks.tracks);
+        Some(track_id)
+    }
+
     pub(super) fn prepare_browser_sample_import(
         &mut self,
         target: BrowserImportTarget,
@@ -537,25 +550,15 @@ impl App {
                     self.state.status_text = SECTION_DROP_GONE.into();
                     return Task::none();
                 }
-                let Some(track_id) = self.ensure_audio_track_for_import(None) else {
-                    self.state.status_text =
-                        crate::domains::arrangement::PROJECT_TRACKS_FULL.into();
+                let Some(track_id) = self.new_audio_track_for_perform_import() else {
                     return Task::none();
                 };
-                self.state
-                    .perform
-                    .sync_project_tracks(&self.state.project_tracks.tracks);
                 self.add_audio_clip_to_section_at(section_id, track_id, position_samples, payload)
             }
             BrowserImportTarget::LauncherNewTrackAt { row } => {
-                let Some(track_id) = self.ensure_audio_track_for_import(None) else {
-                    self.state.status_text =
-                        crate::domains::arrangement::PROJECT_TRACKS_FULL.into();
+                let Some(track_id) = self.new_audio_track_for_perform_import() else {
                     return Task::none();
                 };
-                self.state
-                    .perform
-                    .sync_project_tracks(&self.state.project_tracks.tracks);
                 self.add_audio_launcher_clip(track_id, row, payload)
             }
             BrowserImportTarget::ArrangementClip(preferred_track) => {
