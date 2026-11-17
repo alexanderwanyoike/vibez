@@ -19,6 +19,7 @@ mod clip_commands;
 pub mod compensation;
 pub mod compressor;
 pub mod delay;
+pub mod desktop_pointer;
 pub mod device_card;
 pub mod device_latency;
 pub mod device_levels;

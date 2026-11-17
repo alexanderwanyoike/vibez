@@ -279,6 +279,11 @@ mod sample_retirement;
 
 mod desktop_drop;
 
+mod desktop_pointer;
+
+#[cfg(test)]
+mod desktop_pointer_tests;
+
 mod drag_ghost;
 
 #[cfg(test)]

@@ -153,6 +153,15 @@ pub enum Message {
 
     // Engine events
     Tick,
+    /// Where a poll found the pointer during another app's drag, and the
+    /// drop target the view laid out under it.
+    DesktopPointerProbed {
+        point: iced::Point,
+        under: Option<(
+            crate::domains::desktop_pointer::PointerTarget,
+            iced::Rectangle,
+        )>,
+    },
     EngineMetering {
         peak_l: f32,
         peak_r: f32,

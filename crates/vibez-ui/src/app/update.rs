@@ -942,6 +942,9 @@ impl App {
             Message::Tick => {
                 return self.handle_tick();
             }
+            Message::DesktopPointerProbed { point, under } => {
+                return self.on_desktop_pointer_probed(point, under);
+            }
             Message::EngineMetering { peak_l, peak_r } => {
                 self.state.peak_l = peak_l;
                 self.state.peak_r = peak_r;
