@@ -24,7 +24,6 @@ use vibez_plugin_host::gui::PluginGuiKey;
 use crate::services::plugin_loader::{PluginInstrumentLoadResult, PluginLoadResult};
 
 use crate::domains::audio_settings::AudioSettingsState;
-use crate::icons;
 use crate::message::{Message, ProjectLoadResult};
 use crate::plugin_window::{PluginRawPtr, PluginWindowManager};
 use crate::state::{AppState, AudioStreamHealth};
@@ -128,7 +127,7 @@ pub fn run() -> iced::Result {
         64,
     )
     .ok();
-    iced::application(App::title, App::update_and_refresh_clips, App::view)
+    let app = iced::application(App::title, App::update_and_refresh_clips, App::view)
         .theme(App::theme)
         .scale_factor(App::scale_factor)
         .antialiasing(true)
@@ -152,12 +151,10 @@ pub fn run() -> iced::Result {
             }
             settings
         })
-        .window_size((1400.0, 900.0))
-        .font(icons::ICON_FONT_BYTES)
-        .font(crate::typography::PLEX_SANS_CONDENSED_MEDIUM_BYTES)
-        .font(crate::typography::PLEX_SANS_CONDENSED_SEMIBOLD_BYTES)
-        .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
-        .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
+        .window_size((1400.0, 900.0));
+    crate::typography::BUNDLED_FONTS
+        .into_iter()
+        .fold(app, |app, bytes| app.font(bytes))
         .run_with(App::new)
 }
 

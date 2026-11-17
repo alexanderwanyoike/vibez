@@ -18,6 +18,33 @@ pub const PLEX_MONO_MEDIUM_BYTES: &[u8] =
 pub const PLEX_MONO_SEMIBOLD_BYTES: &[u8] =
     include_bytes!("../../../assets/fonts/ibm-plex/IBMPlexMono-SemiBold.ttf");
 
+/// Every font the app bundles, in the order it loads them.
+pub const BUNDLED_FONTS: [&[u8]; 5] = [
+    crate::icons::ICON_FONT_BYTES,
+    PLEX_SANS_CONDENSED_MEDIUM_BYTES,
+    PLEX_SANS_CONDENSED_SEMIBOLD_BYTES,
+    PLEX_MONO_MEDIUM_BYTES,
+    PLEX_MONO_SEMIBOLD_BYTES,
+];
+
+/// Loads [`BUNDLED_FONTS`] into the renderer's process-wide font system,
+/// once, so tests shape and measure text in the faces the app draws with,
+/// whatever order they run in.
+#[cfg(test)]
+pub(crate) fn load_bundled_fonts() {
+    use std::sync::Once;
+
+    static LOADED: Once = Once::new();
+    LOADED.call_once(|| {
+        let mut system = iced::advanced::graphics::text::font_system()
+            .write()
+            .expect("font system lock");
+        for bytes in BUNDLED_FONTS {
+            system.load_font(std::borrow::Cow::Borrowed(bytes));
+        }
+    });
+}
+
 /// The Plex Sans Condensed faces declare a condensed width, and cosmic-text
 /// only offers faces whose width equals the one asked for, so a role that
 /// asks for the normal width never reaches them and draws in whatever the
@@ -70,27 +97,13 @@ mod tests {
     }
 
     /// Family and weight of every face the renderer's font system shapes
-    /// `content` with, after loading the fonts the app bundles in the order
-    /// `app::run` loads them. The system fonts stay in, so a role that
-    /// misses its bundled face shows whichever fallback this platform picks.
+    /// `content` with. The system fonts stay in, so a role that misses its
+    /// bundled face shows whichever fallback this platform picks.
     fn drawn_faces(content: &str, font: Font) -> Vec<(String, u16)> {
         use iced::advanced::graphics::text::{cosmic_text, font_system, to_attributes};
-        use std::borrow::Cow;
-        use std::sync::Once;
 
-        static LOAD_BUNDLED: Once = Once::new();
+        load_bundled_fonts();
         let mut system = font_system().write().expect("font system lock");
-        LOAD_BUNDLED.call_once(|| {
-            for bytes in [
-                crate::icons::ICON_FONT_BYTES,
-                PLEX_SANS_CONDENSED_MEDIUM_BYTES,
-                PLEX_SANS_CONDENSED_SEMIBOLD_BYTES,
-                PLEX_MONO_MEDIUM_BYTES,
-                PLEX_MONO_SEMIBOLD_BYTES,
-            ] {
-                system.load_font(Cow::Borrowed(bytes));
-            }
-        });
         let raw = system.raw();
         let mut buffer = cosmic_text::Buffer::new(raw, cosmic_text::Metrics::new(10.5, 13.0));
         buffer.set_text(
