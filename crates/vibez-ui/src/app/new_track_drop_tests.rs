@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 
 use vibez_core::audio_buffer::DecodedAudio;
-use vibez_core::id::TrackId;
+use vibez_core::id::{SectionId, TrackId};
 use vibez_core::midi::{InstrumentKind, TrackKind};
 use vibez_core::track::MediaSourceRef;
 
@@ -60,6 +60,19 @@ fn launcher() -> (App, TrackId) {
     (app, id)
 }
 
+/// The Sections layout on a selected Section with one audio track.
+fn sections() -> (App, TrackId, SectionId) {
+    let (mut app, existing) = launcher();
+    app.state.perform.layout = vibez_project::PerformLayout::Sections;
+    let section = crate::domains::perform::Section::new(0);
+    let section_id = section.id;
+    Arc::make_mut(&mut app.state.perform.sections).insert(section);
+    let _ = app.update(Message::Perform(
+        crate::domains::perform::PerformMsg::SelectSection(section_id),
+    ));
+    (app, existing, section_id)
+}
+
 fn browser_drag(app: &mut App, path: PathBuf) {
     app.state.browser.drag_label = path
         .file_name()
@@ -79,6 +92,28 @@ fn the_new_track(app: &App, existing: TrackId) -> &ProjectTrack {
         panic!("one new track, found {}", added.len());
     };
     track
+}
+
+fn section_clip_starts(app: &App, section_id: SectionId, track_id: TrackId) -> Vec<f64> {
+    let samples_per_beat = app.state.transport.samples_per_beat();
+    let section = app.state.perform.sections.by_id(section_id).unwrap();
+    section
+        .timeline
+        .get(track_id)
+        .map(|content| {
+            content
+                .note_clips
+                .iter()
+                .map(|clip| clip.position_beats)
+                .chain(
+                    content
+                        .clips
+                        .iter()
+                        .map(|clip| clip.span(samples_per_beat).start_beats),
+                )
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 #[tokio::test]
@@ -133,4 +168,43 @@ async fn the_ghost_waits_in_the_new_columns_slot_under_the_pointer() {
         app.state.browser.drop_ghost_slot().unwrap().name(),
         "Rebeater P3"
     );
+}
+
+#[tokio::test]
+async fn drums_released_under_a_sections_tracks_get_a_drum_rack_track_in_that_section() {
+    let directory = tempfile::tempdir().unwrap();
+    let (mut app, existing, section_id) = sections();
+    browser_drag(&mut app, drum_phrase(directory.path()));
+    let _ = app.update(browser(BrowserMsg::DragHoverEmptyArrangement { beat: 4.0 }));
+
+    run_until_idle(&mut app, Message::DropSampleOnEmptyArrangement).await;
+
+    let track = the_new_track(&app, existing);
+    assert_eq!(track.instrument_kind, Some(InstrumentKind::DrumRack));
+    assert_eq!(section_clip_starts(&app, section_id, track.id), vec![4.0]);
+    assert!(app
+        .state
+        .arrange_content(track.id)
+        .is_none_or(|content| content.note_clips.is_empty()));
+}
+
+#[tokio::test]
+async fn audio_from_another_app_under_a_sections_tracks_gets_an_audio_track_in_that_section() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = kick(directory.path());
+    let (mut app, existing, section_id) = sections();
+    let _ = app.update(browser(BrowserMsg::DesktopFileHovered(path.clone())));
+    let _ = app.update(browser(BrowserMsg::DragHoverEmptyArrangement { beat: 2.0 }));
+
+    run_until_idle(&mut app, browser(BrowserMsg::DesktopFileDropped(path))).await;
+
+    let track = the_new_track(&app, existing);
+    assert_eq!(track.kind, TrackKind::Audio);
+    let starts = section_clip_starts(&app, section_id, track.id);
+    assert_eq!(starts.len(), 1);
+    assert!((starts[0] - 2.0).abs() < 1e-6);
+    assert!(app
+        .state
+        .arrange_content(track.id)
+        .is_none_or(|content| content.clips.is_empty()));
 }

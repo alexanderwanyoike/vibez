@@ -302,6 +302,11 @@ pub enum BrowserImportTarget {
     ArrangementNewTrackAt {
         position_samples: u64,
     },
+    /// A new track whose Clip goes in `section_id` at `position_samples`.
+    SectionNewTrackAt {
+        section_id: SectionId,
+        position_samples: u64,
+    },
     /// A new track whose Clip goes in the clip launcher's `row`.
     LauncherNewTrackAt {
         row: u32,

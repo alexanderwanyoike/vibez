@@ -526,6 +526,7 @@ impl App {
             BrowserImportTarget::LauncherClipAt { track_id, row } => {
                 self.add_audio_launcher_clip(track_id, row, payload)
             }
+            BrowserImportTarget::SectionNewTrackAt { .. } => Task::none(),
             BrowserImportTarget::LauncherNewTrackAt { row } => {
                 let Some(track_id) = self.ensure_audio_track_for_import(None) else {
                     self.state.status_text =

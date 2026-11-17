@@ -74,6 +74,14 @@ impl MidiLanding {
                     beat: beat(position_samples),
                 })
             }
+            BrowserImportTarget::SectionNewTrackAt {
+                section_id,
+                position_samples,
+            } if ctx.perform.sections.by_id(section_id).is_some() => Ok(Self::Section {
+                section_id,
+                onto: None,
+                beat: beat(position_samples),
+            }),
             BrowserImportTarget::LauncherClipAt { track_id, row } if midi_track(track_id) => {
                 if !ctx.perform.launcher_slot_is_free(track_id, row) {
                     return Err(crate::domains::perform::LAUNCHER_SLOT_GONE.into());
