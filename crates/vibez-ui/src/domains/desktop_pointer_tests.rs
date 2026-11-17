@@ -124,3 +124,20 @@ fn a_drop_where_no_tagged_target_was_found_waits_for_the_widgets_to_report_one()
 
     assert!(browser.desktop_drop_waits_for_target());
 }
+
+#[test]
+fn a_drop_after_the_pointer_crossed_a_lane_to_an_untagged_target_waits_for_the_widgets() {
+    let mut browser = hovering();
+    let lane = Some((PointerTarget::Lane(TrackId::new()), 0.0));
+    for under in [lane, None] {
+        for message in browser.pointer_messages(under, 100.0, timing(), |_| true) {
+            browser.update(message);
+        }
+    }
+
+    browser.update(BrowserMsg::DesktopFileDropped(PathBuf::from(
+        "/tmp/Rebeater drags/Rebeater P3.mid",
+    )));
+
+    assert!(browser.desktop_drop_waits_for_target());
+}
