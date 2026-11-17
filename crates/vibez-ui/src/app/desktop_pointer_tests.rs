@@ -141,3 +141,21 @@ fn every_target_has_its_own_id() {
         desktop_pointer::target_id(PointerTarget::Lane(track_id))
     );
 }
+
+#[test]
+fn each_desktop_drag_asks_afresh_for_the_window_it_polls() {
+    for left_over in [
+        desktop_pointer::PointerPoll::Asking,
+        desktop_pointer::PointerPoll::Unavailable,
+    ] {
+        let (mut app, _) = app_with_midi_track();
+        app.pointer_poll = left_over;
+
+        let _ = app.poll_desktop_pointer();
+
+        assert!(matches!(
+            app.pointer_poll,
+            desktop_pointer::PointerPoll::Unasked
+        ));
+    }
+}
