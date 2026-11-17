@@ -114,6 +114,7 @@ mod tests {
     use crate::widgets::device_controls::text_width;
 
     fn name_width(text: &str) -> f32 {
+        crate::typography::load_bundled_fonts();
         text_width(text, TITLE_SIZE, TITLE_FONT)
     }
 
