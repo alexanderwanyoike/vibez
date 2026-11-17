@@ -1,7 +1,7 @@
 // Drags files into Vibez the way Explorer does: an OLE DoDragDrop from a
 // window in this process, moved by synthetic mouse input.
 //
-// Usage: drag_windows.exe <vibez pid> <screenshot folder> <step>...
+// Usage: drag_windows.exe <vibez pid> <screenshot folder> <interface scale> <step>...
 // where each step is four arguments, <file or "click"> <x> <y> <name>, with
 // x and y in Vibez's logical pixels from the top left of its client area.
 
@@ -59,10 +59,10 @@ static class DragWindows
 
         var origin = new Point();
         ClientToScreen(vibez, ref origin);
-        var scale = GetDpiForWindow(vibez) / 96.0;
+        var scale = GetDpiForWindow(vibez) / 96.0 * double.Parse(args[2], System.Globalization.CultureInfo.InvariantCulture);
         Console.WriteLine("Vibez client area at {0},{1}, scale {2}", origin.X, origin.Y, scale);
 
-        for (var step = 2; step + 3 < args.Length; step += 4)
+        for (var step = 3; step + 3 < args.Length; step += 4)
         {
             var what = args[step];
             var target = new Point

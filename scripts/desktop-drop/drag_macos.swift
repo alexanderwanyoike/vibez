@@ -1,7 +1,7 @@
 // Drags files into Vibez the way Finder does: an NSDraggingSession begun
 // from a window in this process, moved by synthetic mouse input.
 //
-// Usage: drag_macos <vibez pid> <screenshot folder> <step>...
+// Usage: drag_macos <vibez pid> <screenshot folder> <interface scale> <step>...
 // where each step is four arguments, <file or "click"> <x> <y> <name>, with
 // x and y in Vibez's points from the top left of its content.
 
@@ -55,6 +55,7 @@ let dropped = DispatchSemaphore(value: 0)
 let arguments = CommandLine.arguments
 let vibezPid = pid_t(arguments[1])!
 let shots = URL(fileURLWithPath: arguments[2])
+let interfaceScale = CGFloat(Double(arguments[3])!)
 try FileManager.default.createDirectory(at: shots, withIntermediateDirectories: true)
 
 let app = NSApplication.shared
@@ -141,12 +142,12 @@ DispatchQueue.global().async {
     let origin = vibezContentOrigin()
     print("Vibez content at \(origin)")
     Thread.sleep(forTimeInterval: 3)
-    var step = 3
+    var step = 4
     while step + 3 < arguments.count {
         let what = arguments[step]
         let target = CGPoint(
-            x: origin.x + CGFloat(Double(arguments[step + 1])!),
-            y: origin.y + CGFloat(Double(arguments[step + 2])!))
+            x: origin.x + CGFloat(Double(arguments[step + 1])!) * interfaceScale,
+            y: origin.y + CGFloat(Double(arguments[step + 2])!) * interfaceScale)
         let name = arguments[step + 3]
         if what == "click" {
             post(.mouseMoved, at: target)

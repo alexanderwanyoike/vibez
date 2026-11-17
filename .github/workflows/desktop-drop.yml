@@ -19,6 +19,9 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # The macOS runner's screen is 1024 points wide, where Vibez at full scale
+  # wraps its control bar onto a second row and moves every lane down.
+  INTERFACE_SCALE: '0.75'
   # Each step is <file, or click> <x> <y> <screenshot name>, in logical
   # pixels from the top left of Vibez's content. First the Arrange tab, then
   # the MIDI file on empty Arrange and on the lane it made, then the WAV file
@@ -54,7 +57,8 @@ jobs:
         run: python scripts/desktop-drop/fixtures.py "${{ runner.temp }}/drop"
 
       # A fresh runner has no Vibez settings. These close the Browser, so
-      # Arrange gets the room, and skip the update check.
+      # Arrange gets the room, set the interface scale and skip the update
+      # check.
       - name: Drag into Vibez (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -65,7 +69,7 @@ jobs:
           New-Item -ItemType Directory -Force $shots | Out-Null
           $settings = Join-Path $env:APPDATA vibez
           New-Item -ItemType Directory -Force $settings | Out-Null
-          '{"sample_library_roots":[],"sample_browser_open":false,"check_for_updates":false}' | Set-Content (Join-Path $settings ui.json)
+          "{`"sample_library_roots`":[],`"sample_browser_open`":false,`"check_for_updates`":false,`"interface_scale`":$env:INTERFACE_SCALE}" | Set-Content (Join-Path $settings ui.json)
           $drag = Join-Path $env:RUNNER_TEMP drag_windows.exe
           & "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo "/out:$drag" /r:System.Windows.Forms.dll /r:System.Drawing.dll scripts\desktop-drop\drag_windows.cs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -73,7 +77,7 @@ jobs:
             -RedirectStandardOutput (Join-Path $shots vibez.out.log) -RedirectStandardError (Join-Path $shots vibez.err.log)
           Start-Sleep -Seconds 10
           Push-Location $drop
-          & $drag $vibez.Id $shots @($env:DRAG_STEPS -split ' ')
+          & $drag $vibez.Id $shots $env:INTERFACE_SCALE @($env:DRAG_STEPS -split ' ')
           $dragged = $LASTEXITCODE
           Pop-Location
           python scripts/desktop-drop/check.py "$drop\project.vzp"
@@ -93,13 +97,13 @@ jobs:
           home="$RUNNER_TEMP/home"
           settings="$home/Library/Application Support/vibez"
           mkdir -p "$settings"
-          echo '{"sample_library_roots":[],"sample_browser_open":false,"check_for_updates":false}' > "$settings/ui.json"
+          echo "{\"sample_library_roots\":[],\"sample_browser_open\":false,\"check_for_updates\":false,\"interface_scale\":$INTERFACE_SCALE}" > "$settings/ui.json"
           swiftc -O scripts/desktop-drop/drag_macos.swift -o "$RUNNER_TEMP/drag_macos"
           HOME="$home" target/release/vibez "$drop/project.vzp" > "$shots/vibez.log" 2>&1 &
           vibez=$!
           sleep 10
           # Word splitting turns the steps into arguments.
-          (cd "$drop" && "$RUNNER_TEMP/drag_macos" "$vibez" "$shots" $DRAG_STEPS)
+          (cd "$drop" && "$RUNNER_TEMP/drag_macos" "$vibez" "$shots" "$INTERFACE_SCALE" $DRAG_STEPS)
           dragged=$?
           python scripts/desktop-drop/check.py "$drop/project.vzp"
           landed=$?
