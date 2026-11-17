@@ -1,7 +1,10 @@
 //! Bundled type roles used where the system fallback cannot express the
 //! intended interface hierarchy consistently across platforms.
 
-use iced::{font::Weight, Font};
+use iced::{
+    font::{Stretch, Weight},
+    Font,
+};
 
 mod fit;
 pub use fit::{fit_text, fit_text_middle};
@@ -15,13 +18,21 @@ pub const PLEX_MONO_MEDIUM_BYTES: &[u8] =
 pub const PLEX_MONO_SEMIBOLD_BYTES: &[u8] =
     include_bytes!("../../../assets/fonts/ibm-plex/IBMPlexMono-SemiBold.ttf");
 
+/// The Plex Sans Condensed faces declare a condensed width, and cosmic-text
+/// only offers faces whose width equals the one asked for, so a role that
+/// asks for the normal width never reaches them and draws in whatever the
+/// platform falls back to.
+const PLEX_SANS_CONDENSED: Font = Font {
+    stretch: Stretch::Condensed,
+    ..Font::with_name("IBM Plex Sans Condensed")
+};
 pub const PERFORM_DISPLAY: Font = Font {
     weight: Weight::Medium,
-    ..Font::with_name("IBM Plex Sans Condensed")
+    ..PLEX_SANS_CONDENSED
 };
 pub const PERFORM_LABEL: Font = Font {
     weight: Weight::Semibold,
-    ..Font::with_name("IBM Plex Sans Condensed")
+    ..PLEX_SANS_CONDENSED
 };
 /// Clip names in timeline title strips: semibold and condensed, so more of
 /// a name fits a short clip.
