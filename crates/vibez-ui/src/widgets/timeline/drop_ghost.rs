@@ -76,20 +76,9 @@ impl LaneGhost {
         draw_drag_shadow(frame, body);
         draw_clip_back(frame, body, &colors, None, w);
         match &self.body {
-            GhostBody::Waveform(peaks) => draw_waveform(
-                frame,
-                peaks,
-                // The peaks are fitted to the whole Clip, so they stretch to
-                // its width whatever a pixel spans.
-                PeakScale {
-                    frames_per_pixel: 0.0,
-                    peak_span_frames: None,
-                },
-                body,
-                clip_w,
-                w,
-                colors.ink,
-            ),
+            GhostBody::Waveform(peaks) => {
+                draw_waveform(frame, peaks, PeakScale::Fitted, body, clip_w, w, colors.ink)
+            }
             GhostBody::Notes(summary) => draw_notes(
                 frame,
                 summary,

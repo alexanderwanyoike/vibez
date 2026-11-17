@@ -47,10 +47,13 @@ fn waveform_peak_for_pixel(
     peaks: &[(f32, f32)],
     pixel: usize,
     rendered_pixels: usize,
-    frames_per_pixel: f64,
-    peak_span_frames: Option<usize>,
+    scale: PeakScale,
 ) -> Option<(f32, f32)> {
-    if let Some(peak_span_frames) = peak_span_frames.filter(|span| *span > 0) {
+    if let PeakScale::Spans {
+        frames_per_pixel,
+        peak_span_frames,
+    } = scale
+    {
         let peak_span_frames = peak_span_frames as f64;
         let first = (pixel as f64 * frames_per_pixel / peak_span_frames).floor() as usize;
         let end = (((pixel + 1) as f64 * frames_per_pixel / peak_span_frames).ceil() as usize)
@@ -70,11 +73,28 @@ fn waveform_peak_for_pixel(
 
 /// How a Clip's peaks map onto the lane's pixels.
 #[derive(Debug, Clone, Copy)]
-pub(super) struct PeakScale {
-    pub frames_per_pixel: f64,
-    /// Set for a growing take's peaks, each of which spans this many frames;
-    /// unset where the peaks are fitted to the Clip's width.
-    pub peak_span_frames: Option<usize>,
+pub(super) enum PeakScale {
+    /// The peaks stretch across the Clip's width.
+    Fitted,
+    /// A growing take's peaks, each spanning `peak_span_frames` source
+    /// frames, on a lane where a pixel spans `frames_per_pixel`.
+    Spans {
+        frames_per_pixel: f64,
+        peak_span_frames: usize,
+    },
+}
+
+impl PeakScale {
+    /// The scale of peaks spanning `peak_span_frames` each, or fitted ones.
+    fn of(peak_span_frames: Option<usize>, frames_per_pixel: f64) -> Self {
+        match peak_span_frames.filter(|span| *span > 0) {
+            Some(peak_span_frames) => Self::Spans {
+                frames_per_pixel,
+                peak_span_frames,
+            },
+            None => Self::Fitted,
+        }
+    }
 }
 
 /// `peaks` across a Clip's `body`, `clip_w` wide before its gap, under its
@@ -98,13 +118,7 @@ pub(super) fn draw_waveform(
     let pixels = clip_w as usize;
     for px in visible_pixel_columns(body.x, body.width, w) {
         let screen_x = body.x + px as f32;
-        let Some((min_val, max_val)) = waveform_peak_for_pixel(
-            peaks,
-            px,
-            pixels,
-            scale.frames_per_pixel,
-            scale.peak_span_frames,
-        ) else {
+        let Some((min_val, max_val)) = waveform_peak_for_pixel(peaks, px, pixels, scale) else {
             break;
         };
         let y_top = center_y - (max_val * half_h);
@@ -484,10 +498,7 @@ impl TrackClipCanvas {
         draw_waveform(
             frame,
             &clip.peaks,
-            PeakScale {
-                frames_per_pixel: spb / f64::from(ppb),
-                peak_span_frames: clip.peak_span_frames,
-            },
+            PeakScale::of(clip.peak_span_frames, spb / f64::from(ppb)),
             body,
             clip_w,
             w,
@@ -644,7 +655,14 @@ impl TrackClipCanvas {
 
 #[cfg(test)]
 mod tests {
-    use super::{visible_pixel_columns, waveform_peak_for_pixel, whole_pixel_offset};
+    use super::{visible_pixel_columns, waveform_peak_for_pixel, whole_pixel_offset, PeakScale};
+
+    fn spans(peak_span_frames: usize) -> PeakScale {
+        PeakScale::Spans {
+            frames_per_pixel: 600.0,
+            peak_span_frames,
+        }
+    }
 
     #[test]
     fn a_lane_laid_out_between_pixel_rows_paints_on_whole_pixels() {
@@ -661,8 +679,8 @@ mod tests {
         let first: Vec<_> = (0..120).map(|index| (index as f32, index as f32)).collect();
         let grown: Vec<_> = (0..132).map(|index| (index as f32, index as f32)).collect();
 
-        let before = waveform_peak_for_pixel(&first, 10, 12, 600.0, Some(64));
-        let after = waveform_peak_for_pixel(&grown, 10, 14, 600.0, Some(64));
+        let before = waveform_peak_for_pixel(&first, 10, 12, spans(64));
+        let after = waveform_peak_for_pixel(&grown, 10, 14, spans(64));
 
         assert_eq!(before, after);
         assert_eq!(before, Some((93.0, 103.0)));
@@ -680,8 +698,8 @@ mod tests {
             .map(|pair| (pair[0].0.min(pair[1].0), pair[0].1.max(pair[1].1)))
             .collect();
 
-        let before = waveform_peak_for_pixel(&original, 10, 24, 600.0, Some(64));
-        let after = waveform_peak_for_pixel(&compacted, 10, 24, 600.0, Some(128));
+        let before = waveform_peak_for_pixel(&original, 10, 24, spans(64));
+        let after = waveform_peak_for_pixel(&compacted, 10, 24, spans(128));
 
         assert_eq!(before, after);
     }
@@ -691,7 +709,7 @@ mod tests {
         let peaks = [(0.0, 0.0), (1.0, 1.0), (2.0, 2.0), (3.0, 3.0)];
 
         assert_eq!(
-            waveform_peak_for_pixel(&peaks, 2, 8, 600.0, None),
+            waveform_peak_for_pixel(&peaks, 2, 8, PeakScale::Fitted),
             Some((1.0, 1.0))
         );
     }
