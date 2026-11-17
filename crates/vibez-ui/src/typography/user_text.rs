@@ -4,7 +4,10 @@
 use iced::widget::text::Shaping;
 
 /// The shaping for any text that shows a Track, Clip or Section name.
-pub const USER_TEXT_SHAPING: Shaping = Shaping::Basic;
+/// Names can be in any script, and only advanced shaping falls back to a
+/// system face for characters the interface font lacks; iced's default
+/// basic shaping draws them as empty boxes.
+pub const USER_TEXT_SHAPING: Shaping = Shaping::Advanced;
 
 #[cfg(test)]
 mod tests {
