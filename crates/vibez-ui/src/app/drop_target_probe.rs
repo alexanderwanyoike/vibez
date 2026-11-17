@@ -1,5 +1,7 @@
 //! Finds which tagged drop target the view laid out under a point.
 
+use std::collections::HashMap;
+
 use iced::advanced::widget::operation::{Operation, Outcome, Scrollable};
 use iced::advanced::widget::Id;
 use iced::{Point, Rectangle, Vector};
@@ -10,7 +12,7 @@ use crate::domains::desktop_pointer::PointerTarget;
 /// `point`, since later widgets draw on top.
 pub(super) struct DropTargetProbe {
     point: Point,
-    wanted: Vec<(PointerTarget, Id)>,
+    wanted: HashMap<Id, PointerTarget>,
     /// Each scrollable entered: its total translation, its visible area and
     /// the depth it was entered at, as iced's own visible-bounds query keeps.
     scrollables: Vec<(Vector, Rectangle, usize)>,
@@ -24,7 +26,7 @@ impl DropTargetProbe {
             point,
             wanted: wanted
                 .into_iter()
-                .map(|target| (target, Id::from(super::desktop_pointer::target_id(target))))
+                .map(|target| (Id::from(super::desktop_pointer::target_id(target)), target))
                 .collect(),
             scrollables: Vec::new(),
             depth: 0,
@@ -61,12 +63,7 @@ impl Operation<Option<(PointerTarget, Rectangle)>> for DropTargetProbe {
         bounds: Rectangle,
         operate_on_children: &mut dyn FnMut(&mut dyn Operation<Option<(PointerTarget, Rectangle)>>),
     ) {
-        if let Some(target) = id.and_then(|id| {
-            self.wanted
-                .iter()
-                .find(|(_, wanted)| wanted == id)
-                .map(|(target, _)| *target)
-        }) {
+        if let Some(target) = id.and_then(|id| self.wanted.get(id)).copied() {
             let (shown, visible) = match self.scrollables.last() {
                 Some((translation, viewport, _)) => {
                     let shown = bounds - *translation;

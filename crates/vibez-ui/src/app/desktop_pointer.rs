@@ -145,10 +145,11 @@ impl App {
         let _ = (window, scale);
     }
 
-    /// Every drop target the view may have tagged.
+    /// Every drop target the view may have tagged: the launcher's shown
+    /// rows, and row 0 its new-track header drops in.
     fn pointer_targets(&self) -> Vec<PointerTarget> {
         let first_row = self.state.perform.clip_editor.first_row;
-        let rows = 0..first_row + super::views_clip_launcher::LAUNCHER_ROWS;
+        let rows = first_row..first_row + super::views_clip_launcher::LAUNCHER_ROWS;
         let tracks = self
             .state
             .project_tracks
@@ -158,7 +159,10 @@ impl App {
         tracks
             .clone()
             .map(PointerTarget::Lane)
-            .chain([PointerTarget::NewTrackRow])
+            .chain([
+                PointerTarget::NewTrackRow,
+                PointerTarget::NewTrackSlot { row: 0 },
+            ])
             .chain(rows.clone().map(|row| PointerTarget::NewTrackSlot { row }))
             .chain(tracks.flat_map(move |track_id| {
                 rows.clone()
