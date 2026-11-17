@@ -15,6 +15,7 @@ use super::view_harness::{bounds_of, hover_at, pointer_target_at, release_at};
 use super::*;
 use crate::domains::browser::BrowserMsg;
 use crate::domains::desktop_pointer::PointerTarget;
+use crate::domains::drop_ghost::GhostPlace;
 use crate::state::{BrowserDropTarget, ProjectTrack, Workspace};
 use crate::timeline_geometry::TimelineGeometry;
 
@@ -70,8 +71,13 @@ async fn release_browser_drag(app: &mut App, point: Point) {
 }
 
 /// Polls the pointer at the point `place` finds during another app's drag
-/// of `path`, then drops it.
-async fn drop_from_another_app(app: &mut App, path: PathBuf, place: impl Fn(&App) -> Point) {
+/// of `path`, checks the ghost waits at `ghost`, then drops it.
+async fn drop_from_another_app(
+    app: &mut App,
+    path: PathBuf,
+    place: impl Fn(&App) -> Point,
+    ghost: GhostPlace,
+) {
     run_until_idle(
         app,
         Message::Browser(BrowserMsg::DesktopFileHovered(path.clone())),
@@ -81,6 +87,8 @@ async fn drop_from_another_app(app: &mut App, path: PathBuf, place: impl Fn(&App
     let under = pointer_target_at(app, point);
     assert!(under.is_some(), "no tagged target at {point:?}");
     let _ = app.update(Message::DesktopPointerProbed { x: point.x, under });
+    let shown = app.state.browser.drop_ghost(app.state.transport.bpm);
+    assert_eq!(shown.map(|shown| shown.place), Some(ghost));
     run_until_idle(app, Message::Browser(BrowserMsg::DesktopFileDropped(path))).await;
 }
 
@@ -170,9 +178,12 @@ async fn audio_from_another_app_dropped_below_arranges_last_track_gets_an_audio_
     let directory = tempfile::tempdir().unwrap();
     let (mut app, existing) = arrange();
 
-    drop_from_another_app(&mut app, kick(directory.path()), |app| {
-        point_below_new_track_row(app, 2.0, 120.0)
-    })
+    drop_from_another_app(
+        &mut app,
+        kick(directory.path()),
+        |app| point_below_new_track_row(app, 2.0, 120.0),
+        GhostPlace::NewTrack { beat: 2.0 },
+    )
     .await;
 
     let track = the_new_track(&app, existing);
@@ -204,9 +215,12 @@ async fn audio_from_another_app_dropped_below_a_sections_tracks_lands_in_that_se
     let directory = tempfile::tempdir().unwrap();
     let (mut app, existing, section_id) = tall_sections();
 
-    drop_from_another_app(&mut app, kick(directory.path()), |app| {
-        point_below_new_track_row(app, 2.0, 80.0)
-    })
+    drop_from_another_app(
+        &mut app,
+        kick(directory.path()),
+        |app| point_below_new_track_row(app, 2.0, 80.0),
+        GhostPlace::NewTrack { beat: 2.0 },
+    )
     .await;
 
     let track = the_new_track(&app, existing);
@@ -272,9 +286,12 @@ async fn files_from_another_app_dropped_right_of_or_below_the_launchers_columns_
     ] {
         let (mut app, existing) = tall_launcher();
 
-        drop_from_another_app(&mut app, drum_phrase(directory.path()), |app| {
-            place(app, row)
-        })
+        drop_from_another_app(
+            &mut app,
+            drum_phrase(directory.path()),
+            |app| place(app, row),
+            GhostPlace::NewTrackSlot { row },
+        )
         .await;
 
         let track = the_new_track(&app, existing);
@@ -301,6 +318,33 @@ async fn an_empty_launcher_takes_a_drop_anywhere_beside_or_below_its_new_column(
             panic!("one new track");
         };
         assert_eq!(track.instrument_kind, Some(InstrumentKind::DrumRack));
+        assert_eq!(launcher_clip_row(&app, track.id), Some(row));
+    }
+}
+
+#[tokio::test]
+async fn an_empty_launcher_takes_another_apps_drop_beside_or_below_its_new_column() {
+    let directory = tempfile::tempdir().unwrap();
+    for (row, place) in [
+        (2, point_right_of_new_track_column as fn(&App, u32) -> Point),
+        (LAST_ROW, |app: &App, _| {
+            point_below_new_track_column(app, 40.0)
+        }),
+    ] {
+        let mut app = empty_launcher();
+
+        drop_from_another_app(
+            &mut app,
+            kick(directory.path()),
+            |app| place(app, row),
+            GhostPlace::NewTrackSlot { row },
+        )
+        .await;
+
+        let [track] = &app.state.project_tracks.tracks[..] else {
+            panic!("one new track");
+        };
+        assert_eq!(track.kind, TrackKind::Audio);
         assert_eq!(launcher_clip_row(&app, track.id), Some(row));
     }
 }
