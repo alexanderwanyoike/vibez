@@ -8,7 +8,8 @@
 import AppKit
 
 /// The height of a standard window title bar, above the content.
-let titleBarHeight: CGFloat = 28
+let titleBarHeight =
+    NSWindow.frameRect(forContentRect: .zero, styleMask: [.titled]).height
 
 final class SourceView: NSView, NSDraggingSource {
     var file: URL?
