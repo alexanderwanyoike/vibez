@@ -68,6 +68,78 @@ fn waveform_peak_for_pixel(
         .copied()
 }
 
+/// How a Clip's peaks map onto the lane's pixels.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct PeakScale {
+    pub frames_per_pixel: f64,
+    /// Set for a growing take's peaks, each of which spans this many frames;
+    /// unset where the peaks are fitted to the Clip's width.
+    pub peak_span_frames: Option<usize>,
+}
+
+/// `peaks` across a Clip's `body`, `clip_w` wide before its gap, under its
+/// title, on a lane `w` wide.
+pub(super) fn draw_waveform(
+    frame: &mut canvas::Frame,
+    peaks: &[(f32, f32)],
+    scale: PeakScale,
+    body: Rectangle,
+    clip_w: f32,
+    w: f32,
+    ink: iced::Color,
+) {
+    if peaks.is_empty() || clip_w <= 4.0 {
+        return;
+    }
+    let body_top = body.y + CLIP_TITLE_HEIGHT;
+    let body_h = body.height - CLIP_TITLE_HEIGHT;
+    let center_y = body_top + body_h / 2.0;
+    let half_h = body_h / 2.0 - 2.0;
+    let pixels = clip_w as usize;
+    for px in visible_pixel_columns(body.x, body.width, w) {
+        let screen_x = body.x + px as f32;
+        let Some((min_val, max_val)) = waveform_peak_for_pixel(
+            peaks,
+            px,
+            pixels,
+            scale.frames_per_pixel,
+            scale.peak_span_frames,
+        ) else {
+            break;
+        };
+        let y_top = center_y - (max_val * half_h);
+        let y_bottom = center_y - (min_val * half_h);
+        let height = (y_bottom - y_top).max(1.0);
+        frame.fill_rectangle(
+            iced::Point::new(screen_x, y_top),
+            iced::Size::new(1.0, height),
+            ink,
+        );
+    }
+}
+
+/// The notes of `summary` under the title of a Clip's `body`, on a lane `w`
+/// wide at `pixels_per_beat`.
+pub(super) fn draw_notes(
+    frame: &mut canvas::Frame,
+    summary: &super::note_summary::NoteSummary,
+    body: Rectangle,
+    w: f32,
+    pixels_per_beat: f32,
+    ink: iced::Color,
+) {
+    let left = body.x.max(0.0);
+    let area = Rectangle {
+        x: left,
+        y: body.y + CLIP_TITLE_HEIGHT,
+        width: ((body.x + body.width).min(w) - left).max(0.0),
+        height: body.height - CLIP_TITLE_HEIGHT,
+    };
+    for mark in note_marks(summary, body.x, area, pixels_per_beat) {
+        frame.fill_rectangle(mark.position(), mark.size(), ink);
+    }
+}
+
 impl TrackClipCanvas {
     fn clip_colors(&self, selected: bool, recording_preview: bool) -> ClipColors {
         let track = if recording_preview {
@@ -400,34 +472,18 @@ impl TrackClipCanvas {
         });
         draw_clip_back(frame, body, &colors, loop_passes, w);
 
-        if !clip.peaks.is_empty() && clip_w > 4.0 {
-            let body_top = clip_y + CLIP_TITLE_HEIGHT;
-            let body_h = clip_h - CLIP_TITLE_HEIGHT;
-            let center_y = body_top + body_h / 2.0;
-            let half_h = body_h / 2.0 - 2.0;
-            let pixels = clip_w as usize;
-            let frames_per_pixel = spb / f64::from(ppb);
-            for px in visible_pixel_columns(clip_x, body.width, w) {
-                let screen_x = clip_x + px as f32;
-                let Some((min_val, max_val)) = waveform_peak_for_pixel(
-                    &clip.peaks,
-                    px,
-                    pixels,
-                    frames_per_pixel,
-                    clip.peak_span_frames,
-                ) else {
-                    break;
-                };
-                let y_top = center_y - (max_val * half_h);
-                let y_bottom = center_y - (min_val * half_h);
-                let height = (y_bottom - y_top).max(1.0);
-                frame.fill_rectangle(
-                    iced::Point::new(screen_x, y_top),
-                    iced::Size::new(1.0, height),
-                    colors.ink,
-                );
-            }
-        }
+        draw_waveform(
+            frame,
+            &clip.peaks,
+            PeakScale {
+                frames_per_pixel: spb / f64::from(ppb),
+                peak_span_frames: clip.peak_span_frames,
+            },
+            body,
+            clip_w,
+            w,
+            colors.ink,
+        );
 
         if !is_recording_preview
             && (is_selected || clip.fade_in_frames > 0 || clip.fade_out_frames > 0)
@@ -564,17 +620,14 @@ impl TrackClipCanvas {
             });
         draw_clip_back(frame, body, &colors, loop_passes, w);
 
-        // Draw note blocks inside the clip (below title bar)
-        let left = clip_x.max(0.0);
-        let area = Rectangle {
-            x: left,
-            y: clip_y + CLIP_TITLE_HEIGHT,
-            width: ((body.x + body.width).min(w) - left).max(0.0),
-            height: clip_h - CLIP_TITLE_HEIGHT,
-        };
-        for mark in note_marks(&note_clip.notes, clip_x, area, geometry.pixels_per_beat()) {
-            frame.fill_rectangle(mark.position(), mark.size(), colors.ink);
-        }
+        draw_notes(
+            frame,
+            &note_clip.notes,
+            body,
+            w,
+            geometry.pixels_per_beat(),
+            colors.ink,
+        );
 
         draw_clip_front(frame, body, &colors, &note_clip.name, looping, w);
     }
