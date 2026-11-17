@@ -818,6 +818,7 @@ mod clip_launcher;
 mod clip_launcher_resume_tests;
 mod clip_record;
 mod views_clip_launcher;
+mod views_clip_launcher_new_track;
 
 #[cfg(test)]
 mod clip_project_tests;
