@@ -20,6 +20,11 @@ mod tests {
     use super::USER_TEXT_SHAPING;
     use crate::typography::{CLIP_TITLE, PERFORM_DISPLAY, PERFORM_TECH, TRACK_TITLE};
 
+    /// Whether `face` was loaded from the app's own bytes, not a system file.
+    fn is_bundled(face: &cosmic_text::fontdb::FaceInfo) -> bool {
+        matches!(face.source, cosmic_text::fontdb::Source::Binary(_))
+    }
+
     /// Glyph id and whether the face is bundled with the app, for every
     /// glyph of `name` laid out the way a name is drawn. Glyph 0 is the empty
     /// box a face draws for a character it lacks.
@@ -43,8 +48,7 @@ mod tests {
             .flat_map(|run| run.glyphs.iter())
             .map(|glyph| {
                 let face = db.face(glyph.font_id).expect("shaped face is loaded");
-                let bundled = matches!(face.source, cosmic_text::fontdb::Source::Binary(_));
-                (glyph.glyph_id, bundled)
+                (glyph.glyph_id, is_bundled(face))
             })
             .collect()
     }
@@ -56,7 +60,7 @@ mod tests {
         let ids: Vec<_> = raw
             .db()
             .faces()
-            .filter(|face| !matches!(face.source, cosmic_text::fontdb::Source::Binary(_)))
+            .filter(|face| !is_bundled(face))
             .map(|face| face.id)
             .collect();
         ids.into_iter()
