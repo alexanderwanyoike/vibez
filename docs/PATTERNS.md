@@ -487,6 +487,19 @@ exists there. Files are named for the domain they serve; mechanism names
 file opens with a `//!` stating its single responsibility in one sentence;
 when the sentence no longer covers the file, the file splits.
 
+## 9. Drop targets another app's drag can reach
+
+On X11 another app's drag holds the pointer, so widgets see no motion until
+the drop. A drop target that should answer during such a drag wraps itself in
+`desktop_pointer::drop_target(content, PointerTarget::…)`, a container with an
+id. While the drag hovers, the UI tick reads the pointer from the X server and
+`DropTargetProbe`, a widget `Operation`, finds the tagged container under it,
+allowing for scrolling. `BrowserState::pointer_messages` then sends the hover
+message the widget itself would have sent. A new kind of target adds a
+`PointerTarget` variant, tags its widget, and maps to its hover there. Device
+cards are not tagged: a drop with no tagged target under it waits, and the
+card under the released pointer takes it.
+
 ---
 
 ## Trace 1: a fade drag, from pixel to speaker
