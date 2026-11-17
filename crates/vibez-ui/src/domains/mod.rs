@@ -35,6 +35,7 @@ pub mod filter;
 pub mod fm;
 pub mod gain;
 pub mod gate;
+pub mod hardware_keys;
 pub mod instrument_card;
 pub mod labelled_choice;
 pub mod limiter;

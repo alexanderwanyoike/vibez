@@ -149,6 +149,8 @@ overlay and on-screen selector update the same selection used by the Section
 overview, while per-mode target banks remain runtime interaction state.
 Window focus loss drains all held computer keys through matching note-offs and
 clears the Shift overlay so OS-level focus changes cannot leave a note sounding.
+Keys on the hardware MIDI input likewise remember the Track each press played,
+so selecting another Track cannot redirect or drop the release.
 Widget-captured presses are not forwarded, so text fields suppress pad input.
 The mapping and fixed computer-key velocity (default 100) persist in the user's
 `ui.json` settings and are absent from the project document and undo snapshots.
@@ -560,7 +562,11 @@ The engine lives on the cpal audio callback. Its rules:
   clip is overwritten instead of queued, so only the latest position waits.
   `MoveNoteClip` and `SetNoteClipBounds` release only the notes that clip
   started and no longer holds under the playhead; the track remembers which
-  clip started each sounding pitch.
+  clip started each sounding pitch. A held live key owns its pitch over Clip
+  notes, so a Clip being recorded neither restarts nor cuts the note it plays
+  back, and the pitch returns to the Clip at its next note-on. Transport stop
+  and Clip edits leave a held key sounding, since its voice is no longer the
+  Clip's to release.
 - Arrange playback stops on its own only when the playhead reaches the song
   end; a playhead already past it keeps going. Undo and Capture wrap the
   content they re-add in `BeginContentRebuild`/`EndContentRebuild`, and the

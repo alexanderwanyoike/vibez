@@ -139,3 +139,59 @@ pub(crate) fn fulfill_insertion_setup(
         engine.process_block(crate::engine::AudioProcessBlock::new(&mut [], 2));
     }
 }
+
+/// Each note an instrument received as (output frame, pitch, on), behind the
+/// count of frames it has rendered.
+#[cfg(test)]
+pub(crate) type NoteLog = Arc<std::sync::Mutex<(u64, Vec<(u64, u8, bool)>)>>;
+
+/// Logs each note at the output frame it lands on, on either render path.
+#[cfg(test)]
+pub(crate) struct NoteLogProbe {
+    pub log: NoteLog,
+    pub batch: bool,
+}
+
+#[cfg(test)]
+impl NoteLogProbe {
+    fn push(&self, offset: u32, pitch: u8, on: bool) {
+        let mut log = self.log.lock().unwrap();
+        let frame = log.0 + u64::from(offset);
+        log.1.push((frame, pitch, on));
+    }
+}
+
+#[cfg(test)]
+impl Instrument for NoteLogProbe {
+    fn instrument_kind(&self) -> InstrumentKind {
+        InstrumentKind::SubtractiveSynth
+    }
+    fn param_descriptors(&self) -> &'static [ParamDescriptor] {
+        &[]
+    }
+    fn set_param(&mut self, _: usize, _: f32) -> bool {
+        false
+    }
+    fn get_param(&self, _: usize) -> f32 {
+        0.0
+    }
+    fn note_on(&mut self, pitch: u8, _: u8) {
+        self.push(0, pitch, true);
+    }
+    fn note_off(&mut self, pitch: u8) {
+        self.push(0, pitch, false);
+    }
+    fn note_on_at(&mut self, pitch: u8, _: u8, offset: u32) {
+        self.push(offset, pitch, true);
+    }
+    fn note_off_at(&mut self, pitch: u8, offset: u32) {
+        self.push(offset, pitch, false);
+    }
+    fn supports_batch_render(&self) -> bool {
+        self.batch
+    }
+    fn render(&mut self, buffer: &mut [f32], channels: usize) {
+        self.log.lock().unwrap().0 += (buffer.len() / channels) as u64;
+    }
+    fn reset(&mut self) {}
+}

@@ -13,6 +13,9 @@ mod clip_launch;
 mod clip_loop_tests;
 mod effect_slot;
 mod groove;
+mod live_hold;
+#[cfg(test)]
+mod live_hold_tests;
 mod note_repeat;
 mod pan;
 mod pitch_mask;
@@ -185,6 +188,10 @@ pub struct EngineTrack {
     /// The Clip whose note started each pitch in `active_notes`, so an edit
     /// of one Clip can release its own voices and leave the others.
     note_owners: [Option<ClipId>; 128],
+    /// Pitches a live key is holding down.
+    live_held: u128,
+    /// Pitches a live key took over, until a Clip note-on reclaims them.
+    live_owned: u128,
     /// Drum Rack pitches triggered by resident clips during this render block.
     /// Cosmetic feedback is deliberately lossy when the UI event ring is full.
     pending_note_activity: u128,
@@ -448,6 +455,31 @@ impl EngineTrack {
             &mut self.timed_note_ons,
             &mut self.timed_note_offs,
         );
+        live_hold::yield_to_live_keys(
+            &mut self.timed_note_ons,
+            &mut self.timed_note_offs,
+            self.live_held,
+            &mut self.live_owned,
+        );
+    }
+
+    /// A live key takes over its pitch, so a Clip voice already there is no
+    /// longer the Clip's to release.
+    pub(crate) fn hold_live_key(&mut self, pitch: u8) {
+        if let Some(bit) = live_hold::pitch_bit(pitch) {
+            self.live_held |= bit;
+            self.live_owned |= bit;
+            self.active_notes &= !bit;
+            if let Some(owner) = self.note_owners.get_mut(usize::from(pitch)) {
+                *owner = None;
+            }
+        }
+    }
+
+    pub(crate) fn release_live_key(&mut self, pitch: u8) {
+        if let Some(bit) = live_hold::pitch_bit(pitch) {
+            self.live_held &= !bit;
+        }
     }
 
     /// A track that skips rendering this block must not pass on last block's notes.
@@ -475,6 +507,8 @@ impl EngineTrack {
         instrument: Box<dyn Instrument>,
     ) -> Option<Box<dyn Instrument>> {
         self.note_epoch += 1;
+        self.live_held = 0;
+        self.live_owned = 0;
         self.instrument.replace(instrument)
     }
 
