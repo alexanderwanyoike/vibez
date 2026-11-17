@@ -6,12 +6,18 @@ use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::MidiNote;
 use vibez_core::midi_file::MidiFile;
 use vibez_core::perform::GrooveGrid;
+use vibez_core::time::{MusicalTime, BEATS_PER_BAR};
 
 use crate::state::UiNoteClip;
 
 /// Where a MIDI file can go, said when it is dropped anywhere else.
 pub const MIDI_FILE_TARGETS: &str =
     "MIDI files go on a MIDI track, empty Arrange or a MIDI track's Clip slot";
+
+/// How far past a bar line a file may end and still end on it. A last
+/// note-off or End of Track often lands a tick or two late, which would
+/// otherwise add a silent bar.
+const BAR_LINE_SLACK_BEATS: f64 = 1.0 / 32.0;
 
 /// How a file with several playing tracks lands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -122,9 +128,17 @@ impl MidiFileImport {
         }]
     }
 
-    /// A Clip looping over the whole file, as a new pattern does.
+    /// A Clip looping over the whole file in whole bars, as a new pattern
+    /// does. Many files end their track on the last note-off, short of the
+    /// bar, and would otherwise loop early.
     fn clip(&self, name: &str, notes: Vec<MidiNote>, position_beats: f64) -> UiNoteClip {
-        let length = self.file.length_beats;
+        // The slack is for late endings only: a note starting on or past a
+        // bar line needs that bar, however short it is.
+        let last_start = notes.iter().map(|note| note.start_beat).fold(0.0, f64::max);
+        let length = MusicalTime(self.file.length_beats)
+            .whole_bars_holding(BAR_LINE_SLACK_BEATS)
+            .0
+            .max(((last_start / BEATS_PER_BAR).floor() + 1.0) * BEATS_PER_BAR);
         UiNoteClip {
             id: ClipId::new(),
             name: name.to_string(),

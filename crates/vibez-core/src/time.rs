@@ -58,6 +58,12 @@ impl MusicalTime {
         }
     }
 
+    /// The whole bars that hold this length, at least one. A length up to
+    /// `slack` beats past a bar line counts as ending on it.
+    pub fn whole_bars_holding(self, slack: f64) -> Self {
+        Self(((self.0 - slack).max(0.0) / BEATS_PER_BAR).ceil().max(1.0) * BEATS_PER_BAR)
+    }
+
     /// A position as bar, beat and sixteenth counted from 1, such as
     /// "33.1.1", as Ableton reads positions.
     pub fn bar_beat_sixteenth(self) -> String {
@@ -217,5 +223,16 @@ mod tests {
         // 20_353.85 samples per beat.
         let tm = TempoMap::new(130.0, 44_100);
         assert_eq!(tm.musical_to_sample(MusicalTime(1.0)).0, 20_354);
+    }
+
+    #[test]
+    fn whole_bars_hold_a_length_with_its_slack_and_at_least_one_bar() {
+        let bars = |beats: f64, slack: f64| MusicalTime(beats).whole_bars_holding(slack).0;
+        assert_eq!(bars(16.0, 0.0), 16.0);
+        assert_eq!(bars(16.01, 0.0), 20.0);
+        assert_eq!(bars(16.01, 0.03), 16.0);
+        assert_eq!(bars(16.05, 0.03), 20.0);
+        assert_eq!(bars(0.0, 0.0), 4.0);
+        assert_eq!(bars(-2.0, 0.0), 4.0);
     }
 }
