@@ -69,6 +69,16 @@ fn waveform_peak_for_pixel(
         .copied()
 }
 
+/// A recording preview leads its title with the record circle the transport
+/// shows.
+fn title_icon(is_recording_preview: bool, looped: bool) -> Option<char> {
+    if is_recording_preview {
+        Some(icons::CIRCLE)
+    } else {
+        looped.then_some(icons::REPEAT)
+    }
+}
+
 impl TrackClipCanvas {
     fn clip_colors(&self, selected: bool, recording_preview: bool) -> ClipColors {
         let track = if recording_preview {
@@ -488,7 +498,7 @@ impl TrackClipCanvas {
             body,
             &colors,
             &clip.name,
-            looped.then_some(icons::REPEAT),
+            title_icon(is_recording_preview, looped),
             w,
         );
 
@@ -589,7 +599,7 @@ impl TrackClipCanvas {
             body,
             &colors,
             &note_clip.name,
-            looping.then_some(icons::REPEAT),
+            title_icon(is_recording_preview, looping),
             w,
         );
     }

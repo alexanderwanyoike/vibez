@@ -344,14 +344,14 @@ impl App {
             if let Some(preview) = self.state.audio_recording.preview_for_track(track.id) {
                 let name = match preview.source {
                     crate::domains::audio_recording::AudioRecordingSource::HardwareInput => {
-                        "● RECORDING INPUT".into()
+                        "RECORDING INPUT".into()
                     }
                     crate::domains::audio_recording::AudioRecordingSource::TrackOutput(source) => {
                         let source_name = self
                             .state
                             .find_track(source)
                             .map_or("MIDI TRACK", |track| track.name.as_str());
-                        format!("● RESAMPLING {source_name}")
+                        format!("RESAMPLING {source_name}")
                     }
                 };
                 clip_canvas_widget =

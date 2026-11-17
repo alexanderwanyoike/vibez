@@ -379,7 +379,7 @@ impl App {
                         clip_id: preview.clip_id,
                         position_beats: preview.position_beats,
                         duration_beats: preview.length_beats,
-                        name: "● RECORDING LIVE".into(),
+                        name: "RECORDING LIVE".into(),
                         notes: Arc::new(NoteSummary::new(
                             preview.notes.iter().map(|note| {
                                 (
