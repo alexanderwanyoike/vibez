@@ -590,13 +590,10 @@ impl App {
             }
         }
 
-        // The scroll shrinks to its rows so the space left below them can
-        // take a drop.
-        let track_body = column![
-            quiet_scroll::vertical(track_rows),
+        let track_body = quiet_scroll::vertical_above(
+            track_rows,
             self.view_new_track_space(TRACK_HEADER_TOTAL_WIDTH, geometry),
-        ]
-        .height(Length::Fill);
+        );
         let channel_footer =
             container(quiet_scroll::vertical(channel_rows)).max_height(CHANNEL_FOOTER_MAX_HEIGHT);
 
