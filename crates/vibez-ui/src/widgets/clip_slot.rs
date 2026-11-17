@@ -546,10 +546,7 @@ impl canvas::Program<Message> for ClipSlot<'_> {
                         );
                     }
                 } else {
-                    let low = clip.notes.iter().map(|n| n.pitch).min().unwrap_or(60) as f32;
-                    let high = clip.notes.iter().map(|n| n.pitch).max().unwrap_or(60) as f32;
-                    let span = (high - low + 5.0).max(12.0);
-                    let middle = (low + high) / 2.0;
+                    let rows = crate::note_rows::NoteRows::of(clip.notes.iter().map(|n| n.pitch));
                     for note in &clip.notes {
                         if !note.duration_beats.is_finite() || note.duration_beats <= 0.0 {
                             continue;
@@ -565,17 +562,15 @@ impl canvas::Program<Message> for ClipSlot<'_> {
                                 as f32
                                 * plot.width;
                             let x = plot.x + (start / duration) as f32 * plot.width;
-                            let y = plot.y
-                                + (0.5 - (f32::from(note.pitch) - middle) / span)
-                                    * (plot.height - 3.0);
+                            let y = plot.y + rows.depth(note.pitch) * (plot.height - 3.0);
                             frame.fill_rectangle(
                                 Point::new(x, y),
                                 Size::new(
                                     width.max(2.0).min(plot.x + plot.width - x),
-                                    (plot.height / span).clamp(2.0, 4.0),
+                                    rows.note_height(plot.height),
                                 ),
                                 Color {
-                                    a: 0.55 + f32::from(note.velocity) / 127.0 * 0.45,
+                                    a: crate::note_rows::note_alpha(note.velocity),
                                     ..ink
                                 },
                             );

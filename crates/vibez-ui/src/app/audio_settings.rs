@@ -3,7 +3,6 @@
 use iced::Task;
 use vibez_audio_io::audio_host::{AudioBackend, AudioHost};
 use vibez_audio_io::audio_stream::{AudioOutputStream, OutputStreamConfig};
-use vibez_engine::commands::EngineCommand;
 use vibez_engine::engine::AudioEngine;
 
 use crate::domains::audio_settings::{AudioDeviceChoice, AudioSampleRate};
@@ -187,6 +186,19 @@ fn live_output_requests(
 }
 
 impl App {
+    /// Tells the engine the hardware rate, with a preview voice built for it.
+    pub(super) fn apply_engine_sample_rate(&mut self, sample_rate: u32) {
+        self.send_command(vibez_engine::commands::EngineCommand::SetSampleRate(
+            sample_rate,
+        ));
+        self.send_command(vibez_engine::commands::EngineCommand::SetAuditionVoice(
+            vibez_instruments::create_instrument(
+                vibez_core::midi::InstrumentKind::SubtractiveSynth,
+                sample_rate as f32,
+            ),
+        ));
+    }
+
     pub(super) fn handle_select_audio_backend(&mut self, backend: AudioBackend) -> Task<Message> {
         if self.state.audio_recording.is_busy() {
             self.state.status_text = "Stop Audio Track Recording before changing hardware".into();
@@ -457,7 +469,7 @@ impl App {
                 self.state.audio_settings.buffer_size = buffer_size;
                 self.state.transport.sample_rate = actual_sample_rate;
                 self.state.audio_stream_health = AudioStreamHealth::Running;
-                self.send_command(EngineCommand::SetSampleRate(actual_sample_rate));
+                self.apply_engine_sample_rate(actual_sample_rate);
                 let conversion = at_previous_rate.map_or_else(Task::none, |project| {
                     self.convert_project_sample_rate(project)
                 });

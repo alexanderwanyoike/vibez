@@ -9,7 +9,7 @@ use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::{InstrumentKind, TrackKind};
 use vibez_core::track::MediaSourceRef;
-use vibez_engine::commands::{AuditionStart, EngineCommand};
+use vibez_engine::commands::EngineCommand;
 
 use crate::domains::device_panel_drop::DevicePanelDrop;
 use crate::message::{BrowserImportTarget, Message, PreparedBrowserImport};
@@ -251,7 +251,10 @@ impl App {
         let Some(source) = browser.selected_source.clone() else {
             return Task::none();
         };
-        match browser.waveform_for_source(&source) {
+        if self.audition_read_midi_file(&source) {
+            return Task::none();
+        }
+        match self.state.browser.waveform_for_source(&source) {
             Some(raw) => self.play_browser_mode(source, raw),
             None => Task::none(),
         }
@@ -267,32 +270,19 @@ impl App {
         audio: Arc<DecodedAudio>,
         playback_mode: AuditionMode,
     ) {
-        let warped = playback_mode == AuditionMode::Warp;
-        let queued = self.state.transport.is_playing() && warped;
-        // Retain a UI-side clone (never cleared on stop) so the engine
-        // voice can never drop the final Arc inside the RT callback.
-        // A superseded buffer moves into the retired ring rather than
-        // dropping here, because up to three outgoing engine voices may
-        // still hold it while fading.
-        if let Some(prev) = self
-            .state
-            .browser
-            .audition_audio
-            .replace(Arc::clone(&audio))
-        {
-            let retired = &mut self.state.browser.audition_audio_retired;
-            retired.rotate_right(1);
-            retired[0] = Some(prev);
-        }
+        self.state.browser.audition_pattern.retire();
+        self.state.browser.audition_audio.hand(Arc::clone(&audio));
         self.send_command(EngineCommand::StartAudition {
             audio,
-            start: if warped {
-                AuditionStart::NextBar
-            } else {
-                AuditionStart::Immediate
-            },
-            looped: warped,
+            start: playback_mode.engine_start(),
+            looped: playback_mode.loops(),
         });
+        self.audition_requested(playback_mode);
+    }
+
+    /// Records an audition just handed to the engine and says so.
+    pub(super) fn audition_requested(&mut self, playback_mode: AuditionMode) {
+        let queued = self.state.transport.is_playing() && playback_mode.loops();
         self.state
             .browser
             .mark_audition_requested(queued, playback_mode);

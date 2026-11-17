@@ -728,6 +728,14 @@ once from now. Because a target Track plays the audition through its own
 chain, a Resample of that Track hears it, and a phrase plugin on it passes
 what it plays on to MIDI From receivers, as a played keyboard would.
 
+In the Browser, selecting a MIDI file reads it off the UI thread and previews
+the Clip a drop would land, so the producer sees and hears what landing gives.
+The Audition footer draws it as a piano-roll strip with bar lines, placing
+notes on the same note rows as Clip thumbnails. With Audition On it plays
+through the selected Track's instrument when that Track can play MIDI, and
+otherwise through the preview voice, which the UI builds for each hardware
+sample rate. Raw plays the file once at once; Warp loops it from the next bar.
+
 `EngineTrack` is the shared project channel strip: it owns the instrument,
 effects, sends, gain/pan, mute/solo, meters, and preallocated render scratch.
 Time-based content is a separate `PreparedPlaybackSource` behind an owned

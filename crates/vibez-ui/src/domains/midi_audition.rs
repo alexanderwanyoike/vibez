@@ -1,0 +1,118 @@
+//! The Browser's preview of a selected MIDI file, showing and playing the Clip a drop would land.
+
+use std::sync::Arc;
+
+use vibez_core::id::TrackId;
+use vibez_core::time::BEATS_PER_BAR;
+use vibez_core::track::MediaSourceRef;
+use vibez_engine::midi_audition::MidiAuditionPattern;
+
+use crate::domains::midi_file_import::{MidiFileImport, MidiFileLayout};
+use crate::note_rows::NoteRows;
+use crate::state::ProjectTrack;
+
+/// A selected MIDI file, read for the Audition footer.
+#[derive(Debug, Clone)]
+pub struct MidiPreview {
+    pub source: MediaSourceRef,
+    pub pattern: Arc<MidiAuditionPattern>,
+    /// Laid out once, since the footer draws it on every frame.
+    pub strip: Arc<MidiStrip>,
+}
+
+impl MidiPreview {
+    /// Previews the Clip a drop would land, so what the producer hears and
+    /// sees is what landing gives them.
+    pub fn of(source: MediaSourceRef, import: &MidiFileImport) -> Self {
+        let clip = import
+            .plan(None, 0.0, MidiFileLayout::OneClip)
+            .swap_remove(0)
+            .clip;
+        let pattern = MidiAuditionPattern::new(clip.notes, clip.duration_beats);
+        Self {
+            source,
+            strip: Arc::new(MidiStrip::of(&pattern)),
+            pattern: Arc::new(pattern),
+        }
+    }
+}
+
+impl MidiStrip {
+    fn of(pattern: &MidiAuditionPattern) -> Self {
+        let notes = pattern.notes();
+        let length = pattern.length_beats();
+        let rows = NoteRows::of(notes.iter().map(|note| note.pitch));
+        let across = |beat: f64| (beat / length).clamp(0.0, 1.0) as f32;
+        Self {
+            notes: notes
+                .iter()
+                .map(|note| StripNote {
+                    start: across(note.start_beat),
+                    end: across(note.end_beat()),
+                    depth: rows.depth(note.pitch),
+                    velocity: note.velocity,
+                })
+                .collect(),
+            bar_lines: (1..)
+                .map(|bar| f64::from(bar) * BEATS_PER_BAR)
+                .take_while(|&beat| beat < length)
+                .map(across)
+                .collect(),
+            rows,
+        }
+    }
+}
+
+/// A note in the footer strip, as fractions of its width and height.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StripNote {
+    pub start: f32,
+    pub end: f32,
+    /// How far down the strip the note sits.
+    pub depth: f32,
+    pub velocity: u8,
+}
+
+/// The strip's notes and bar lines.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MidiStrip {
+    pub notes: Vec<StripNote>,
+    /// Each bar line after the first bar, as a fraction of the width.
+    pub bar_lines: Vec<f32>,
+    pub rows: NoteRows,
+}
+
+/// Who plays the audition, as the Audition footer names it.
+/// `target` is the track whose instrument plays it, if any.
+pub fn audition_player(target: Option<TrackId>, tracks: &[ProjectTrack]) -> String {
+    let track = target.and_then(|target| tracks.iter().find(|track| track.id == target));
+    match track {
+        Some(track) => format!("on {}", track.name),
+        None => "on Preview voice".into(),
+    }
+}
+
+/// Where the playhead sits in the strip, `position` samples into the
+/// audition.
+pub fn playhead_fraction(
+    pattern: &MidiAuditionPattern,
+    position: u64,
+    samples_per_beat: f64,
+    looped: bool,
+) -> Option<f32> {
+    let length = pattern.length_beats();
+    if samples_per_beat <= 0.0 || length <= 0.0 {
+        return None;
+    }
+    let beats = position as f64 / samples_per_beat;
+    let played = if looped {
+        beats.rem_euclid(length)
+    } else {
+        beats.min(length)
+    };
+    Some((played / length) as f32)
+}
+
+#[cfg(test)]
+#[path = "midi_audition_tests.rs"]
+mod tests;

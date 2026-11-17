@@ -6,6 +6,7 @@ pub mod dev_gallery;
 mod domains;
 pub mod icons;
 mod message;
+mod note_rows;
 pub mod plugin_window;
 mod remote_provider;
 mod services;
