@@ -41,6 +41,22 @@ impl AuditionMode {
             Self::Warp => "WARP",
         }
     }
+
+    /// How many beats `seconds` of audio lasts once imported this way at
+    /// `project_bpm`; WARP fits a loop to its whole bars, and audio with no
+    /// loop fit imports RAW.
+    pub fn imported_beats(
+        self,
+        seconds: f64,
+        loop_fit: Option<crate::warp::LoopGridFit>,
+        project_bpm: f64,
+    ) -> Option<f64> {
+        let raw = (project_bpm > 0.0).then_some(seconds * project_bpm / 60.0);
+        match self {
+            Self::Raw => raw,
+            Self::Warp => loop_fit.map(|fit| fit.bars as f64 * 4.0).or(raw),
+        }
+    }
 }
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AuditionImportInput {
