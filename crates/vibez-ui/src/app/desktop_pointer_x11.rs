@@ -1,7 +1,6 @@
 //! The pointer read straight from the X server, which answers even while
 //! another app's drag holds it.
 
-use x11rb::connection::Connection;
 use x11rb::protocol::xproto::ConnectionExt as _;
 use x11rb::rust_connection::RustConnection;
 
@@ -25,7 +24,6 @@ impl PointerWindow {
             .ok()?
             .reply()
             .ok()?;
-        let _ = self.connection.flush();
         reply
             .same_screen
             .then(|| (f32::from(reply.win_x), f32::from(reply.win_y)))
