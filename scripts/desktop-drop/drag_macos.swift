@@ -7,7 +7,7 @@
 
 import AppKit
 
-/// The height of a standard window title bar, above the content.
+/// CGWindow bounds include the title bar, so the content starts this far below.
 let titleBarHeight =
     NSWindow.frameRect(forContentRect: .zero, styleMask: [.titled]).height
 
