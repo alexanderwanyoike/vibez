@@ -471,17 +471,19 @@ impl App {
         } else {
             let first_track = self.state.perform.clip_editor.first_track;
             let first_row = self.state.perform.clip_editor.first_row;
-            let visible_tracks =
-                ((width - 54.0) / 145.0).floor().max(4.0) as usize - usize::from(new_track_column);
-            let shown_tracks = (self
+            let visible_tracks = ((width - 54.0) / 145.0).floor().max(4.0) as usize;
+            let tracks_shown = self
                 .state
                 .project_tracks
                 .tracks
                 .len()
                 .saturating_sub(first_track)
-                .min(visible_tracks)
-                + usize::from(new_track_column))
-            .max(4);
+                .min(visible_tracks);
+            // The column sits beside the last track, so it shows only while
+            // that track is in view, and the lanes narrow to make room.
+            let new_track_column = new_track_column
+                && first_track + tracks_shown >= self.state.project_tracks.tracks.len();
+            let shown_tracks = (tracks_shown + usize::from(new_track_column)).max(4);
             let lane_width = (width - 46.0) / shown_tracks as f32;
             let header_height = if compact { 26.0 } else { 42.0 };
             let mut numbers = column![iced::widget::Space::new(1, header_height)].spacing(0);
