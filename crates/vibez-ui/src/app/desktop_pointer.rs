@@ -88,9 +88,19 @@ impl App {
     /// Reads the pointer while another app's drag hovers, and asks the
     /// view what is under it whenever it moves.
     pub(super) fn poll_desktop_pointer(&mut self) -> Task<Message> {
-        let hovering = self.state.browser.polls_desktop_pointer();
+        if !self.state.browser.polls_desktop_pointer() {
+            // Each drag asks afresh, so a window moved to another scale, or
+            // an answer that never came, holds for one drag at most.
+            if !matches!(
+                self.pointer_poll,
+                PointerPoll::Unasked | PointerPoll::Unavailable
+            ) {
+                self.pointer_poll = PointerPoll::Unasked;
+            }
+            return Task::none();
+        }
         match &mut self.pointer_poll {
-            PointerPoll::Unasked if hovering => {
+            PointerPoll::Unasked => {
                 self.pointer_poll = PointerPoll::Asking;
                 find_pointer_window()
             }
@@ -100,10 +110,6 @@ impl App {
                 scale,
                 last,
             } => {
-                if !hovering {
-                    *last = None;
-                    return Task::none();
-                }
                 let Some((x, y)) = window.pointer() else {
                     return Task::none();
                 };
