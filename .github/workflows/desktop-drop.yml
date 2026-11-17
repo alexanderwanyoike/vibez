@@ -1,0 +1,115 @@
+name: Desktop drop
+
+# Drags a real MIDI file and a real WAV file into a running Vibez from
+# another process, with each platform's own drag API driven by synthetic
+# mouse input, and checks that they land. winit 0.30 reports no pointer
+# positions during such a drag on Windows or macOS, so this is the end to
+# end proof of the pointer poll there. The screenshots are uploaded.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'crates/vibez-ui/src/app/desktop_drop*.rs'
+      - 'crates/vibez-ui/src/app/desktop_pointer*.rs'
+      - 'crates/vibez-ui/src/app/drop_target_probe.rs'
+      - 'crates/vibez-ui/src/domains/desktop_pointer*.rs'
+      - 'scripts/desktop-drop/**'
+      - '.github/workflows/desktop-drop.yml'
+
+env:
+  CARGO_TERM_COLOR: always
+  # Each step is <file, or click> <x> <y> <screenshot name>, in logical
+  # pixels from the top left of Vibez's content. First the Arrange tab, then
+  # the MIDI file on empty Arrange and on the lane it made, then the WAV file
+  # on the new-track row under that lane and on the lane it made.
+  DRAG_STEPS: >-
+    click 294 24 0-arrange
+    drums.mid 500 300 1-midi-on-empty-arrange
+    drums.mid 400 156 2-midi-on-its-lane
+    tone.wav 500 224 3-wav-on-new-track-row
+    tone.wav 600 224 4-wav-on-its-lane
+
+jobs:
+  drop:
+    name: Drop (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/setup-asio-sdk
+        if: runner.os == 'Windows'
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --locked --bin vibez
+
+      - name: Write the project and the files to drop
+        run: python scripts/desktop-drop/fixtures.py "${{ runner.temp }}/drop"
+
+      # A fresh runner has no Vibez settings. These close the Browser, so
+      # Arrange gets the room, and skip the update check.
+      - name: Drag into Vibez (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          try { Set-DisplayResolution -Width 1920 -Height 1080 -Force } catch { Write-Host "Keeping the resolution: $_" }
+          $drop = Join-Path $env:RUNNER_TEMP drop
+          $shots = Join-Path $env:RUNNER_TEMP shots
+          New-Item -ItemType Directory -Force $shots | Out-Null
+          $settings = Join-Path $env:APPDATA vibez
+          New-Item -ItemType Directory -Force $settings | Out-Null
+          '{"sample_library_roots":[],"sample_browser_open":false,"check_for_updates":false}' | Set-Content (Join-Path $settings ui.json)
+          $drag = Join-Path $env:RUNNER_TEMP drag_windows.exe
+          & "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo "/out:$drag" /r:System.Windows.Forms.dll /r:System.Drawing.dll scripts\desktop-drop\drag_windows.cs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $vibez = Start-Process target\release\vibez.exe -ArgumentList "`"$drop\project.vzp`"" -PassThru `
+            -RedirectStandardOutput (Join-Path $shots vibez.out.log) -RedirectStandardError (Join-Path $shots vibez.err.log)
+          Start-Sleep -Seconds 10
+          Push-Location $drop
+          & $drag $vibez.Id $shots @($env:DRAG_STEPS -split ' ')
+          $dragged = $LASTEXITCODE
+          Pop-Location
+          python scripts/desktop-drop/check.py "$drop\project.vzp"
+          $landed = $LASTEXITCODE
+          Stop-Process -Id $vibez.Id -ErrorAction SilentlyContinue
+          if ($dragged -ne 0) { exit $dragged }
+          exit $landed
+
+      - name: Drag into Vibez (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          # Check the project and stop Vibez even when a drag fails.
+          set +e
+          drop="$RUNNER_TEMP/drop"
+          shots="$RUNNER_TEMP/shots"
+          mkdir -p "$shots"
+          home="$RUNNER_TEMP/home"
+          settings="$home/Library/Application Support/vibez"
+          mkdir -p "$settings"
+          echo '{"sample_library_roots":[],"sample_browser_open":false,"check_for_updates":false}' > "$settings/ui.json"
+          swiftc -O scripts/desktop-drop/drag_macos.swift -o "$RUNNER_TEMP/drag_macos"
+          HOME="$home" target/release/vibez "$drop/project.vzp" > "$shots/vibez.log" 2>&1 &
+          vibez=$!
+          sleep 10
+          # Word splitting turns the steps into arguments.
+          (cd "$drop" && "$RUNNER_TEMP/drag_macos" "$vibez" "$shots" $DRAG_STEPS)
+          dragged=$?
+          python scripts/desktop-drop/check.py "$drop/project.vzp"
+          landed=$?
+          kill "$vibez" || true
+          [ "$dragged" -eq 0 ] && exit "$landed"
+          exit "$dragged"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: desktop-drop-${{ runner.os }}
+          path: ${{ runner.temp }}/shots
+          if-no-files-found: warn
