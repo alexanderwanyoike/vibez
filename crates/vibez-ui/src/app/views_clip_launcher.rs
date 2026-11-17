@@ -916,13 +916,14 @@ impl App {
         let active = self.state.perform.capture.is_active();
         button(
             row![
-                text(if active {
-                    "● CAPTURING"
-                } else {
-                    "○ CAPTURE"
-                })
-                .font(PERFORM_LABEL)
-                .size(10),
+                row![
+                    icons::icon(icons::CIRCLE).size(10),
+                    text(if active { "CAPTURING" } else { "CAPTURE" })
+                        .font(PERFORM_LABEL)
+                        .size(10),
+                ]
+                .spacing(4)
+                .align_y(iced::Alignment::Center),
                 text("F5").font(PERFORM_TECH).size(9),
             ]
             .spacing(8)
