@@ -59,7 +59,10 @@ impl BrowserState {
     /// Whether another app's drag hovers the window with nothing yet
     /// dropped, so only a poll can say where its pointer is.
     pub fn polls_desktop_pointer(&self) -> bool {
-        false
+        matches!(
+            self.desktop_drop,
+            Some(DesktopDrop::Hovering | DesktopDrop::PointerSeen)
+        )
     }
 
     /// What the widget under the polled pointer would have reported: its
@@ -72,8 +75,32 @@ impl BrowserState {
         timing: LaneTiming,
         compatible: impl Fn(TrackId) -> bool,
     ) -> Vec<BrowserMsg> {
-        let _ = (under, point, timing, compatible);
-        Vec::new()
+        let hover = match under {
+            Some((PointerTarget::Lane(track_id), bounds)) => Some(BrowserMsg::DragHoverTrack {
+                track_id,
+                beat: timing.beat_at(point.x - bounds.x),
+                compatible: compatible(track_id),
+            }),
+            Some((PointerTarget::NewTrackRow, bounds)) => {
+                Some(BrowserMsg::DragHoverEmptyArrangement {
+                    beat: timing.beat_at(point.x - bounds.x),
+                })
+            }
+            Some((PointerTarget::NewTrackSlot { row }, _)) => {
+                Some(BrowserMsg::DragHoverNewTrackSlot { row })
+            }
+            Some((PointerTarget::ClipSlot { track_id, row }, _)) => {
+                Some(BrowserMsg::DragHoverClipSlot { track_id, row })
+            }
+            None => self
+                .drag_target
+                .is_some()
+                .then_some(BrowserMsg::ClearDragTarget),
+        };
+        hover
+            .into_iter()
+            .chain([BrowserMsg::DesktopPointerMoved])
+            .collect()
     }
 }
 
