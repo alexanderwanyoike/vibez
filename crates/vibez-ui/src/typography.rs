@@ -69,9 +69,12 @@ fn register_at_normal_width(db: &mut fontdb::Database, id: fontdb::ID) {
     });
 }
 
+const PLEX_SANS_CONDENSED_FAMILY: &str = "IBM Plex Sans Condensed";
+const PLEX_MONO_FAMILY: &str = "IBM Plex Mono";
+
 /// A family is only used at a weight it has a face for, so every role's
 /// weight needs a bundled face.
-const PLEX_SANS_CONDENSED: Font = Font::with_name("IBM Plex Sans Condensed");
+const PLEX_SANS_CONDENSED: Font = Font::with_name(PLEX_SANS_CONDENSED_FAMILY);
 pub const PERFORM_DISPLAY: Font = Font {
     weight: Weight::Medium,
     ..PLEX_SANS_CONDENSED
@@ -87,17 +90,40 @@ pub const CLIP_TITLE: Font = PERFORM_LABEL;
 pub const TRACK_TITLE: Font = PERFORM_LABEL;
 pub const PERFORM_TECH: Font = Font {
     weight: Weight::Medium,
-    ..Font::with_name("IBM Plex Mono")
+    ..Font::with_name(PLEX_MONO_FAMILY)
 };
 pub const PERFORM_TECH_STRONG: Font = Font {
     weight: Weight::Semibold,
-    ..Font::with_name("IBM Plex Mono")
+    ..Font::with_name(PLEX_MONO_FAMILY)
 };
 
 /// `text`, or as much of it as fits `width` before an ellipsis; empty when
 /// not even one letter fits.
 pub(crate) fn fit(text: &str, width: f32, size: f32, font: Font) -> String {
     fit_text(text, width, size, font, 1).unwrap_or_default()
+}
+
+/// The loaded faces `keep` accepts, parsed as cosmic-text shapes with them.
+#[cfg(test)]
+fn loaded_faces(
+    keep: impl Fn(&fontdb::FaceInfo) -> bool,
+) -> Vec<std::sync::Arc<iced::advanced::graphics::text::cosmic_text::Font>> {
+    load_bundled_fonts();
+    let mut system = font_system().write().expect("font system lock");
+    let raw = system.raw();
+    let ids: Vec<_> = raw
+        .db()
+        .faces()
+        .filter(|face| keep(face))
+        .map(|face| face.id)
+        .collect();
+    ids.into_iter().filter_map(|id| raw.get_font(id)).collect()
+}
+
+/// Whether `face` has a glyph for `c`.
+#[cfg(test)]
+fn draws(face: &iced::advanced::graphics::text::cosmic_text::Font, c: char) -> bool {
+    face.rustybuzz().glyph_index(c).is_some()
 }
 
 #[cfg(test)]
@@ -119,8 +145,12 @@ mod tests {
     /// shapes `content` with. The system fonts stay in, so a role that misses
     /// its bundled face shows whichever fallback this platform picks. Glyph 0
     /// is the empty box a face draws for a character it lacks.
+    ///
+    /// It shapes as `text_width` measures, with fallback. Text drawn with
+    /// iced's default basic shaping uses only the first face that matches,
+    /// so a character that face lacks stays an empty box.
     fn shaped_glyphs(content: &str, font: Font) -> Vec<(String, u16, u16)> {
-        use iced::advanced::graphics::text::{cosmic_text, font_system, to_attributes};
+        use iced::advanced::graphics::text::{cosmic_text, to_attributes};
 
         load_bundled_fonts();
         let mut system = font_system().write().expect("font system lock");
@@ -158,31 +188,11 @@ mod tests {
     }
 
     /// Whether a face the app does not bundle has a glyph for every char of
-    /// `content`.
+    /// `content`. The app's faces load from memory, the system's from files.
     fn a_system_face_covers(content: &str) -> bool {
-        use iced::advanced::graphics::text::font_system;
-
-        load_bundled_fonts();
-        let mut system = font_system().write().expect("font system lock");
-        let raw = system.raw();
-        let system_faces: Vec<_> = raw
-            .db()
-            .faces()
-            .filter(|face| {
-                !face
-                    .families
-                    .iter()
-                    .any(|(name, _)| name.starts_with("IBM Plex") || name.as_str() == "lucide")
-            })
-            .map(|face| face.id)
-            .collect();
-        system_faces.into_iter().any(|id| {
-            raw.get_font(id).is_some_and(|font| {
-                content
-                    .chars()
-                    .all(|c| font.rustybuzz().glyph_index(c).is_some())
-            })
-        })
+        loaded_faces(|face| !matches!(face.source, fontdb::Source::Binary(_)))
+            .iter()
+            .any(|face| content.chars().all(|c| draws(face, c)))
     }
 
     #[test]
@@ -191,20 +201,20 @@ mod tests {
             (
                 "PERFORM_DISPLAY",
                 PERFORM_DISPLAY,
-                "IBM Plex Sans Condensed",
+                PLEX_SANS_CONDENSED_FAMILY,
                 500,
             ),
             (
                 "PERFORM_LABEL",
                 PERFORM_LABEL,
-                "IBM Plex Sans Condensed",
+                PLEX_SANS_CONDENSED_FAMILY,
                 600,
             ),
-            ("PERFORM_TECH", PERFORM_TECH, "IBM Plex Mono", 500),
+            ("PERFORM_TECH", PERFORM_TECH, PLEX_MONO_FAMILY, 500),
             (
                 "PERFORM_TECH_STRONG",
                 PERFORM_TECH_STRONG,
-                "IBM Plex Mono",
+                PLEX_MONO_FAMILY,
                 600,
             ),
         ];
@@ -222,7 +232,7 @@ mod tests {
     }
 
     #[test]
-    fn a_japanese_name_in_a_plex_role_draws_in_a_system_face() {
+    fn a_japanese_name_shaped_with_fallback_in_a_plex_role_draws_in_a_system_face() {
         let name = "ドラム";
         if !a_system_face_covers(name) {
             eprintln!("no system face here draws {name}, so there is nothing to fall back to");
@@ -238,7 +248,7 @@ mod tests {
             assert!(
                 glyphs
                     .iter()
-                    .all(|(family, _, glyph)| *glyph != 0 && !family.starts_with("IBM Plex")),
+                    .all(|(family, _, glyph)| *glyph != 0 && family != PLEX_SANS_CONDENSED_FAMILY),
                 "{role} drew {name} as {glyphs:?}"
             );
         }

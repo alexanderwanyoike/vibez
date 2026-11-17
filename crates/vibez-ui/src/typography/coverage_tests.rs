@@ -7,9 +7,9 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use iced::advanced::graphics::text::{cosmic_text, font_system};
+use iced::advanced::graphics::text::cosmic_text;
 
-use super::load_bundled_fonts;
+use super::{draws, loaded_faces, PLEX_SANS_CONDENSED_FAMILY};
 
 /// Literals drawn in the default font, which falls back across the system's
 /// faces, so they may hold characters Plex lacks. Each is a path under
@@ -24,23 +24,11 @@ const DRAWN_IN_THE_DEFAULT_FONT: &[(&str, &str)] = &[
 
 /// The bundled Plex Sans Condensed faces, one per weight.
 fn plex_condensed_faces() -> Vec<Arc<cosmic_text::Font>> {
-    load_bundled_fonts();
-    let mut system = font_system().write().expect("font system lock");
-    let raw = system.raw();
-    let ids: Vec<_> = raw
-        .db()
-        .faces()
-        .filter(|face| {
-            face.families
-                .iter()
-                .any(|(name, _)| name == "IBM Plex Sans Condensed")
-        })
-        .map(|face| face.id)
-        .collect();
-    let faces: Vec<_> = ids
-        .into_iter()
-        .map(|id| raw.get_font(id).expect("bundled face parses"))
-        .collect();
+    let faces = loaded_faces(|face| {
+        face.families
+            .iter()
+            .any(|(name, _)| name == PLEX_SANS_CONDENSED_FAMILY)
+    });
     assert_eq!(
         faces.len(),
         2,
@@ -198,11 +186,7 @@ fn string_literals(source: &str) -> Vec<Literal> {
 #[test]
 fn every_ui_string_has_glyphs_in_the_bundled_plex_faces() {
     let faces = plex_condensed_faces();
-    let covered = |c: char| {
-        faces
-            .iter()
-            .all(|face| face.rustybuzz().glyph_index(c).is_some())
-    };
+    let covered = |c: char| faces.iter().all(|face| draws(face, c));
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut sources = Vec::new();
     production_sources(&src, &mut sources);
