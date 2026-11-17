@@ -49,6 +49,10 @@ remain editable at capacity, while another target cannot grow callback storage.
 Offline channel preparation preserves that reserved storage.
 `engine_command_allocation_tests` measures every command; its list of commands
 that still allocate may only shrink.
+When the engine keeps an `Arc` until a later command replaces it (the Browser
+audition's audio and MIDI patterns), the UI keeps that `Arc` and the last few
+it replaced in an `EngineHeld`, so the audio thread never drops the final
+owner.
 
 Ordinary owner returns use one private `RetirementQueue` with 32 fixed slots.
 Reserve the command's existing worst-case allowance before popping it, then

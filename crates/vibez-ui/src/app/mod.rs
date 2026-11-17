@@ -304,6 +304,7 @@ mod drag_ghost_tests;
 #[cfg(test)]
 mod new_track_drop_tests;
 
+mod midi_audition;
 mod midi_file_drop;
 
 #[cfg(test)]
@@ -311,6 +312,9 @@ mod device_panel_drop_tests;
 
 #[cfg(test)]
 mod midi_file_drop_tests;
+
+#[cfg(test)]
+mod browser_midi_audition_tests;
 
 #[cfg(test)]
 mod desktop_drop_tests;
@@ -589,9 +593,7 @@ impl App {
         };
 
         // Inform the engine of the actual hardware clock and project tempo.
-        app.send_command(EngineCommand::SetSampleRate(
-            app.state.transport.sample_rate,
-        ));
+        app.apply_engine_sample_rate(app.state.transport.sample_rate);
         app.send_command(EngineCommand::SetBpm(app.state.transport.bpm));
         app.send_command(EngineCommand::SetAuditionGain(
             app.state.browser.audition_gain,

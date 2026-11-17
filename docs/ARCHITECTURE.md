@@ -715,6 +715,33 @@ receiver renders the source's instrument first. The source keeps sounding its ow
 instrument, its mute silences only its audio, and the receiver plays routed
 notes whether or not it is the record target.
 
+The Browser's **MIDI audition** plays a MIDI file through a Track's
+instrument the same way, but never as input. `MidiAuditionPattern` places one
+pass of the file's notes on the samples of each block, played once or looped,
+with notes held past its length ending there. Before any Track renders, the
+Audition Bus works out the block's notes and their player: the target Track
+when it has an instrument, otherwise a preview voice the UI supplies and the
+bus mixes after master at the Audition gain. Each Track admits them through a
+second `RoutedNotes` keyed by an audition generation, so a new audition, a
+Stop, an audio audition or a change of player ends held notes at the next
+block start, and nothing reports them as `SourceNoteInput`, so no recording
+takes them. A synchronized (Warp) audition starts on the next bar while the
+transport plays, and moves to the bar Play starts on, like a warped audio
+audition. The preview voice renders only while it plays an audition or still
+rings, and a replaced voice is disposed off the audio thread. A MIDI file has
+no audio tempo to keep, so both treatments play at project tempo; Raw plays it
+once from now. Because a target Track plays the audition through its own
+chain, a Resample of that Track hears it, and a phrase plugin on it passes
+what it plays on to MIDI From receivers, as a played keyboard would.
+
+In the Browser, selecting a MIDI file reads it off the UI thread and previews
+the Clip a drop would land, so the producer sees and hears what landing gives.
+The Audition footer draws it as a piano-roll strip with bar lines, placing
+notes on the same note rows as Clip thumbnails. With Audition On it plays
+through the selected Track's instrument when that Track can play MIDI, and
+otherwise through the preview voice, which the UI builds for each hardware
+sample rate. Raw plays the file once at once; Warp loops it from the next bar.
+
 `EngineTrack` is the shared project channel strip: it owns the instrument,
 effects, sends, gain/pan, mute/solo, meters, and preallocated render scratch.
 Time-based content is a separate `PreparedPlaybackSource` behind an owned

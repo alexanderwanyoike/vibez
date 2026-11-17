@@ -345,6 +345,14 @@ pub enum Message {
     /// dropped instead of starting playback.
     LocalSamplePreviewReady(MediaSourceRef, u64, Result<AnalysedBrowserAudio, String>),
     BrowserWaveformReady(MediaSourceRef, Result<AnalysedBrowserAudio, String>),
+    /// A MIDI file selected in the Browser was read; `play` asks for its
+    /// audition once read, under the audition request `generation`.
+    BrowserMidiPreviewReady {
+        source: MediaSourceRef,
+        generation: u64,
+        play: bool,
+        result: Result<crate::domains::midi_file_import::MidiFileImport, String>,
+    },
     BrowserAuditionReady {
         source: MediaSourceRef,
         generation: u64,

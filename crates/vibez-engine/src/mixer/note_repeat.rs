@@ -96,9 +96,11 @@ impl EngineTrack {
             }
             let instrument = self.instrument.as_mut().unwrap();
             self.routed_notes.schedule(instrument.as_mut());
+            self.audition_notes.schedule(instrument.as_mut());
             instrument.render(&mut self.mix_buffer[..buf_size], channels);
         } else {
             let mut routed = 0;
+            let mut auditioned = 0;
             for frame in 0..frames {
                 let (triggers, count) = self.note_repeats.triggers_at(
                     repeat_pos + frame as u64,
@@ -114,6 +116,8 @@ impl EngineTrack {
                 }
                 self.routed_notes
                     .play_due(frame as u32, &mut routed, instrument.as_mut());
+                self.audition_notes
+                    .play_due(frame as u32, &mut auditioned, instrument.as_mut());
                 let start = frame * channels;
                 instrument.render(&mut self.mix_buffer[start..start + channels], channels);
             }

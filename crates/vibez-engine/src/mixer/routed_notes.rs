@@ -1,4 +1,4 @@
-//! The notes MIDI From routes into a track, admitted so each note-on gets exactly one note-off.
+//! Notes a track plays from outside its own clips, admitted so each note-on gets exactly one note-off.
 
 use vibez_core::note_output::{BlockNote, NoteOutput};
 use vibez_instruments::Instrument;
@@ -17,8 +17,10 @@ pub(crate) struct NoteSource {
     pub(crate) instrument: u64,
 }
 
+/// `S` names whoever plays the notes, so a change of player releases what
+/// the old one started.
 #[derive(Debug)]
-pub(crate) struct RoutedNotes {
+pub(crate) struct RoutedNotes<S = NoteSource> {
     incoming: Vec<BlockNote>,
     block: Vec<BlockNote>,
     sounding: u128,
@@ -26,11 +28,11 @@ pub(crate) struct RoutedNotes {
     deferred: u128,
     /// The frame each held pitch last started on in this block.
     started: [u32; 128],
-    source: Option<NoteSource>,
+    source: Option<S>,
     release_pending: bool,
 }
 
-impl Default for RoutedNotes {
+impl<S> Default for RoutedNotes<S> {
     fn default() -> Self {
         Self {
             incoming: Vec::with_capacity(NoteOutput::CAPACITY),
@@ -44,17 +46,12 @@ impl Default for RoutedNotes {
     }
 }
 
-impl RoutedNotes {
+impl<S: Copy + PartialEq> RoutedNotes<S> {
     /// Replaces the block's notes with `incoming` from `source`, in frame
     /// order, after any pending release. `source` is `None` when no source
     /// rendered this block. A changed source releases what the old one
     /// started, since it will never end those notes.
-    pub(crate) fn admit(
-        &mut self,
-        source: Option<NoteSource>,
-        incoming: &[BlockNote],
-        frames: u32,
-    ) {
+    pub(crate) fn admit(&mut self, source: Option<S>, incoming: &[BlockNote], frames: u32) {
         self.block.clear();
         if source != self.source {
             self.source = source;

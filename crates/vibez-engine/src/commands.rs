@@ -430,6 +430,17 @@ pub enum EngineCommand {
     StopAudition,
     /// Set Audition Bus gain independently from project mixer state.
     SetAuditionGain(f32),
+    /// Audition a MIDI file through `target`'s instrument, or through the
+    /// preview voice when that track has none. The UI keeps a clone of
+    /// `pattern` so the audio thread never drops its last owner.
+    StartMidiAudition {
+        pattern: Arc<crate::midi_audition::MidiAuditionPattern>,
+        target: Option<TrackId>,
+        start: AuditionStart,
+        looped: bool,
+    },
+    /// The instrument a MIDI audition without a target track plays through.
+    SetAuditionVoice(Box<dyn Instrument>),
 
     // -- External MIDI input --
     /// Route a live note-on from an external MIDI source (hardware
