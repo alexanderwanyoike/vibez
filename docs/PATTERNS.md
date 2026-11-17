@@ -502,7 +502,9 @@ then sends the hover message the widget itself would have sent. A new kind of
 target adds a `PointerTarget` variant, tags its widget, lists it in
 `pointer_targets`, and maps to its hover. Device cards and Drum Rack pads are
 not tagged, so a poll that finds no tagged target leaves the drop free, and
-the card under the released pointer takes it.
+the card under the released pointer takes it. Wayland has no `PointerWindow`,
+since a client cannot ask the compositor where the pointer is, so a drop there
+waits for the released pointer too.
 
 ---
 
