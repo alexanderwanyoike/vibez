@@ -1,7 +1,7 @@
 //! Another app's drag, followed by polling the pointer, since the window
 //! sees no pointer motion until the drop.
 
-use iced::{Point, Rectangle, Task};
+use iced::{Point, Task};
 
 use super::App;
 use crate::domains::desktop_pointer::{LaneTiming, PointerTarget};
@@ -11,12 +11,27 @@ use crate::state::Workspace;
 /// Clip launcher rows a probe looks for, as many as the launcher shows.
 const LAUNCHER_ROWS: u32 = 6;
 
+/// The id the view gives the container around `target`.
+pub(super) fn target_id(target: PointerTarget) -> iced::widget::container::Id {
+    let name = match target {
+        PointerTarget::Lane(track_id) => format!("lane/{}", track_id.raw()),
+        PointerTarget::NewTrackRow => "new-track-row".to_string(),
+        PointerTarget::NewTrackSlot { row } => format!("new-track-slot/{row}"),
+        PointerTarget::ClipSlot { track_id, row } => {
+            format!("clip-slot/{}/{row}", track_id.raw())
+        }
+    };
+    iced::widget::container::Id::new(format!("desktop-drop-target:{name}"))
+}
+
 /// `content` tagged as `target`, so a polled pointer can find it.
 pub(super) fn drop_target<'a>(
     content: impl Into<iced::Element<'a, Message>>,
     target: PointerTarget,
 ) -> iced::Element<'a, Message> {
-    iced::widget::container(content).id(target.id()).into()
+    iced::widget::container(content)
+        .id(target_id(target))
+        .into()
 }
 
 /// How far the app has got with reading the pointer itself.
@@ -41,8 +56,8 @@ impl App {
     /// as the widget there would have.
     pub(super) fn on_desktop_pointer_probed(
         &mut self,
-        point: Point,
-        under: Option<(PointerTarget, Rectangle)>,
+        x: f32,
+        under: Option<(PointerTarget, f32)>,
     ) -> Task<Message> {
         if !self.state.browser.polls_desktop_pointer() {
             return Task::none();
@@ -59,7 +74,7 @@ impl App {
         let messages = self
             .state
             .browser
-            .pointer_messages(under, point, timing, |track_id| {
+            .pointer_messages(under, x, timing, |track_id| {
                 self.state
                     .find_track(track_id)
                     .is_some_and(|track| self.state.browser.drag_lands_on(track.kind))
@@ -100,8 +115,12 @@ impl App {
                 *last = Some(point);
                 let probe =
                     super::drop_target_probe::DropTargetProbe::new(point, self.pointer_targets());
-                iced::advanced::widget::operate(probe)
-                    .map(move |under| Message::DesktopPointerProbed { point, under })
+                iced::advanced::widget::operate(probe).map(move |under| {
+                    Message::DesktopPointerProbed {
+                        x: point.x,
+                        under: under.map(|(target, bounds)| (target, bounds.x)),
+                    }
+                })
             }
             _ => Task::none(),
         }

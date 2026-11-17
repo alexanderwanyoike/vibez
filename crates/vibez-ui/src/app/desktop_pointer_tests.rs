@@ -2,7 +2,6 @@
 
 use std::path::{Path, PathBuf};
 
-use iced::{Point, Rectangle, Size};
 use vibez_core::id::TrackId;
 use vibez_core::midi::TrackKind;
 
@@ -37,9 +36,8 @@ fn app_with_midi_track() -> (App, TrackId) {
     (app, track_id)
 }
 
-fn lane_bounds() -> Rectangle {
-    Rectangle::new(Point::new(400.0, 200.0), Size::new(900.0, 70.0))
-}
+/// The left edge of the lane the probes find.
+const LANE_LEFT: f32 = 400.0;
 
 #[tokio::test]
 async fn a_polled_pointer_over_a_lane_shows_the_ghost_where_the_drop_then_lands() {
@@ -52,11 +50,9 @@ async fn a_polled_pointer_over_a_lane_shows_the_ghost_where_the_drop_then_lands(
     )
     .await;
     let pixels_per_beat = app.state.view.viewport.geometry().pixels_per_beat();
-    let point = Point::new(400.0 + 8.0 * pixels_per_beat, 230.0);
-
     let _ = app.update(Message::DesktopPointerProbed {
-        point,
-        under: Some((PointerTarget::Lane(track_id), lane_bounds())),
+        x: LANE_LEFT + 8.0 * pixels_per_beat,
+        under: Some((PointerTarget::Lane(track_id), LANE_LEFT)),
     });
 
     let ghost = app
@@ -93,12 +89,12 @@ async fn a_polled_pointer_off_every_target_takes_the_ghost_away() {
     )
     .await;
     let _ = app.update(Message::DesktopPointerProbed {
-        point: Point::new(500.0, 230.0),
-        under: Some((PointerTarget::Lane(track_id), lane_bounds())),
+        x: 500.0,
+        under: Some((PointerTarget::Lane(track_id), LANE_LEFT)),
     });
 
     let _ = app.update(Message::DesktopPointerProbed {
-        point: Point::new(10.0, 10.0),
+        x: 10.0,
         under: None,
     });
 
@@ -115,9 +111,33 @@ fn a_probe_after_the_drag_ended_changes_nothing() {
     let (mut app, track_id) = app_with_midi_track();
 
     let _ = app.update(Message::DesktopPointerProbed {
-        point: Point::new(500.0, 230.0),
-        under: Some((PointerTarget::Lane(track_id), lane_bounds())),
+        x: 500.0,
+        under: Some((PointerTarget::Lane(track_id), LANE_LEFT)),
     });
 
     assert!(app.state.browser.drag_target.is_none());
+}
+
+#[test]
+fn every_target_has_its_own_id() {
+    let track_id = TrackId::new();
+    let ids = [
+        PointerTarget::Lane(track_id),
+        PointerTarget::NewTrackRow,
+        PointerTarget::NewTrackSlot { row: 0 },
+        PointerTarget::NewTrackSlot { row: 1 },
+        PointerTarget::ClipSlot { track_id, row: 0 },
+    ]
+    .map(desktop_pointer::target_id);
+    for (index, id) in ids.iter().enumerate() {
+        assert_eq!(
+            ids.iter().filter(|other| *other == id).count(),
+            1,
+            "{index}"
+        );
+    }
+    assert_eq!(
+        desktop_pointer::target_id(PointerTarget::Lane(track_id)),
+        desktop_pointer::target_id(PointerTarget::Lane(track_id))
+    );
 }

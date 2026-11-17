@@ -158,14 +158,12 @@ pub enum Message {
         window: Option<u32>,
         scale: f32,
     },
-    /// Where a poll found the pointer during another app's drag, and the
-    /// drop target the view laid out under it.
+    /// How far across the window a poll found the pointer during another
+    /// app's drag, and the drop target the view laid out under it.
     DesktopPointerProbed {
-        point: iced::Point,
-        under: Option<(
-            crate::domains::desktop_pointer::PointerTarget,
-            iced::Rectangle,
-        )>,
+        x: f32,
+        /// The target there and its left edge.
+        under: Option<(crate::domains::desktop_pointer::PointerTarget, f32)>,
     },
     EngineMetering {
         peak_l: f32,

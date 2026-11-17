@@ -945,8 +945,8 @@ impl App {
             Message::DesktopPointerWindow { window, scale } => {
                 self.on_desktop_pointer_window(window, scale);
             }
-            Message::DesktopPointerProbed { point, under } => {
-                return self.on_desktop_pointer_probed(point, under);
+            Message::DesktopPointerProbed { x, under } => {
+                return self.on_desktop_pointer_probed(x, under);
             }
             Message::EngineMetering { peak_l, peak_r } => {
                 self.state.peak_l = peak_l;

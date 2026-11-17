@@ -24,7 +24,7 @@ impl DropTargetProbe {
             point,
             wanted: wanted
                 .into_iter()
-                .map(|target| (target, Id::from(target.id())))
+                .map(|target| (target, Id::from(super::desktop_pointer::target_id(target))))
                 .collect(),
             scrollables: Vec::new(),
             depth: 0,

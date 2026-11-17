@@ -1,16 +1,10 @@
-//! The drop target under the pointer while another app's drag hovers the
-//! window. On X11 the dragging app holds the pointer, so the widgets never
-//! see it move; a poll finds the pointer and the target the view tagged
-//! there, and reports it as the widget would have.
+//! What a polled pointer over a drop target reports during another app's drag.
 
-use iced::{Point, Rectangle};
 use vibez_core::id::TrackId;
 
 use crate::domains::browser::BrowserMsg;
 use crate::state::{BrowserState, DesktopDrop, GridConfig};
 use crate::timeline_geometry::TimelineGeometry;
-
-const ID_PREFIX: &str = "desktop-drop-target:";
 
 /// A place the view tags so a polled pointer can find it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,21 +17,6 @@ pub enum PointerTarget {
     NewTrackSlot { row: u32 },
     /// An empty Clip slot of a track that takes the drag.
     ClipSlot { track_id: TrackId, row: u32 },
-}
-
-impl PointerTarget {
-    /// The id the view gives the container around this target.
-    pub fn id(self) -> iced::widget::container::Id {
-        let name = match self {
-            Self::Lane(track_id) => format!("lane/{}", track_id.raw()),
-            Self::NewTrackRow => "new-track-row".to_string(),
-            Self::NewTrackSlot { row } => format!("new-track-slot/{row}"),
-            Self::ClipSlot { track_id, row } => {
-                format!("clip-slot/{}/{row}", track_id.raw())
-            }
-        };
-        iced::widget::container::Id::new(format!("{ID_PREFIX}{name}"))
-    }
 }
 
 /// How the active timeline maps a lane's x to a beat, as its widgets do.
@@ -65,25 +44,26 @@ impl BrowserState {
         )
     }
 
-    /// What the widget under the polled pointer would have reported: its
-    /// hover, or leaving the target it had, followed by the pointer moving.
-    /// `compatible` says whether a track's lane takes the drag.
+    /// What the widget under a pointer polled at `x` would have reported:
+    /// its hover, or leaving the target it had, followed by the pointer
+    /// moving. `under` is the target there and its left edge; `compatible`
+    /// says whether a track's lane takes the drag.
     pub fn pointer_messages(
         &self,
-        under: Option<(PointerTarget, Rectangle)>,
-        point: Point,
+        under: Option<(PointerTarget, f32)>,
+        x: f32,
         timing: LaneTiming,
         compatible: impl Fn(TrackId) -> bool,
     ) -> Vec<BrowserMsg> {
         let hover = match under {
-            Some((PointerTarget::Lane(track_id), bounds)) => Some(BrowserMsg::DragHoverTrack {
+            Some((PointerTarget::Lane(track_id), left)) => Some(BrowserMsg::DragHoverTrack {
                 track_id,
-                beat: timing.beat_at(point.x - bounds.x),
+                beat: timing.beat_at(x - left),
                 compatible: compatible(track_id),
             }),
-            Some((PointerTarget::NewTrackRow, bounds)) => {
+            Some((PointerTarget::NewTrackRow, left)) => {
                 Some(BrowserMsg::DragHoverEmptyArrangement {
-                    beat: timing.beat_at(point.x - bounds.x),
+                    beat: timing.beat_at(x - left),
                 })
             }
             Some((PointerTarget::NewTrackSlot { row }, _)) => {
