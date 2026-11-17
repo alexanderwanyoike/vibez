@@ -137,9 +137,6 @@ func drag(_ file: URL, to target: CGPoint, hoverShot: String) {
     Thread.sleep(forTimeInterval: 1.5)
     screenshot(hoverShot)
     post(.leftMouseUp, at: target)
-    // Straight back off Vibez, so no ordinary mouse move reaches it after
-    // the drop. A drop then lands only where the poll found a target.
-    post(.mouseMoved, at: start)
     if dropped.wait(timeout: .now() + 10) == .timedOut {
         fatalError("the drag did not end")
     }
