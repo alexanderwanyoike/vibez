@@ -18,8 +18,9 @@ impl PointerWindow {
         let RawWindowHandle::AppKit(window) = handle.as_raw() else {
             return None;
         };
+        MainThreadMarker::new()?;
         // SAFETY: the handle borrows the live window this view belongs to,
-        // and iced hands it over on the main thread.
+        // and AppKit views are only touched on the main thread, checked above.
         let view = unsafe { window.ns_view.cast::<NSView>().as_ref() };
         Some(Self {
             number: view.window()?.windowNumber(),
