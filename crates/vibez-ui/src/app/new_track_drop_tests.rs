@@ -208,3 +208,37 @@ async fn audio_from_another_app_under_a_sections_tracks_gets_an_audio_track_in_t
         .arrange_content(track.id)
         .is_none_or(|content| content.clips.is_empty()));
 }
+
+#[test]
+fn audio_for_a_section_deleted_while_it_was_prepared_adds_no_track() {
+    let (mut app, existing, _) = sections();
+    let gone = crate::domains::perform::Section::new(1).id;
+    let payload = crate::message::PreparedBrowserImport {
+        treatment: crate::state::AuditionImportInput {
+            mode: AuditionMode::Raw,
+            source_bpm: None,
+        },
+        audio: Arc::new(DecodedAudio {
+            channels: vec![vec![0.5; 4_410]],
+            sample_rate: 44_100,
+        }),
+        original_audio: None,
+        name: "kick.wav".into(),
+        source: crate::state::UiClip::test_source(),
+    };
+
+    let _ = app.apply_browser_import_prepared(
+        crate::message::BrowserImportTarget::SectionNewTrackAt {
+            section_id: gone,
+            position_samples: 0,
+        },
+        payload,
+    );
+
+    assert!(app
+        .state
+        .project_tracks
+        .tracks
+        .iter()
+        .all(|track| track.id == existing));
+}
