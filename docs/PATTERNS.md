@@ -489,18 +489,20 @@ when the sentence no longer covers the file, the file splits.
 
 ## 9. Drop targets another app's drag can reach
 
-On X11 another app's drag holds the pointer, so widgets see no motion until
-the drop. A drop target that should answer during such a drag wraps itself in
+Another app's drag holds the pointer, and winit 0.30 passes on none of its
+positions, so widgets see no motion until the drop. A drop target that should
+answer during such a drag wraps itself in
 `desktop_pointer::drop_target(content, PointerTarget::…)`, a container with an
-id. While the drag hovers, the UI tick reads the pointer from the X server and
-`DropTargetProbe`, a widget `Operation`, looks for the ids
-`App::pointer_targets` lists and finds the one under the pointer, allowing for
-scrolling. `BrowserState::pointer_messages` then sends the hover message the
-widget itself would have sent. A new kind of target adds a `PointerTarget`
-variant, tags its widget, lists it in `pointer_targets`, and maps to its
-hover. Device cards and Drum Rack pads are not tagged, so a poll that finds
-no tagged target leaves the drop free, and the card under the released
-pointer takes it.
+id. While the drag hovers, the UI tick reads the pointer itself, through the
+platform's `PointerWindow` (QueryPointer on X11, GetCursorPos on Windows,
+NSEvent's mouse location on macOS), and `DropTargetProbe`, a widget
+`Operation`, looks for the ids `App::pointer_targets` lists and finds the one
+under the pointer, allowing for scrolling. `BrowserState::pointer_messages`
+then sends the hover message the widget itself would have sent. A new kind of
+target adds a `PointerTarget` variant, tags its widget, lists it in
+`pointer_targets`, and maps to its hover. Device cards and Drum Rack pads are
+not tagged, so a poll that finds no tagged target leaves the drop free, and
+the card under the released pointer takes it.
 
 ---
 
