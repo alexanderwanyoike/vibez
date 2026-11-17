@@ -680,7 +680,18 @@ impl TrackClipCanvas {
 
 #[cfg(test)]
 mod tests {
-    use super::{visible_pixel_columns, waveform_peak_for_pixel, whole_pixel_offset, PeakScale};
+    use super::{
+        title_icon, visible_pixel_columns, waveform_peak_for_pixel, whole_pixel_offset, PeakScale,
+    };
+    use crate::icons;
+
+    #[test]
+    fn a_recording_preview_leads_with_the_record_circle_and_a_looped_clip_with_its_loop() {
+        assert_eq!(title_icon(true, false), Some(icons::CIRCLE));
+        assert_eq!(title_icon(true, true), Some(icons::CIRCLE));
+        assert_eq!(title_icon(false, true), Some(icons::REPEAT));
+        assert_eq!(title_icon(false, false), None);
+    }
 
     fn spans(peak_span_frames: usize) -> PeakScale {
         PeakScale::Spans {
