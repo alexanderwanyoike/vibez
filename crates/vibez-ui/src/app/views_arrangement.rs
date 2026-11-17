@@ -34,7 +34,7 @@ use crate::widgets::track_header::{
 
 use super::*;
 use crate::domains::browser::DragMedia;
-use crate::domains::drop_ghost::{DropGhost, NewTrack};
+use crate::domains::drop_ghost::DropGhost;
 
 /// Expanded return or master automation scrolls inside this cap so the
 /// pinned footer can never squeeze the track list out of the window.
@@ -644,8 +644,8 @@ impl App {
         };
         // Until the drag reaches it, the lane only hints at what it is;
         // once there, its zone says it.
-        let hint = match (zone.is_some(), self.state.browser.drag_media()) {
-            (false, Some(media)) => NewTrack::of(media).label(),
+        let hint = match (zone.is_some(), self.state.browser.new_track_kind()) {
+            (false, Some(kind)) => kind.label(),
             _ => "",
         };
         let ghost = self.state.browser.new_track_drop_ghost(bpm);

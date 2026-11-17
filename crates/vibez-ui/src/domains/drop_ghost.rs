@@ -217,6 +217,14 @@ impl BrowserState {
         })
     }
 
+    /// The kind of track a drop on empty space adds: what the file read
+    /// says, or what its media says until then.
+    pub fn new_track_kind(&self) -> Option<NewTrack> {
+        self.current_ghost_cache()
+            .map(|ghost| ghost.read.media.new_track())
+            .or_else(|| self.drag_media().map(NewTrack::of))
+    }
+
     /// The ghost waiting on the lane of a track the drop adds.
     pub fn new_track_drop_ghost(&self, project_bpm: f64) -> Option<DropGhost<'_>> {
         self.drop_ghost(project_bpm)
