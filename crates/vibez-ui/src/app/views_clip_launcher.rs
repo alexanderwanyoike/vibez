@@ -18,6 +18,9 @@ use crate::widgets::control_style;
 
 use super::App;
 
+/// Clip slot rows the launcher shows at once.
+pub(super) const LAUNCHER_ROWS: u32 = 6;
+
 fn surface(_theme: &Theme) -> container::Style {
     container::Style {
         background: Some(th::bg_surface().into()),
@@ -487,7 +490,7 @@ impl App {
             let lane_width = (width - 46.0) / shown_tracks as f32;
             let header_height = if compact { 26.0 } else { 42.0 };
             let mut numbers = column![iced::widget::Space::new(1, header_height)].spacing(0);
-            for offset in 0..6u32 {
+            for offset in 0..LAUNCHER_ROWS {
                 numbers = numbers.push(
                     container(
                         text(format!("{:02}", first_row + offset + 1))
@@ -578,7 +581,7 @@ impl App {
                     .height(header_height)]
                 .spacing(0)
                 .width(Length::Fixed(lane_width));
-                for offset in 0..6u32 {
+                for offset in 0..LAUNCHER_ROWS {
                     let slot_row = first_row + offset;
                     let recording =
                         self.state

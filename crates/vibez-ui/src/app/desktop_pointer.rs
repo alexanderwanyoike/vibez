@@ -8,9 +8,6 @@ use crate::domains::desktop_pointer::{LaneTiming, PointerTarget};
 use crate::message::Message;
 use crate::state::Workspace;
 
-/// Clip launcher rows a probe looks for, as many as the launcher shows.
-const LAUNCHER_ROWS: u32 = 6;
-
 /// The id the view gives the container around `target`.
 pub(super) fn target_id(target: PointerTarget) -> iced::widget::container::Id {
     let name = match target {
@@ -151,7 +148,7 @@ impl App {
     /// Every drop target the view may have tagged.
     fn pointer_targets(&self) -> Vec<PointerTarget> {
         let first_row = self.state.perform.clip_editor.first_row;
-        let rows = 0..first_row + LAUNCHER_ROWS;
+        let rows = 0..first_row + super::views_clip_launcher::LAUNCHER_ROWS;
         let tracks = self
             .state
             .project_tracks
