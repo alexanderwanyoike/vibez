@@ -5,8 +5,8 @@ use iced::window::raw_window_handle::{RawWindowHandle, WindowHandle};
 use objc2::MainThreadMarker;
 use objc2_app_kit::{NSApplication, NSEvent, NSView};
 
-/// The app's window, by number, so it can cross to the UI thread and be
-/// looked up again there.
+/// The app's window, by number, since an AppKit window cannot travel in a
+/// `Send` message. It is looked up again on the main thread.
 #[derive(Debug)]
 pub struct PointerWindow {
     number: isize,

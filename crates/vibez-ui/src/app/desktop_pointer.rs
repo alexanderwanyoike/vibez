@@ -207,5 +207,6 @@ use super::desktop_pointer_windows as platform;
 use super::desktop_pointer_macos as platform;
 
 /// The platform's pointer source, built from the window handle, which reads
-/// the pointer relative to the window in physical pixels. Wayland has none.
+/// the pointer relative to the window in physical pixels. On Wayland
+/// `from_handle` finds none.
 pub(crate) use platform::PointerWindow;

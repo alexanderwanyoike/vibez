@@ -9,7 +9,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
 /// The app's top-level window.
 #[derive(Debug)]
 pub struct PointerWindow {
-    /// The HWND as a number, so the window can cross to the UI thread.
+    /// The HWND as a number, since a raw HWND cannot travel in a `Send` message.
     hwnd: isize,
 }
 
