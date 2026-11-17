@@ -545,9 +545,12 @@ impl BrowserState {
                 );
             }
             BrowserMsg::DesktopFileHovered(path) => {
-                let dragging = self.drag_source.clone();
+                let hovering = Some(crate::state::DesktopDrop::Hovering);
+                let was_hovering = self.desktop_drop == hovering;
                 action.status = self.hover_desktop_file(path);
-                if self.drags_from_desktop() && self.drag_source != dragging {
+                // A hover that starts the drag, or restarts a waiting drop
+                // that cleared its ghost, reads the file.
+                if self.desktop_drop == hovering && !was_hovering {
                     action.read_drag_ghost = self.drag_source.clone();
                 }
             }
