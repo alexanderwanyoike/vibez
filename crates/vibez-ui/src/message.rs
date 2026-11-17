@@ -153,6 +153,11 @@ pub enum Message {
 
     // Engine events
     Tick,
+    /// The app's X window, where there is one, and its scale factor.
+    DesktopPointerWindow {
+        window: Option<u32>,
+        scale: f32,
+    },
     /// Where a poll found the pointer during another app's drag, and the
     /// drop target the view laid out under it.
     DesktopPointerProbed {

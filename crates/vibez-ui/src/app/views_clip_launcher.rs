@@ -689,17 +689,22 @@ impl App {
                                 track_id: track.id,
                                 row: slot_row,
                             };
-                            mouse_area(slot_cell)
-                                .on_enter(Message::Browser(BrowserMsg::DragHoverClipSlot {
+                            super::desktop_pointer::drop_target(
+                                mouse_area(slot_cell)
+                                    .on_enter(Message::Browser(BrowserMsg::DragHoverClipSlot {
+                                        track_id: track.id,
+                                        row: slot_row,
+                                    }))
+                                    .on_exit(Message::Browser(BrowserMsg::LeaveDragTarget(slot)))
+                                    .on_release(Message::ImportLauncherClip {
+                                        track_id: track.id,
+                                        row: slot_row,
+                                    }),
+                                crate::domains::desktop_pointer::PointerTarget::ClipSlot {
                                     track_id: track.id,
                                     row: slot_row,
-                                }))
-                                .on_exit(Message::Browser(BrowserMsg::LeaveDragTarget(slot)))
-                                .on_release(Message::ImportLauncherClip {
-                                    track_id: track.id,
-                                    row: slot_row,
-                                })
-                                .into()
+                                },
+                            )
                         } else {
                             slot_cell.into()
                         };

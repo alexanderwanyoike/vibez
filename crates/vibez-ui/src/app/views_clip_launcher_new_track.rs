@@ -15,13 +15,15 @@ use super::App;
 /// Moving re-reports the slot, so leaving one slot for the next never
 /// clears both.
 fn new_track_slot<'a>(content: impl Into<Element<'a, Message>>, row: u32) -> Element<'a, Message> {
-    mouse_area(content)
-        .on_move(move |_| Message::Browser(BrowserMsg::DragHoverNewTrackSlot { row }))
-        .on_exit(Message::Browser(BrowserMsg::LeaveDragTarget(
-            crate::state::BrowserDropTarget::NewTrackSlot { row },
-        )))
-        .on_release(Message::ImportLauncherClipOnNewTrack { row })
-        .into()
+    super::desktop_pointer::drop_target(
+        mouse_area(content)
+            .on_move(move |_| Message::Browser(BrowserMsg::DragHoverNewTrackSlot { row }))
+            .on_exit(Message::Browser(BrowserMsg::LeaveDragTarget(
+                crate::state::BrowserDropTarget::NewTrackSlot { row },
+            )))
+            .on_release(Message::ImportLauncherClipOnNewTrack { row }),
+        crate::domains::desktop_pointer::PointerTarget::NewTrackSlot { row },
+    )
 }
 
 impl App {

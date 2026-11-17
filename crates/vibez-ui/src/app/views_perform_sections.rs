@@ -443,6 +443,10 @@ impl App {
                 } else {
                     focused_clip_canvas
                 };
+                let clip_lane = super::desktop_pointer::drop_target(
+                    clip_lane,
+                    crate::domains::desktop_pointer::PointerTarget::Lane(track_id),
+                );
                 track_rows = track_rows.push(
                     row![gutter, clip_lane]
                         .width(Length::Fill)

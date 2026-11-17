@@ -942,6 +942,9 @@ impl App {
             Message::Tick => {
                 return self.handle_tick();
             }
+            Message::DesktopPointerWindow { window, scale } => {
+                self.on_desktop_pointer_window(window, scale);
+            }
             Message::DesktopPointerProbed { point, under } => {
                 return self.on_desktop_pointer_probed(point, under);
             }

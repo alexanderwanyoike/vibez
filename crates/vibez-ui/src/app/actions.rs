@@ -699,7 +699,7 @@ impl App {
         } else {
             Task::none()
         };
-        Task::batch([export_task, auto_save_task])
+        Task::batch([export_task, auto_save_task, self.poll_desktop_pointer()])
     }
 }
 
