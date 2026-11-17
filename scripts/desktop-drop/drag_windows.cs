@@ -167,6 +167,9 @@ static class DragWindows
         Screenshot(hoverShot);
 
         mouse_event(LeftUp, 0, 0, 0, UIntPtr.Zero);
+        // Straight back off Vibez, so no ordinary mouse move reaches it after
+        // the drop. A drop then lands only where the poll found a target.
+        MoveTo(start);
         if (!dropped.WaitOne(10000))
         {
             throw new TimeoutException("the drag did not end");
