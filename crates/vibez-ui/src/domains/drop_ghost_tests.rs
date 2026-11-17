@@ -311,3 +311,24 @@ fn cancelling_or_dropping_ends_the_ghost_with_its_drag() {
         assert!(browser.drag_ghost.is_none());
     }
 }
+
+#[test]
+fn a_file_hovered_again_while_its_drop_waits_is_read_again() {
+    let mut browser = BrowserState::default();
+    browser.update(BrowserMsg::DesktopFileHovered(path("Rebeater P3.mid")));
+    browser.update(BrowserMsg::DesktopFileDropped(path("Rebeater P3.mid")));
+
+    let action = browser.update(BrowserMsg::DesktopFileHovered(path("Rebeater P3.mid")));
+
+    assert_eq!(action.read_drag_ghost, Some(source("Rebeater P3.mid")));
+}
+
+#[test]
+fn the_other_files_of_a_multi_file_drag_ask_for_no_read() {
+    let mut browser = BrowserState::default();
+    browser.update(BrowserMsg::DesktopFileHovered(path("kick.wav")));
+
+    let action = browser.update(BrowserMsg::DesktopFileHovered(path("snare.wav")));
+
+    assert_eq!(action.read_drag_ghost, None);
+}
