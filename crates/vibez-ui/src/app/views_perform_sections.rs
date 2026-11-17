@@ -74,7 +74,10 @@ impl App {
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
-        } else if self.state.project_tracks.tracks.is_empty() {
+        // A drag shows the timeline even with no tracks, for its new-track row.
+        } else if self.state.project_tracks.tracks.is_empty()
+            && self.state.browser.drag_source.is_none()
+        {
             center(
                 column![
                     text("NO PROJECT TRACKS")
@@ -463,6 +466,11 @@ impl App {
                         );
                     }
                 }
+            }
+
+            if self.state.browser.drag_source.is_some() {
+                track_rows = track_rows
+                    .push(self.view_new_track_row(SECTION_TRACK_GUTTER_WIDTH, viewport.geometry()));
             }
 
             let body = crate::widgets::quiet_scroll::vertical(
