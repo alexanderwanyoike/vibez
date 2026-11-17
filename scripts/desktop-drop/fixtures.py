@@ -1,59 +1,29 @@
-"""Writes what the desktop drop check drags and drops into.
+"""Writes the files the desktop drop check drags, and Vibez's settings.
 
-An empty project for Vibez to open and auto-save, a one-bar drum phrase as
-a MIDI file and a one-second tone as a WAV file, all under the given folder.
+A one-bar drum phrase as a MIDI file and a one-second tone as a WAV file go
+in the drop folder. The settings close the Browser, so Arrange gets the room,
+set the interface scale and skip the update check.
+
+Usage: fixtures.py <drop folder> <settings folder> <interface scale>
 """
 
 import json
 import math
-import sqlite3
 import struct
 import sys
 import wave
 from pathlib import Path
 
-# Project Format V1, as crates/vibez-project/src/project_format_v1.rs
-# defines it: "VZP1" in the application id and the document as JSON.
-APPLICATION_ID = 0x565A5031
-FORMAT_VERSION = 1
-SCHEMA = """
-CREATE TABLE project_document (
-    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-    json BLOB NOT NULL
-);
-CREATE TABLE project_media (
-    id TEXT PRIMARY KEY,
-    file_name TEXT NOT NULL,
-    byte_len INTEGER NOT NULL,
-    sha256 TEXT NOT NULL,
-    provenance_json BLOB NOT NULL,
-    content BLOB NOT NULL
-);
-"""
 
-
-def write_project(path: Path) -> None:
-    document = {
-        "format_version": FORMAT_VERSION,
-        "project": {
-            "name": "Desktop drop",
-            "bpm": 120.0,
-            "sample_rate": 48000,
-            "tracks": [],
-        },
-        "project_media": [],
+def write_settings(folder: Path, interface_scale: float) -> None:
+    settings = {
+        "sample_library_roots": [],
+        "sample_browser_open": False,
+        "check_for_updates": False,
+        "interface_scale": interface_scale,
     }
-    path.unlink(missing_ok=True)
-    connection = sqlite3.connect(path)
-    connection.executescript(SCHEMA)
-    connection.execute(f"PRAGMA application_id = {APPLICATION_ID}")
-    connection.execute(f"PRAGMA user_version = {FORMAT_VERSION}")
-    connection.execute(
-        "INSERT INTO project_document(singleton, json) VALUES (1, ?)",
-        (json.dumps(document).encode(),),
-    )
-    connection.commit()
-    connection.close()
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "ui.json").write_text(json.dumps(settings))
 
 
 def write_midi(path: Path) -> None:
@@ -85,11 +55,11 @@ def write_wav(path: Path) -> None:
 
 
 def main() -> None:
-    folder = Path(sys.argv[1])
-    folder.mkdir(parents=True, exist_ok=True)
-    write_project(folder / "project.vzp")
-    write_midi(folder / "drums.mid")
-    write_wav(folder / "tone.wav")
+    drop = Path(sys.argv[1])
+    drop.mkdir(parents=True, exist_ok=True)
+    write_midi(drop / "drums.mid")
+    write_wav(drop / "tone.wav")
+    write_settings(Path(sys.argv[2]), float(sys.argv[3]))
 
 
 if __name__ == "__main__":

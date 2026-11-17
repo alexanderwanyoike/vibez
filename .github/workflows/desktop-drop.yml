@@ -14,6 +14,7 @@ on:
       - 'crates/vibez-ui/src/app/desktop_pointer*.rs'
       - 'crates/vibez-ui/src/app/drop_target_probe.rs'
       - 'crates/vibez-ui/src/domains/desktop_pointer*.rs'
+      - 'crates/vibez-project/examples/empty_project.rs'
       - 'scripts/desktop-drop/**'
       - '.github/workflows/desktop-drop.yml'
 
@@ -53,12 +54,21 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release --locked --bin vibez
 
-      - name: Write the project and the files to drop
-        run: python scripts/desktop-drop/fixtures.py "${{ runner.temp }}/drop"
+      # dirs::config_dir() is a known folder on Windows that no variable
+      # redirects, so there the settings are fresh only because the runner
+      # is. On macOS a HOME of its own keeps them apart.
+      - name: Write the files to drop, an empty project and fresh settings
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then
+            settings="$APPDATA/vibez"
+          else
+            settings="$RUNNER_TEMP/home/Library/Application Support/vibez"
+          fi
+          rm -rf "$settings"
+          python scripts/desktop-drop/fixtures.py "$RUNNER_TEMP/drop" "$settings" "$INTERFACE_SCALE"
+          cargo run --release --locked -p vibez-project --example empty_project -- "$RUNNER_TEMP/drop/project.vzp"
 
-      # A fresh runner has no Vibez settings. These close the Browser, so
-      # Arrange gets the room, set the interface scale and skip the update
-      # check.
       - name: Drag into Vibez (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -67,9 +77,6 @@ jobs:
           $drop = Join-Path $env:RUNNER_TEMP drop
           $shots = Join-Path $env:RUNNER_TEMP shots
           New-Item -ItemType Directory -Force $shots | Out-Null
-          $settings = Join-Path $env:APPDATA vibez
-          New-Item -ItemType Directory -Force $settings | Out-Null
-          "{`"sample_library_roots`":[],`"sample_browser_open`":false,`"check_for_updates`":false,`"interface_scale`":$env:INTERFACE_SCALE}" | Set-Content (Join-Path $settings ui.json)
           $drag = Join-Path $env:RUNNER_TEMP drag_windows.exe
           & "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo "/out:$drag" /r:System.Windows.Forms.dll /r:System.Drawing.dll scripts\desktop-drop\drag_windows.cs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -95,9 +102,6 @@ jobs:
           shots="$RUNNER_TEMP/shots"
           mkdir -p "$shots"
           home="$RUNNER_TEMP/home"
-          settings="$home/Library/Application Support/vibez"
-          mkdir -p "$settings"
-          echo "{\"sample_library_roots\":[],\"sample_browser_open\":false,\"check_for_updates\":false,\"interface_scale\":$INTERFACE_SCALE}" > "$settings/ui.json"
           swiftc -O scripts/desktop-drop/drag_macos.swift -o "$RUNNER_TEMP/drag_macos"
           HOME="$home" target/release/vibez "$drop/project.vzp" > "$shots/vibez.log" 2>&1 &
           vibez=$!
