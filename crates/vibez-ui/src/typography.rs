@@ -9,17 +9,17 @@ mod coverage_tests;
 mod fit;
 pub use fit::{fit_text, fit_text_middle};
 
-pub const PLEX_SANS_CONDENSED_MEDIUM_BYTES: &[u8] =
+const PLEX_SANS_CONDENSED_MEDIUM_BYTES: &[u8] =
     include_bytes!("../../../assets/fonts/ibm-plex/IBMPlexSansCondensed-Medium.ttf");
-pub const PLEX_SANS_CONDENSED_SEMIBOLD_BYTES: &[u8] =
+const PLEX_SANS_CONDENSED_SEMIBOLD_BYTES: &[u8] =
     include_bytes!("../../../assets/fonts/ibm-plex/IBMPlexSansCondensed-SemiBold.ttf");
-pub const PLEX_MONO_MEDIUM_BYTES: &[u8] =
+const PLEX_MONO_MEDIUM_BYTES: &[u8] =
     include_bytes!("../../../assets/fonts/ibm-plex/IBMPlexMono-Medium.ttf");
-pub const PLEX_MONO_SEMIBOLD_BYTES: &[u8] =
+const PLEX_MONO_SEMIBOLD_BYTES: &[u8] =
     include_bytes!("../../../assets/fonts/ibm-plex/IBMPlexMono-SemiBold.ttf");
 
 /// Every font the app bundles, in the order it loads them.
-pub const BUNDLED_FONTS: [&[u8]; 5] = [
+const BUNDLED_FONTS: [&[u8]; 5] = [
     crate::icons::ICON_FONT_BYTES,
     PLEX_SANS_CONDENSED_MEDIUM_BYTES,
     PLEX_SANS_CONDENSED_SEMIBOLD_BYTES,
