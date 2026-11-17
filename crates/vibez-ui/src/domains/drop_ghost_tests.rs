@@ -306,7 +306,7 @@ fn cancelling_or_dropping_ends_the_ghost_with_its_drag() {
         cancel(&mut browser);
 
         assert!(browser.drop_ghost(BPM).is_none());
-        assert!(browser.drag_ghost.is_none());
+        assert!(browser.ghost_cache.is_none());
     }
 }
 

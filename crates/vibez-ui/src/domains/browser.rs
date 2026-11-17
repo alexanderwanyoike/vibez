@@ -575,7 +575,7 @@ impl BrowserState {
                 self.cancel_media_drag();
                 action.status = Some(reason);
             }
-            BrowserMsg::DragGhostRead(Ok(read)) => self.install_drag_ghost(*read),
+            BrowserMsg::DragGhostRead(Ok(read)) => self.install_ghost_cache(*read),
             BrowserMsg::DragGhostRead(Err(_)) => {}
             BrowserMsg::EndDragSample => {
                 if self.drag_source.is_some() {

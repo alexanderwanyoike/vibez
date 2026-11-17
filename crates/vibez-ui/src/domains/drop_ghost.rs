@@ -199,7 +199,7 @@ impl BrowserState {
     /// until the file has been read, and none where the target turns the
     /// drag away.
     pub fn drop_ghost(&self, project_bpm: f64) -> Option<DropGhost<'_>> {
-        let read = &self.current_drag_ghost()?.read;
+        let read = &self.current_ghost_cache()?.read;
         let place = match *self.drag_target.as_ref()? {
             BrowserDropTarget::ArrangementLane {
                 track_id,
@@ -232,7 +232,7 @@ impl BrowserState {
 
     /// The launcher Clip the ghost shows as in a new column's slot.
     pub fn drop_ghost_slot(&self) -> Option<&LauncherClip> {
-        let ghost = self.current_drag_ghost()?;
+        let ghost = self.current_ghost_cache()?;
         matches!(
             self.drag_target,
             Some(BrowserDropTarget::NewTrackSlot { .. })
@@ -240,17 +240,17 @@ impl BrowserState {
         .then_some(&ghost.slot)
     }
 
-    fn current_drag_ghost(&self) -> Option<&GhostCache> {
-        self.drag_ghost
+    fn current_ghost_cache(&self) -> Option<&GhostCache> {
+        self.ghost_cache
             .as_ref()
             .filter(|ghost| self.drag_source.as_ref() == Some(&ghost.read.source))
     }
 
     /// Keeps what was read of `source` for the ghost while it is still the
     /// drag in flight; a read that finishes after its drag ended is dropped.
-    pub(super) fn install_drag_ghost(&mut self, read: DragGhostRead) {
+    pub(super) fn install_ghost_cache(&mut self, read: DragGhostRead) {
         if self.drag_source.as_ref() == Some(&read.source) {
-            self.drag_ghost = Some(GhostCache::new(read));
+            self.ghost_cache = Some(GhostCache::new(read));
         }
     }
 }

@@ -201,7 +201,7 @@ async fn a_browser_drag_shows_the_clip_its_release_lands() {
     };
     assert!(close(start, 2.0));
     assert!(close(landed_length, length));
-    assert!(app.state.browser.drag_ghost.is_none());
+    assert!(app.state.browser.ghost_cache.is_none());
 }
 
 #[tokio::test]
