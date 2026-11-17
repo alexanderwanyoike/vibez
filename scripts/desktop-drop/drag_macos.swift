@@ -52,6 +52,9 @@ final class SourceView: NSView, NSDraggingSource {
     }
 }
 
+// Line by line, so the log shows when each step happened.
+setvbuf(stdout, nil, _IOLBF, 0)
+
 let dropped = DispatchSemaphore(value: 0)
 let arguments = CommandLine.arguments
 let vibezPid = pid_t(arguments[1])!
