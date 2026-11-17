@@ -159,3 +159,12 @@ fn each_desktop_drag_asks_afresh_for_the_window_it_polls() {
         ));
     }
 }
+
+#[test]
+fn a_macos_window_point_becomes_pixels_down_from_the_top_left() {
+    // 10 points up a 600-point-tall view on a 2x display.
+    assert_eq!(
+        desktop_pointer::top_left_pixels(30.0, 10.0, 600.0, 2.0),
+        (60.0, 1180.0)
+    );
+}
