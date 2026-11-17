@@ -127,6 +127,9 @@ pub struct BrowserState {
     pub drag_target: Option<BrowserDropTarget>,
     /// Set while the drag in flight is a file from another app.
     pub desktop_drop: Option<DesktopDrop>,
+    /// What the drag in flight has read of its file, kept for the drag's
+    /// life so the ghost never reads it twice.
+    pub drag_ghost: Option<crate::domains::drop_ghost::DragGhostRead>,
 }
 
 /// Where a file dragged in from another app is in its drop.
@@ -189,6 +192,7 @@ impl Default for BrowserState {
             drag_label: None,
             drag_target: None,
             desktop_drop: None,
+            drag_ghost: None,
         }
     }
 }
@@ -575,6 +579,7 @@ impl BrowserState {
         self.drag_label = None;
         self.drag_target = None;
         self.desktop_drop = None;
+        self.drag_ghost = None;
     }
 
     /// The drag's name, how it imports and its musical length, as the lane

@@ -279,6 +279,9 @@ mod sample_retirement;
 
 mod desktop_drop;
 
+#[cfg(test)]
+mod drag_ghost_tests;
+
 mod midi_file_drop;
 
 #[cfg(test)]
