@@ -57,4 +57,87 @@ mod tests {
         assert!(!fitted.is_empty());
         assert!(text_width(&fitted, 13.0, Font::DEFAULT) <= width);
     }
+
+    /// Family and weight of every face the renderer's font system shapes
+    /// `content` with, after loading the fonts the app bundles in the order
+    /// `app::run` loads them. The system fonts stay in, so a role that
+    /// misses its bundled face shows whichever fallback this platform picks.
+    fn drawn_faces(content: &str, font: Font) -> Vec<(String, u16)> {
+        use iced::advanced::graphics::text::{cosmic_text, font_system, to_attributes};
+        use std::borrow::Cow;
+        use std::sync::Once;
+
+        static LOAD_BUNDLED: Once = Once::new();
+        let mut system = font_system().write().expect("font system lock");
+        LOAD_BUNDLED.call_once(|| {
+            for bytes in [
+                crate::icons::ICON_FONT_BYTES,
+                PLEX_SANS_CONDENSED_MEDIUM_BYTES,
+                PLEX_SANS_CONDENSED_SEMIBOLD_BYTES,
+                PLEX_MONO_MEDIUM_BYTES,
+                PLEX_MONO_SEMIBOLD_BYTES,
+            ] {
+                system.load_font(Cow::Borrowed(bytes));
+            }
+        });
+        let raw = system.raw();
+        let mut buffer = cosmic_text::Buffer::new(raw, cosmic_text::Metrics::new(10.5, 13.0));
+        buffer.set_text(
+            raw,
+            content,
+            to_attributes(font),
+            cosmic_text::Shaping::Advanced,
+        );
+        buffer.shape_until_scroll(raw, false);
+        let mut faces: Vec<(String, u16)> = buffer
+            .layout_runs()
+            .flat_map(|run| run.glyphs.iter().map(|glyph| glyph.font_id))
+            .map(|id| {
+                let face = raw.db().face(id).expect("shaped face is loaded");
+                let family = face
+                    .families
+                    .first()
+                    .map_or_else(|| face.post_script_name.clone(), |(name, _)| name.clone());
+                (family, face.weight.0)
+            })
+            .collect();
+        faces.dedup();
+        faces
+    }
+
+    #[test]
+    fn each_role_draws_digits_with_its_bundled_face() {
+        let roles = [
+            (
+                "PERFORM_DISPLAY",
+                PERFORM_DISPLAY,
+                "IBM Plex Sans Condensed",
+                500,
+            ),
+            (
+                "PERFORM_LABEL",
+                PERFORM_LABEL,
+                "IBM Plex Sans Condensed",
+                600,
+            ),
+            ("PERFORM_TECH", PERFORM_TECH, "IBM Plex Mono", 500),
+            (
+                "PERFORM_TECH_STRONG",
+                PERFORM_TECH_STRONG,
+                "IBM Plex Mono",
+                600,
+            ),
+        ];
+
+        let drawn: Vec<_> = roles
+            .iter()
+            .map(|&(role, font, _, _)| (role, drawn_faces("0:00", font)))
+            .collect();
+        let bundled: Vec<_> = roles
+            .iter()
+            .map(|&(role, _, family, weight)| (role, vec![(family.to_string(), weight)]))
+            .collect();
+
+        assert_eq!(drawn, bundled);
+    }
 }
