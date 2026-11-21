@@ -186,6 +186,7 @@ impl Gallery {
 }
 
 pub fn run() -> iced::Result {
+    crate::typography::load_bundled_fonts();
     iced::application(
         "Device card gallery",
         |_: &mut Gallery, _: Message| {},
@@ -194,11 +195,6 @@ pub fn run() -> iced::Result {
     .theme(|_| th::vibez_theme())
     .antialiasing(true)
     .window_size((1900.0, 300.0))
-    .font(crate::icons::ICON_FONT_BYTES)
-    .font(crate::typography::PLEX_SANS_CONDENSED_MEDIUM_BYTES)
-    .font(crate::typography::PLEX_SANS_CONDENSED_SEMIBOLD_BYTES)
-    .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
-    .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
     .run_with(|| (Gallery::new(), iced::Task::none()))
 }
 
@@ -415,6 +411,7 @@ impl GainGallery {
 }
 
 pub fn run_gain() -> iced::Result {
+    crate::typography::load_bundled_fonts();
     iced::application(
         "Gain device gallery",
         |_: &mut GainGallery, _: Message| {},
@@ -423,11 +420,6 @@ pub fn run_gain() -> iced::Result {
     .theme(|_| th::vibez_theme())
     .antialiasing(true)
     .window_size((1400.0, 1000.0))
-    .font(crate::icons::ICON_FONT_BYTES)
-    .font(crate::typography::PLEX_SANS_CONDENSED_MEDIUM_BYTES)
-    .font(crate::typography::PLEX_SANS_CONDENSED_SEMIBOLD_BYTES)
-    .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
-    .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
     .run_with(|| (GainGallery::new(), iced::Task::none()))
 }
 
@@ -574,6 +566,7 @@ impl EqGallery {
 }
 
 pub fn run_eq() -> iced::Result {
+    crate::typography::load_bundled_fonts();
     iced::application(
         "EQ device gallery",
         |_: &mut EqGallery, _: Message| {},
@@ -582,11 +575,6 @@ pub fn run_eq() -> iced::Result {
     .theme(|_| th::vibez_theme())
     .antialiasing(true)
     .window_size((1900.0, 1260.0))
-    .font(crate::icons::ICON_FONT_BYTES)
-    .font(crate::typography::PLEX_SANS_CONDENSED_MEDIUM_BYTES)
-    .font(crate::typography::PLEX_SANS_CONDENSED_SEMIBOLD_BYTES)
-    .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
-    .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
     .run_with(|| (EqGallery::new(), iced::Task::none()))
 }
 
@@ -718,6 +706,7 @@ impl CompressorGallery {
 }
 
 pub fn run_compressor() -> iced::Result {
+    crate::typography::load_bundled_fonts();
     iced::application(
         "Compressor device gallery",
         |_: &mut CompressorGallery, _: Message| {},
@@ -726,11 +715,6 @@ pub fn run_compressor() -> iced::Result {
     .theme(|_| th::vibez_theme())
     .antialiasing(true)
     .window_size((1900.0, 1260.0))
-    .font(crate::icons::ICON_FONT_BYTES)
-    .font(crate::typography::PLEX_SANS_CONDENSED_MEDIUM_BYTES)
-    .font(crate::typography::PLEX_SANS_CONDENSED_SEMIBOLD_BYTES)
-    .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
-    .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
     .run_with(|| (CompressorGallery::new(), iced::Task::none()))
 }
 
@@ -872,6 +856,7 @@ impl FilterGallery {
 }
 
 pub fn run_filter() -> iced::Result {
+    crate::typography::load_bundled_fonts();
     iced::application(
         "Filter device gallery",
         |_: &mut FilterGallery, _: Message| {},
@@ -880,11 +865,6 @@ pub fn run_filter() -> iced::Result {
     .theme(|_| th::vibez_theme())
     .antialiasing(true)
     .window_size((1900.0, 1260.0))
-    .font(crate::icons::ICON_FONT_BYTES)
-    .font(crate::typography::PLEX_SANS_CONDENSED_MEDIUM_BYTES)
-    .font(crate::typography::PLEX_SANS_CONDENSED_SEMIBOLD_BYTES)
-    .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
-    .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
     .run_with(|| (FilterGallery::new(), iced::Task::none()))
 }
 
@@ -1025,6 +1005,7 @@ impl GateGallery {
 }
 
 pub fn run_gate() -> iced::Result {
+    crate::typography::load_bundled_fonts();
     iced::application(
         "Gate device gallery",
         |_: &mut GateGallery, _: Message| {},
@@ -1033,11 +1014,6 @@ pub fn run_gate() -> iced::Result {
     .theme(|_| th::vibez_theme())
     .antialiasing(true)
     .window_size((1900.0, 1260.0))
-    .font(crate::icons::ICON_FONT_BYTES)
-    .font(crate::typography::PLEX_SANS_CONDENSED_MEDIUM_BYTES)
-    .font(crate::typography::PLEX_SANS_CONDENSED_SEMIBOLD_BYTES)
-    .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
-    .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
     .run_with(|| (GateGallery::new(), iced::Task::none()))
 }
 
@@ -1158,6 +1134,7 @@ impl DriveGallery {
 }
 
 pub fn run_drive() -> iced::Result {
+    crate::typography::load_bundled_fonts();
     iced::application(
         "Drive device gallery",
         |_: &mut DriveGallery, _: Message| {},
@@ -1166,11 +1143,6 @@ pub fn run_drive() -> iced::Result {
     .theme(|_| th::vibez_theme())
     .antialiasing(true)
     .window_size((1900.0, 1260.0))
-    .font(crate::icons::ICON_FONT_BYTES)
-    .font(crate::typography::PLEX_SANS_CONDENSED_MEDIUM_BYTES)
-    .font(crate::typography::PLEX_SANS_CONDENSED_SEMIBOLD_BYTES)
-    .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
-    .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
     .run_with(|| (DriveGallery::new(), iced::Task::none()))
 }
 
@@ -1289,6 +1261,7 @@ impl BitcrushGallery {
 }
 
 pub fn run_bitcrush() -> iced::Result {
+    crate::typography::load_bundled_fonts();
     iced::application(
         "Bitcrush device gallery",
         |_: &mut BitcrushGallery, _: Message| {},
@@ -1297,11 +1270,6 @@ pub fn run_bitcrush() -> iced::Result {
     .theme(|_| th::vibez_theme())
     .antialiasing(true)
     .window_size((1900.0, 1260.0))
-    .font(crate::icons::ICON_FONT_BYTES)
-    .font(crate::typography::PLEX_SANS_CONDENSED_MEDIUM_BYTES)
-    .font(crate::typography::PLEX_SANS_CONDENSED_SEMIBOLD_BYTES)
-    .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
-    .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
     .run_with(|| (BitcrushGallery::new(), iced::Task::none()))
 }
 
@@ -1427,6 +1395,7 @@ impl DelayGallery {
 }
 
 pub fn run_delay() -> iced::Result {
+    crate::typography::load_bundled_fonts();
     iced::application(
         "Delay device gallery",
         |_: &mut DelayGallery, _: Message| {},
@@ -1435,11 +1404,6 @@ pub fn run_delay() -> iced::Result {
     .theme(|_| th::vibez_theme())
     .antialiasing(true)
     .window_size((1900.0, 1260.0))
-    .font(crate::icons::ICON_FONT_BYTES)
-    .font(crate::typography::PLEX_SANS_CONDENSED_MEDIUM_BYTES)
-    .font(crate::typography::PLEX_SANS_CONDENSED_SEMIBOLD_BYTES)
-    .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
-    .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
     .run_with(|| (DelayGallery::new(), iced::Task::none()))
 }
 
@@ -1545,6 +1509,7 @@ impl EchoGallery {
 }
 
 pub fn run_echo() -> iced::Result {
+    crate::typography::load_bundled_fonts();
     iced::application(
         "Echo device gallery",
         |_: &mut EchoGallery, _: Message| {},
@@ -1553,11 +1518,6 @@ pub fn run_echo() -> iced::Result {
     .theme(|_| th::vibez_theme())
     .antialiasing(true)
     .window_size((1900.0, 1260.0))
-    .font(crate::icons::ICON_FONT_BYTES)
-    .font(crate::typography::PLEX_SANS_CONDENSED_MEDIUM_BYTES)
-    .font(crate::typography::PLEX_SANS_CONDENSED_SEMIBOLD_BYTES)
-    .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
-    .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
     .run_with(|| (EchoGallery::new(), iced::Task::none()))
 }
 
@@ -1715,6 +1675,7 @@ impl SaturatorGallery {
 }
 
 pub fn run_saturator() -> iced::Result {
+    crate::typography::load_bundled_fonts();
     iced::application(
         "Saturator device gallery",
         |_: &mut SaturatorGallery, _: Message| {},
@@ -1723,11 +1684,6 @@ pub fn run_saturator() -> iced::Result {
     .theme(|_| th::vibez_theme())
     .antialiasing(true)
     .window_size((1900.0, 1500.0))
-    .font(crate::icons::ICON_FONT_BYTES)
-    .font(crate::typography::PLEX_SANS_CONDENSED_MEDIUM_BYTES)
-    .font(crate::typography::PLEX_SANS_CONDENSED_SEMIBOLD_BYTES)
-    .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
-    .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
     .run_with(|| (SaturatorGallery::new(), iced::Task::none()))
 }
 
@@ -1903,6 +1859,7 @@ impl LimiterGallery {
 }
 
 pub fn run_limiter() -> iced::Result {
+    crate::typography::load_bundled_fonts();
     iced::application(
         "Limiter device gallery",
         |_: &mut LimiterGallery, _: Message| {},
@@ -1911,11 +1868,6 @@ pub fn run_limiter() -> iced::Result {
     .theme(|_| th::vibez_theme())
     .antialiasing(true)
     .window_size((1900.0, 1500.0))
-    .font(crate::icons::ICON_FONT_BYTES)
-    .font(crate::typography::PLEX_SANS_CONDENSED_MEDIUM_BYTES)
-    .font(crate::typography::PLEX_SANS_CONDENSED_SEMIBOLD_BYTES)
-    .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
-    .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
     .run_with(|| (LimiterGallery::new(), iced::Task::none()))
 }
 
@@ -2038,6 +1990,7 @@ impl ReverbGallery {
 }
 
 pub fn run_reverb() -> iced::Result {
+    crate::typography::load_bundled_fonts();
     iced::application(
         "Reverb device gallery",
         |_: &mut ReverbGallery, _: Message| {},
@@ -2046,11 +1999,6 @@ pub fn run_reverb() -> iced::Result {
     .theme(|_| th::vibez_theme())
     .antialiasing(true)
     .window_size((1900.0, 1260.0))
-    .font(crate::icons::ICON_FONT_BYTES)
-    .font(crate::typography::PLEX_SANS_CONDENSED_MEDIUM_BYTES)
-    .font(crate::typography::PLEX_SANS_CONDENSED_SEMIBOLD_BYTES)
-    .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
-    .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
     .run_with(|| (ReverbGallery::new(), iced::Task::none()))
 }
 
@@ -2172,6 +2120,7 @@ impl AutoPanGallery {
 }
 
 pub fn run_auto_pan() -> iced::Result {
+    crate::typography::load_bundled_fonts();
     iced::application(
         "Auto-Pan device gallery",
         |_: &mut AutoPanGallery, _: Message| {},
@@ -2180,11 +2129,6 @@ pub fn run_auto_pan() -> iced::Result {
     .theme(|_| th::vibez_theme())
     .antialiasing(true)
     .window_size((1900.0, 1260.0))
-    .font(crate::icons::ICON_FONT_BYTES)
-    .font(crate::typography::PLEX_SANS_CONDENSED_MEDIUM_BYTES)
-    .font(crate::typography::PLEX_SANS_CONDENSED_SEMIBOLD_BYTES)
-    .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
-    .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
     .run_with(|| (AutoPanGallery::new(), iced::Task::none()))
 }
 
@@ -2293,6 +2237,7 @@ impl PhaserGallery {
 }
 
 pub fn run_phaser() -> iced::Result {
+    crate::typography::load_bundled_fonts();
     iced::application(
         "Phaser device gallery",
         |_: &mut PhaserGallery, _: Message| {},
@@ -2301,11 +2246,6 @@ pub fn run_phaser() -> iced::Result {
     .theme(|_| th::vibez_theme())
     .antialiasing(true)
     .window_size((1900.0, 1260.0))
-    .font(crate::icons::ICON_FONT_BYTES)
-    .font(crate::typography::PLEX_SANS_CONDENSED_MEDIUM_BYTES)
-    .font(crate::typography::PLEX_SANS_CONDENSED_SEMIBOLD_BYTES)
-    .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
-    .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
     .run_with(|| (PhaserGallery::new(), iced::Task::none()))
 }
 
@@ -2456,6 +2396,7 @@ impl SynthGallery {
 }
 
 pub fn run_synth() -> iced::Result {
+    crate::typography::load_bundled_fonts();
     iced::application(
         "Subtractive Synth device gallery",
         |_: &mut SynthGallery, _: Message| {},
@@ -2464,11 +2405,6 @@ pub fn run_synth() -> iced::Result {
     .theme(|_| th::vibez_theme())
     .antialiasing(true)
     .window_size((1900.0, 1400.0))
-    .font(crate::icons::ICON_FONT_BYTES)
-    .font(crate::typography::PLEX_SANS_CONDENSED_MEDIUM_BYTES)
-    .font(crate::typography::PLEX_SANS_CONDENSED_SEMIBOLD_BYTES)
-    .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
-    .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
     .run_with(|| (SynthGallery::new(), iced::Task::none()))
 }
 
@@ -2662,6 +2598,7 @@ impl WavetableGallery {
 }
 
 pub fn run_wavetable() -> iced::Result {
+    crate::typography::load_bundled_fonts();
     iced::application(
         "Wavetable Synth device gallery",
         |_: &mut WavetableGallery, _: Message| {},
@@ -2670,11 +2607,6 @@ pub fn run_wavetable() -> iced::Result {
     .theme(|_| th::vibez_theme())
     .antialiasing(true)
     .window_size((1900.0, 1500.0))
-    .font(crate::icons::ICON_FONT_BYTES)
-    .font(crate::typography::PLEX_SANS_CONDENSED_MEDIUM_BYTES)
-    .font(crate::typography::PLEX_SANS_CONDENSED_SEMIBOLD_BYTES)
-    .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
-    .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
     .run_with(|| (WavetableGallery::new(), iced::Task::none()))
 }
 
@@ -2836,6 +2768,7 @@ impl SamplerGallery {
 }
 
 pub fn run_sampler() -> iced::Result {
+    crate::typography::load_bundled_fonts();
     iced::application(
         "Sampler device gallery",
         |_: &mut SamplerGallery, _: Message| {},
@@ -2844,11 +2777,6 @@ pub fn run_sampler() -> iced::Result {
     .theme(|_| th::vibez_theme())
     .antialiasing(true)
     .window_size((1900.0, 1500.0))
-    .font(crate::icons::ICON_FONT_BYTES)
-    .font(crate::typography::PLEX_SANS_CONDENSED_MEDIUM_BYTES)
-    .font(crate::typography::PLEX_SANS_CONDENSED_SEMIBOLD_BYTES)
-    .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
-    .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
     .run_with(|| (SamplerGallery::new(), iced::Task::none()))
 }
 
@@ -3066,6 +2994,7 @@ impl DrumRackGallery {
 }
 
 pub fn run_drum_rack() -> iced::Result {
+    crate::typography::load_bundled_fonts();
     iced::application(
         "Drum Rack device gallery",
         |_: &mut DrumRackGallery, _: Message| {},
@@ -3077,11 +3006,6 @@ pub fn run_drum_rack() -> iced::Result {
     .subscription(|_| {
         iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::Tick)
     })
-    .font(crate::icons::ICON_FONT_BYTES)
-    .font(crate::typography::PLEX_SANS_CONDENSED_MEDIUM_BYTES)
-    .font(crate::typography::PLEX_SANS_CONDENSED_SEMIBOLD_BYTES)
-    .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
-    .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
     .run_with(|| (DrumRackGallery::new(), iced::Task::none()))
 }
 
@@ -3247,6 +3171,7 @@ impl FmGallery {
 }
 
 pub fn run_fm() -> iced::Result {
+    crate::typography::load_bundled_fonts();
     iced::application(
         "FM Synth device gallery",
         |_: &mut FmGallery, _: Message| {},
@@ -3255,10 +3180,5 @@ pub fn run_fm() -> iced::Result {
     .theme(|_| th::vibez_theme())
     .antialiasing(true)
     .window_size((1900.0, 1500.0))
-    .font(crate::icons::ICON_FONT_BYTES)
-    .font(crate::typography::PLEX_SANS_CONDENSED_MEDIUM_BYTES)
-    .font(crate::typography::PLEX_SANS_CONDENSED_SEMIBOLD_BYTES)
-    .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
-    .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
     .run_with(|| (FmGallery::new(), iced::Task::none()))
 }

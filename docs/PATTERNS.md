@@ -504,9 +504,15 @@ NSEvent's mouse location on macOS), and `DropTargetProbe`, a widget
 under the pointer, allowing for scrolling. `BrowserState::pointer_messages`
 then sends the hover message the widget itself would have sent. A new kind of
 target adds a `PointerTarget` variant, tags its widget, lists it in
-`pointer_targets`, and maps to its hover. Device cards and Drum Rack pads are
-not tagged, so a poll that finds no tagged target leaves the drop free, and
-the card under the released pointer takes it. Wayland has no `PointerWindow`,
+`pointer_targets`, and maps to its hover. Empty space that takes a drop as an
+existing target does wears that target's tag instead. The space below
+Arrange's and a Section's tracks is the new-track row's, and the launcher's
+space beside and below its new-track column is that column's slot for the row
+there, or for the last row shown. The strip under the track headers beside
+the new-track row and below it is a kind of its own, `NewTrackGutter`, since
+it lands at the lane's left edge wherever the pointer is. Device cards and
+Drum Rack pads are not tagged, so a poll that finds no tagged target leaves
+the drop free, and the card under the released pointer takes it. Wayland has no `PointerWindow`,
 since a client cannot ask the compositor where the pointer is, so a drop there
 waits for the released pointer too.
 

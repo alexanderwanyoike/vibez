@@ -125,6 +125,7 @@ fn every_target_has_its_own_id() {
     let ids = [
         PointerTarget::Lane(track_id),
         PointerTarget::NewTrackRow,
+        PointerTarget::NewTrackGutter,
         PointerTarget::NewTrackSlot { row: 0 },
         PointerTarget::NewTrackSlot { row: 1 },
         PointerTarget::ClipSlot { track_id, row: 0 },

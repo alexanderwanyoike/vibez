@@ -838,13 +838,15 @@ impl App {
                     compact,
                 ));
             }
-            workspace = workspace.push(
-                crate::widgets::quiet_scroll::vertical(
-                    container(grid).padding([0, 12]).width(Length::Fill),
-                )
-                .width(Length::Fill)
-                .height(Length::Fill),
-            );
+            let below: Element<'_, Message> = if new_track_column {
+                super::views_clip_launcher_new_track::below_new_track_column(first_row)
+            } else {
+                iced::widget::Space::new(Length::Fill, Length::Fill).into()
+            };
+            workspace = workspace.push(crate::widgets::quiet_scroll::vertical_above(
+                container(grid).padding([0, 12]).width(Length::Fill),
+                below,
+            ));
         }
         let footer = row![
             text(if keyboard_active {
@@ -918,13 +920,14 @@ impl App {
         let active = self.state.perform.capture.is_active();
         button(
             row![
-                text(if active {
-                    "● CAPTURING"
-                } else {
-                    "○ CAPTURE"
-                })
-                .font(PERFORM_LABEL)
-                .size(10),
+                row![
+                    icons::icon(icons::CIRCLE).size(10),
+                    text(if active { "CAPTURING" } else { "CAPTURE" })
+                        .font(PERFORM_LABEL)
+                        .size(10),
+                ]
+                .spacing(4)
+                .align_y(iced::Alignment::Center),
                 text("F5").font(PERFORM_TECH).size(9),
             ]
             .spacing(8)
