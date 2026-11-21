@@ -114,7 +114,9 @@ impl App {
                 .wrapping(text::Wrapping::None)
         };
         let status = row![
-            line(target, PERFORM_TECH).color(th::text_dim()),
+            line(target, PERFORM_TECH)
+                .shaping(crate::typography::USER_TEXT_SHAPING)
+                .color(th::text_dim()),
             line(phase, PERFORM_LABEL).color(state_color),
             line(capture_phase, PERFORM_LABEL).color(if capturing {
                 th::danger()

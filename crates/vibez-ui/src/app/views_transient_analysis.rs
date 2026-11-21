@@ -127,7 +127,10 @@ impl App {
                 ]
                 .spacing(8)
                 .align_y(iced::Alignment::Center),
-                text(clip_name).size(11).color(th::text_dim()),
+                text(clip_name)
+                    .shaping(crate::typography::USER_TEXT_SHAPING)
+                    .size(11)
+                    .color(th::text_dim()),
                 sensitivity_control,
                 text("Analysis replaces detected markers. Manual markers stay in place.")
                     .size(10)

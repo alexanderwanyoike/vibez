@@ -68,6 +68,11 @@ fn label(
         } else {
             PERFORM_LABEL
         },
+        shaping: if technical {
+            iced::widget::text::Shaping::Basic
+        } else {
+            crate::typography::USER_TEXT_SHAPING
+        },
         ..Default::default()
     });
 }

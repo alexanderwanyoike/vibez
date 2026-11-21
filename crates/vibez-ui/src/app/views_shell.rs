@@ -302,6 +302,7 @@ impl App {
         };
         let mut content = row![
             text(&self.state.status_text)
+                .shaping(crate::typography::USER_TEXT_SHAPING)
                 .size(STATUS_TEXT_SIZE)
                 .color(th::text_dim()),
             horizontal_space(),

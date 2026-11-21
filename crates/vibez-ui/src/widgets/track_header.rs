@@ -122,6 +122,7 @@ where
     T: ToString + PartialEq + Clone + 'a,
 {
     pick_list(options, Some(selected), on_selected)
+        .text_shaping(crate::typography::USER_TEXT_SHAPING)
         .width(Length::Fixed(width))
         .padding([3, 5])
         .text_size(9)
@@ -196,19 +197,25 @@ pub fn view_editable_channel_name<'a>(
             .width(Length::Fill)
             .into()
     } else {
-        button(text(&track.name).size(size).font(font).color(color))
-            .on_press(Message::View(ViewMsg::StartEditingTrackName {
-                track_id: track.id,
-                name: track.name.clone(),
-            }))
-            .padding(0)
-            .style(|_theme: &Theme, _status| button::Style {
-                background: None,
-                text_color: th::text(),
-                border: iced::Border::default(),
-                ..Default::default()
-            })
-            .into()
+        button(
+            text(&track.name)
+                .shaping(crate::typography::USER_TEXT_SHAPING)
+                .size(size)
+                .font(font)
+                .color(color),
+        )
+        .on_press(Message::View(ViewMsg::StartEditingTrackName {
+            track_id: track.id,
+            name: track.name.clone(),
+        }))
+        .padding(0)
+        .style(|_theme: &Theme, _status| button::Style {
+            background: None,
+            text_color: th::text(),
+            border: iced::Border::default(),
+            ..Default::default()
+        })
+        .into()
     }
 }
 

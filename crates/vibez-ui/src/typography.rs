@@ -7,7 +7,9 @@ use iced::{font::Weight, Font};
 #[cfg(test)]
 mod coverage_tests;
 mod fit;
+mod user_text;
 pub use fit::{fit_text, fit_text_middle};
+pub use user_text::USER_TEXT_SHAPING;
 
 const PLEX_SANS_CONDENSED_MEDIUM_BYTES: &[u8] =
     include_bytes!("../../../assets/fonts/ibm-plex/IBMPlexSansCondensed-Medium.ttf");
@@ -125,6 +127,22 @@ fn draws(face: &iced::advanced::graphics::text::cosmic_text::Font, c: char) -> b
     face.rustybuzz().glyph_index(c).is_some()
 }
 
+/// Whether `face` is one the app bundles. The app's faces load from memory,
+/// the system's from files.
+#[cfg(test)]
+fn is_bundled(face: &fontdb::FaceInfo) -> bool {
+    matches!(face.source, fontdb::Source::Binary(_))
+}
+
+/// Whether a face the app does not bundle has a glyph for every char of
+/// `content`.
+#[cfg(test)]
+fn a_system_face_covers(content: &str) -> bool {
+    loaded_faces(|face| !is_bundled(face))
+        .iter()
+        .any(|face| content.chars().all(|c| draws(face, c)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -184,14 +202,6 @@ mod tests {
             .collect();
         faces.dedup();
         faces
-    }
-
-    /// Whether a face the app does not bundle has a glyph for every char of
-    /// `content`. The app's faces load from memory, the system's from files.
-    fn a_system_face_covers(content: &str) -> bool {
-        loaded_faces(|face| !matches!(face.source, fontdb::Source::Binary(_)))
-            .iter()
-            .any(|face| content.chars().all(|c| draws(face, c)))
     }
 
     #[test]

@@ -287,6 +287,7 @@ impl App {
             let tab_bar = row![
                 crate::widgets::segment_group::switch(tabs),
                 text(&track.name)
+                    .shaping(crate::typography::USER_TEXT_SHAPING)
                     .size(12)
                     .font(crate::typography::TRACK_TITLE)
                     .color(th::text()),
@@ -476,7 +477,10 @@ impl App {
             let clip_id = clip.id;
             let clip_loop = clip.loop_enabled;
             let groove_grid = clip.groove_grid;
-            let clip_name = text(clip.name.clone()).size(11).color(th::text());
+            let clip_name = text(clip.name.clone())
+                .shaping(crate::typography::USER_TEXT_SHAPING)
+                .size(11)
+                .color(th::text());
             let pos_label = text(format!("Pos: {:.1}", clip.position_beats))
                 .size(10)
                 .color(th::text_dim());

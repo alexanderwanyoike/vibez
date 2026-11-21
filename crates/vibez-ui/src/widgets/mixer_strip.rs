@@ -358,6 +358,7 @@ fn channel_name<'a>(
     };
     let name = if is_master {
         text(&track.name)
+            .shaping(crate::typography::USER_TEXT_SHAPING)
             .size(style.size)
             .font(style.font)
             .color(style.color)
@@ -429,6 +430,7 @@ fn view_sends<'a>(
                         10.0,
                         iced::Font::DEFAULT
                     ))
+                    .shaping(crate::typography::USER_TEXT_SHAPING)
                     .size(10)
                     .color(th::text_dim())
                     .wrapping(text::Wrapping::None)

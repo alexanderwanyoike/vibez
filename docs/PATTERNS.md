@@ -516,6 +516,15 @@ the drop free, and the card under the released pointer takes it. Wayland has no 
 since a client cannot ask the compositor where the pointer is, so a drop there
 waits for the released pointer too.
 
+## 10. Text that shows a producer's names
+
+Track, Clip and Section names can be in any script. iced 0.13 shapes text
+with `Shaping::Basic` unless told otherwise, and basic shaping draws a
+character the font lacks as an empty box, so any `text`, canvas `Text` or
+`pick_list` that shows a name, alone or inside a longer line, sets its
+shaping to `typography::USER_TEXT_SHAPING`. iced has no app-wide default, so
+each such site opts in. Fixed interface strings keep the default.
+
 ---
 
 ## Trace 1: a fade drag, from pixel to speaker

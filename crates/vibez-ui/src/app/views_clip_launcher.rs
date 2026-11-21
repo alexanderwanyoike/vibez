@@ -318,6 +318,7 @@ impl App {
         ];
         super::views_perform_header::RecordGroup {
             status: text(status)
+                .shaping(crate::typography::USER_TEXT_SHAPING)
                 .font(PERFORM_TECH)
                 .size(9)
                 .wrapping(iced::widget::text::Wrapping::None)
@@ -346,6 +347,7 @@ impl App {
         row![
             container(
                 text(clip.name())
+                    .shaping(crate::typography::USER_TEXT_SHAPING)
                     .size(10)
                     .color(th::text())
                     .wrapping(iced::widget::text::Wrapping::None),

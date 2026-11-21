@@ -225,7 +225,10 @@ impl App {
                                     background: Some(th::danger().into()),
                                     ..Default::default()
                                 }),
-                            text(label).size(11).color(th::text())
+                            text(label)
+                                .shaping(crate::typography::USER_TEXT_SHAPING)
+                                .size(11)
+                                .color(th::text())
                         ]
                         .spacing(8)
                         .align_y(iced::Alignment::Center),
@@ -270,6 +273,7 @@ impl App {
         let card = container(
             column![
                 text(format!("Delete {track_name}?"))
+                    .shaping(crate::typography::USER_TEXT_SHAPING)
                     .font(crate::typography::PERFORM_DISPLAY)
                     .size(18)
                     .color(th::text()),
