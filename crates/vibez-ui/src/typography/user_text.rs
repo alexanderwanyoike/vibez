@@ -13,7 +13,7 @@ pub const USER_TEXT_SHAPING: Shaping = Shaping::Advanced;
 
 #[cfg(test)]
 mod tests {
-    use iced::advanced::graphics::text::{cosmic_text, font_system, Paragraph};
+    use iced::advanced::graphics::text::{font_system, Paragraph};
     use iced::advanced::text::Paragraph as _;
     use iced::alignment::{Horizontal, Vertical};
     use iced::widget::text::Wrapping;
@@ -21,33 +21,9 @@ mod tests {
 
     use super::USER_TEXT_SHAPING;
     use crate::typography::{
-        CLIP_TITLE, PERFORM_DISPLAY, PERFORM_TECH, PLEX_MONO_MEDIUM_BYTES,
-        PLEX_MONO_SEMIBOLD_BYTES, PLEX_SANS_CONDENSED_MEDIUM_BYTES,
-        PLEX_SANS_CONDENSED_SEMIBOLD_BYTES, TRACK_TITLE,
+        a_system_face_covers, is_bundled, load_bundled_fonts, CLIP_TITLE, PERFORM_DISPLAY,
+        PERFORM_TECH, TRACK_TITLE,
     };
-
-    /// Loads the faces the app bundles into the renderer's font system, as
-    /// the app does before its window opens, so names are shaped among the
-    /// same faces they are drawn with.
-    fn load_bundled_faces() {
-        static LOADED: std::sync::Once = std::sync::Once::new();
-        LOADED.call_once(|| {
-            let mut system = font_system().write().expect("font system lock");
-            for bytes in [
-                PLEX_SANS_CONDENSED_MEDIUM_BYTES,
-                PLEX_SANS_CONDENSED_SEMIBOLD_BYTES,
-                PLEX_MONO_MEDIUM_BYTES,
-                PLEX_MONO_SEMIBOLD_BYTES,
-            ] {
-                system.load_font(std::borrow::Cow::Borrowed(bytes));
-            }
-        });
-    }
-
-    /// Whether `face` was loaded from the app's own bytes, not a system file.
-    fn is_bundled(face: &cosmic_text::fontdb::FaceInfo) -> bool {
-        matches!(face.source, cosmic_text::fontdb::Source::Binary(_))
-    }
 
     /// Glyph id and whether the face is bundled with the app, for every
     /// glyph of `name` laid out the way a name is drawn. Glyph 0 is the empty
@@ -77,27 +53,9 @@ mod tests {
             .collect()
     }
 
-    /// Whether a system face has a glyph for every char of `name`.
-    fn a_system_face_covers(name: &str) -> bool {
-        let mut system = font_system().write().expect("font system lock");
-        let raw = system.raw();
-        let ids: Vec<_> = raw
-            .db()
-            .faces()
-            .filter(|face| !is_bundled(face))
-            .map(|face| face.id)
-            .collect();
-        ids.into_iter()
-            .filter_map(|id| raw.get_font(id))
-            .any(|face| {
-                name.chars()
-                    .all(|c| face.rustybuzz().glyph_index(c).is_some())
-            })
-    }
-
     #[test]
     fn japanese_and_chinese_names_draw_in_a_system_face() {
-        load_bundled_faces();
+        load_bundled_fonts();
         let mut checked = 0;
         for name in ["ドラム", "贝斯线"] {
             if !a_system_face_covers(name) {
