@@ -19,12 +19,14 @@ fn routing(track: TrackId, effect: Option<EffectId>) -> Box<crate::routing::Prep
                     inactive_inputs: vec![],
                 })
                 .collect(),
+            midi_from: None,
         },
         RoutingChannel {
             id: TrackId::MASTER,
             is_bus: true,
             sends: vec![],
             effects: vec![],
+            midi_from: None,
         },
     ];
     crate::routing::PreparedRouting::prepare(&channels, 32).unwrap()

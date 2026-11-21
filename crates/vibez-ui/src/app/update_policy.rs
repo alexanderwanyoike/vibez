@@ -13,6 +13,23 @@ pub(super) fn apply_project_track_deletion_policy(message: Message, confirm: boo
     }
 }
 
+/// Whether `message` drops the Browser drag in flight on a target, as a
+/// button release over it does; an empty audio Clip slot's plain click sends
+/// one of these too.
+pub(super) fn drops_dragged_media(message: &Message) -> bool {
+    matches!(
+        message,
+        Message::DropSampleOnArrangement { .. }
+            | Message::DropSampleOnEmptyArrangement
+            | Message::DropSampleOnDrumPad { .. }
+            | Message::DropSampleOnSampler { .. }
+            | Message::DropSampleOnDrumRack { .. }
+            | Message::DropSampleOnDevicePanel { .. }
+            | Message::ImportLauncherClip { .. }
+            | Message::ImportLauncherClipOnNewTrack { .. }
+    )
+}
+
 /// Whether `message` may take an instrument away, so the undo step before it
 /// records the live plugin state.
 pub(super) fn may_remove_an_instrument(message: &Message) -> bool {

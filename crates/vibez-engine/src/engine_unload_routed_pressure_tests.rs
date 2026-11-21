@@ -170,6 +170,7 @@ fn assert_combined_routed_unload_pressure(delayed_minimum_credits: bool) {
                 } else {
                     vec![]
                 },
+                midi_from: None,
             })
             .collect();
         channels.push(RoutingChannel {
@@ -177,6 +178,7 @@ fn assert_combined_routed_unload_pressure(delayed_minimum_credits: bool) {
             is_bus: true,
             effects: vec![],
             sends: vec![],
+            midi_from: None,
         });
         let reports = [(
             RoutingNode {

@@ -19,6 +19,7 @@ fn channel(id: TrackId, effects: &[EffectId], bus: bool) -> RoutingChannel {
             })
             .collect(),
         sends: vec![],
+        midi_from: None,
     }
 }
 

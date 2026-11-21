@@ -133,6 +133,7 @@ mod export_tests {
             }),
             automation: Vec::new(),
             sends: Vec::new(),
+            midi_from: None,
         };
         let request = vibez_engine::render::BounceRequest {
             tracks: vec![track],
@@ -200,6 +201,7 @@ mod export_tests {
             plugin_instrument: None,
             automation: vec![],
             sends: vec![],
+            midi_from: None,
         };
         let mut receiver = channel(bass, "Bass");
         receiver.effects.push(EffectInfo {

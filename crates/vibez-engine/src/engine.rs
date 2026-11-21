@@ -140,6 +140,9 @@ pub struct AudioEngine {
     /// Vibez extends MPC Note Repeat to stopped transport. The first held pad
     /// establishes this shared musical downbeat until the last repeat stops.
     stopped_note_repeat_anchor: Option<u64>,
+    /// Whether the transport was playing at the last callback, so any stop,
+    /// commanded or not, releases routed notes once.
+    transport_was_playing: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -256,6 +259,7 @@ impl AudioEngine {
                     is_bus: true,
                     effects: vec![],
                     sends: vec![],
+                    midi_from: None,
                 }],
                 crate::routing::MAX_BLOCK_FRAMES,
             )
@@ -324,6 +328,7 @@ impl AudioEngine {
             clip_record: None,
             clock_domain: ClockDomain::Arrange,
             stopped_note_repeat_anchor: None,
+            transport_was_playing: false,
         };
 
         (engine, cmd_tx, event_rx)
@@ -395,6 +400,7 @@ impl AudioEngine {
 
         // ---- 1. Drain commands ------------------------------------------
         self.drain_commands();
+        self.release_routed_notes_after_stop();
         self.rendered_callback_frames = 0;
         self.begin_device_reconfiguration();
         self.validate_compensation();
@@ -407,6 +413,7 @@ impl AudioEngine {
             capture.samples.fill(0.0);
         }
 
+        self.sequence_midi_audition(frames);
         self.process_multitrack(
             output,
             frames,
@@ -435,6 +442,9 @@ impl AudioEngine {
             self.sample_rate,
             &mut self.event_tx,
         );
+        self.audition
+            .midi
+            .render_preview_voice(output, frames, channels, self.audition.gain);
 
         // ---- 5. Advance transport and send events -----------------------
         let was_playing = self.transport.is_playing();
@@ -819,6 +829,18 @@ mod tests;
 mod stuck_note_tests;
 
 #[cfg(test)]
+#[path = "engine_midi_from_tests.rs"]
+mod midi_from_tests;
+
+#[cfg(test)]
+#[path = "engine_midi_audition_tests.rs"]
+mod midi_audition_tests;
+
+#[cfg(test)]
+#[path = "engine_note_listener_test_support.rs"]
+mod note_listener_test_support;
+
+#[cfg(test)]
 #[path = "engine_transport_ring_tests.rs"]
 mod transport_ring_tests;
 
@@ -868,6 +890,10 @@ mod clip_launcher;
 #[path = "engine_clip_launcher_tests.rs"]
 mod clip_launcher_tests;
 
+#[cfg(test)]
+#[path = "engine_clip_device_clock_tests.rs"]
+mod clip_device_clock_tests;
+
 #[path = "engine_graph_layout.rs"]
 mod graph_layout;
 
@@ -876,6 +902,12 @@ mod processing;
 
 #[path = "engine_graph.rs"]
 mod graph_render;
+
+#[path = "engine_live_note_clock.rs"]
+mod live_note_clock;
+
+#[path = "engine_note_routing.rs"]
+mod note_routing;
 
 #[cfg(test)]
 #[path = "engine_compensation_tests.rs"]
@@ -1150,6 +1182,9 @@ mod unload_routed_pressure_tests;
 #[path = "engine_section_activation_pressure_tests.rs"]
 mod section_activation_pressure_tests;
 
+#[cfg(test)]
+#[path = "engine_clip_record_hold_tests.rs"]
+mod clip_record_hold_tests;
 #[cfg(test)]
 #[path = "engine_clip_record_pressure_tests.rs"]
 mod clip_record_pressure_tests;

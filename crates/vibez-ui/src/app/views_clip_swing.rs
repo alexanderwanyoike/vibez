@@ -158,7 +158,10 @@ impl App {
             column![
                 row![
                     text("TRACK SWING").size(7).color(th::text_dim()),
-                    text(track.name.to_uppercase()).size(7).color(track_color),
+                    text(track.name.to_uppercase())
+                        .shaping(crate::typography::USER_TEXT_SHAPING)
+                        .size(7)
+                        .color(track_color),
                 ]
                 .spacing(5),
                 row![value, follow]

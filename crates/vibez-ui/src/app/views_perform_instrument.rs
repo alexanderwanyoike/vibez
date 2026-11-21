@@ -239,6 +239,7 @@ impl App {
             Message::Perform(PerformMsg::SelectInstrumentTarget(target.track_id))
         })
         .placeholder("CHOOSE MIDI TARGET")
+        .text_shaping(crate::typography::USER_TEXT_SHAPING)
         .width(Length::Fill)
         .padding([5, 7])
         .text_size(9)

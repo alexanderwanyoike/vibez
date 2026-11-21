@@ -7,7 +7,7 @@ use std::sync::Arc;
 use iced::Task;
 
 use crate::domains::arrangement::ArrangementMsg;
-use crate::domains::browser::BrowserMsg;
+use crate::domains::browser::{BrowserMsg, DragMedia};
 use crate::domains::device_panel_drop::DevicePanelDrop;
 use crate::domains::piano_roll::PianoRollMsg;
 use crate::domains::view::ViewMsg;
@@ -327,6 +327,9 @@ impl App {
             self.state.status_text = "Drag cancelled".into();
             return Task::none();
         }
+        if DragMedia::of(&source) == DragMedia::Midi {
+            return self.select_midi_file(source);
+        }
         let changed = self.state.browser.select_source(source.clone());
         if changed {
             if let MediaSourceRef::LocalFile { path } = source.clone() {
@@ -349,6 +352,9 @@ impl App {
     }
 
     pub(super) fn on_preview_local_entry(&mut self, source: MediaSourceRef) -> Task<Message> {
+        if DragMedia::of(&source) == DragMedia::Midi {
+            return self.preview_midi_file(source);
+        }
         self.state.browser.select_source(source.clone());
         if let Some(raw) = self.state.browser.waveform_for_source(&source) {
             return self.play_browser_mode(source, raw);
@@ -408,6 +414,9 @@ impl App {
         let Some(source) = self.state.browser.selected_source.clone() else {
             return Task::none();
         };
+        if self.audition_read_midi_file(&source) {
+            return Task::none();
+        }
         let Some(raw) = self.state.browser.waveform_audio.clone() else {
             self.state.status_text = "Select a source to audition".into();
             return Task::none();
@@ -423,6 +432,10 @@ impl App {
             return Task::none();
         }
         if self.state.view.drum_rack_slice_dialog.take().is_some() {
+            return Task::none();
+        }
+        if self.state.view.midi_file_layout_choice.is_some() {
+            self.on_choose_midi_file_layout(None);
             return Task::none();
         }
         if !self
@@ -508,10 +521,16 @@ impl App {
         };
         self.state.browser.cancel_media_drag();
         let position_samples = self.state.transport.beats_to_samples(beat);
-        self.dispatch_drop_for_target(
-            source,
-            BrowserImportTarget::ArrangementNewTrackAt { position_samples },
-        )
+        let target = match self.active_timeline_location() {
+            vibez_project::TimelineLocation::Section(section_id) => {
+                BrowserImportTarget::SectionNewTrackAt {
+                    section_id,
+                    position_samples,
+                }
+            }
+            _ => BrowserImportTarget::ArrangementNewTrackAt { position_samples },
+        };
+        self.dispatch_drop_for_target(source, target)
     }
 
     pub(super) fn on_drop_sample_on_sampler(&mut self, track_id: TrackId) -> Task<Message> {

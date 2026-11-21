@@ -225,6 +225,15 @@ impl App {
         if self.reject_invalid_send_edit(&message) {
             return Task::none();
         }
+        // A desktop drag gets no button events, so a click-made drop while one
+        // seems to hover means winit reported a hover after the drag ended.
+        if super::update_policy::drops_dragged_media(&message)
+            && self.state.browser.drags_from_desktop()
+        {
+            self.state.browser.cancel_media_drag();
+            self.state.status_text = "Drag cancelled".into();
+            return Task::none();
+        }
         let owns_project_transaction = self.begin_project_track_deletion_transaction(&message);
         self.invalidate_device_preset_load(&message);
         let deferred_arrangement_project_edit = matches!(
@@ -706,6 +715,18 @@ impl App {
                     "Select a sample in the Browser, then add it to a Clip slot".into();
                 self.state.browser.open = true;
             }
+            Message::ImportLauncherClipOnNewTrack { row } => {
+                let source = self.state.browser.drag_source.take();
+                self.state.browser.cancel_media_drag();
+                if let Some(source) = source
+                    .filter(|_| self.state.perform.layout == vibez_project::PerformLayout::Clips)
+                {
+                    return self.dispatch_drop_for_target(
+                        source,
+                        crate::message::BrowserImportTarget::LauncherNewTrackAt { row },
+                    );
+                }
+            }
             Message::NewProject => {
                 return self.route_new_project();
             }
@@ -788,12 +809,15 @@ impl App {
             | Message::EscapePressed
             | Message::DropSampleOnArrangement { .. }
             | Message::DropSampleOnEmptyArrangement
+            | Message::MidiFileRead { .. }
+            | Message::ChooseMidiFileLayout(..)
             | Message::DropSampleOnDrumPad { .. }
             | Message::DropSampleOnSampler { .. }
             | Message::DropSampleOnDrumRack { .. }
             | Message::DropSampleOnDevicePanel { .. }
             | Message::LocalSamplePreviewReady(..)
             | Message::BrowserWaveformReady(..)
+            | Message::BrowserMidiPreviewReady { .. }
             | Message::BrowserAuditionReady { .. }
             | Message::ImportSelectedBrowserSampleToArrangement
             | Message::SelectAdjacentBrowserResult(..)
@@ -919,6 +943,12 @@ impl App {
             Message::Tick => {
                 return self.handle_tick();
             }
+            Message::DesktopPointerWindow { window, scale } => {
+                self.on_desktop_pointer_window(window, scale);
+            }
+            Message::DesktopPointerProbed { x, under } => {
+                return self.on_desktop_pointer_probed(x, under);
+            }
             Message::EngineMetering { peak_l, peak_r } => {
                 self.state.peak_l = peak_l;
                 self.state.peak_r = peak_r;
@@ -947,6 +977,7 @@ impl App {
             Message::SetAudioTrackInputRoute(track_id, route) => {
                 return self.set_audio_track_input_route(track_id, route);
             }
+            Message::SetMidiFrom(track_id, source) => self.set_midi_from(track_id, source),
             Message::SetAudioTrackMonitoring(track_id, monitoring) => {
                 return self.set_audio_track_monitoring(track_id, monitoring);
             }

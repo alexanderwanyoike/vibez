@@ -94,6 +94,7 @@ fn pending_notes_keep_current_first_match_edits_and_clamps_until_fifo_release() 
             is_bus: id.is_master(),
             sends: Vec::new(),
             effects: Vec::new(),
+            midi_from: None,
         })
         .collect();
     commands

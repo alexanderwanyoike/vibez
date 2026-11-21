@@ -90,6 +90,7 @@ fn repeated_small_hints_keep_current_duplicate_lanes_and_live_controls_ahead_of_
         is_bus: id.is_master(),
         sends: vec![],
         effects: vec![],
+        midi_from: None,
     });
     let mut routing = crate::routing::PreparedRouting::prepare(&channels, 64).unwrap();
     routing

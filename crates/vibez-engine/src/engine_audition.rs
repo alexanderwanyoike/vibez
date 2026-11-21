@@ -3,6 +3,8 @@ use std::sync::Arc;
 use rtrb::Producer;
 use vibez_core::audio_buffer::DecodedAudio;
 
+use crate::engine_audition_queue::{take_due, QueuedStart};
+use crate::engine_midi_audition::MidiAudition;
 use crate::events::EngineEvent;
 use crate::transport::Transport;
 
@@ -17,8 +19,9 @@ const AUDITION_FADE_MS: usize = 5;
 pub(super) struct AuditionBus {
     pub(super) active: Option<AuditionVoice>,
     outgoing: [Option<AuditionVoice>; AUDITION_OUTGOING_VOICES],
-    pub(super) queued: Option<QueuedAudition>,
+    pub(super) queued: Option<QueuedStart<QueuedAudition>>,
     pub(super) gain: f32,
+    pub(super) midi: MidiAudition,
 }
 
 pub(super) struct AuditionVoice {
@@ -32,7 +35,6 @@ pub(super) struct AuditionVoice {
 
 pub(super) struct QueuedAudition {
     audio: Arc<DecodedAudio>,
-    frames_until_start: u64,
     looped: bool,
     synchronized: bool,
 }
@@ -44,6 +46,7 @@ impl AuditionBus {
             outgoing: std::array::from_fn(|_| None),
             queued: None,
             gain: 1.0,
+            midi: MidiAudition::new(),
         }
     }
 
@@ -75,12 +78,14 @@ impl AuditionBus {
         synchronized: bool,
     ) {
         self.stop_active(fade_frames);
-        self.queued = Some(QueuedAudition {
-            audio,
+        self.queued = Some(QueuedStart::new(
+            QueuedAudition {
+                audio,
+                looped,
+                synchronized,
+            },
             frames_until_start,
-            looped,
-            synchronized,
-        });
+        ));
     }
 
     /// A synchronized preview may begin while the Project is stopped. When
@@ -93,7 +98,11 @@ impl AuditionBus {
         sample_rate: u32,
         fade_frames: usize,
     ) -> Option<bool> {
-        let active = self.active.as_ref().filter(|voice| voice.synchronized)?;
+        let Some(active) = self.active.as_ref().filter(|voice| voice.synchronized) else {
+            return self
+                .midi
+                .resync_on_transport_start(position, bpm, sample_rate);
+        };
         let audio = Arc::clone(&active.audio);
         let looped = active.looped;
         let frames_until_start = frames_until_audition_boundary(position, bpm, sample_rate, 4);
@@ -146,17 +155,8 @@ impl AuditionBus {
     ) {
         let mut had_voice = self.active.is_some() || self.has_outgoing();
         let mut start_offset = 0;
-        let queued_ready = self.queued.as_ref().is_some_and(|queued| {
-            if !transport.is_playing() {
-                return true;
-            }
-            queued.frames_until_start < frames as u64
-        });
-        if queued_ready {
-            let queued = self.queued.take().expect("queued audition exists");
-            if transport.is_playing() {
-                start_offset = queued.frames_until_start.min(frames as u64) as usize;
-            }
+        if let Some((queued, lead)) = take_due(&mut self.queued, frames, transport.is_playing()) {
+            start_offset = lead;
             self.start(
                 queued.audio,
                 audition_fade_frames(sample_rate),
@@ -165,10 +165,6 @@ impl AuditionBus {
             );
             had_voice = true;
             let _ = event_tx.push(EngineEvent::AuditionStarted);
-        } else if transport.is_playing() {
-            if let Some(queued) = self.queued.as_mut() {
-                queued.frames_until_start = queued.frames_until_start.saturating_sub(frames as u64);
-            }
         }
         let gain = self.gain;
         for slot in self.outgoing.iter_mut() {
@@ -186,7 +182,12 @@ impl AuditionBus {
         if let Some(active) = self.active.as_ref() {
             let _ = event_tx.push(EngineEvent::AuditionPosition(active.position));
         }
-        if had_voice && self.active.is_none() && !self.has_outgoing() && self.queued.is_none() {
+        if had_voice
+            && self.active.is_none()
+            && !self.has_outgoing()
+            && self.queued.is_none()
+            && !self.midi.is_running()
+        {
             let _ = event_tx.push(EngineEvent::AuditionStopped);
         }
     }
@@ -205,7 +206,12 @@ pub(super) fn next_audition_boundary(position: u64, bpm: f64, sample_rate: u32, 
     (boundary_index * boundary_frames).round() as u64
 }
 
-fn frames_until_audition_boundary(position: u64, bpm: f64, sample_rate: u32, beats: u64) -> u64 {
+pub(crate) fn frames_until_audition_boundary(
+    position: u64,
+    bpm: f64,
+    sample_rate: u32,
+    beats: u64,
+) -> u64 {
     if bpm <= 0.0 || sample_rate == 0 {
         return 0;
     }

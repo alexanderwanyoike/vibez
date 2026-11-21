@@ -23,8 +23,9 @@ use crate::timeline_snap::SnapTargets;
 use crate::widgets::arrange_corner::{arrange_corner, arrangement_size_labels, song_length_label};
 use crate::widgets::quiet_scroll;
 use crate::widgets::timeline::{
-    build_row_spans, ArrangementMinimap, MinimapTrack, RulerWidget, TimeRulerWidget, TimelineClip,
-    TrackClipCanvas, ARRANGE_RULER_HEIGHT, OVERVIEW_HEIGHT, TIME_RULER_HEIGHT,
+    build_row_spans, ArrangementMinimap, LaneGhost, MinimapTrack, NewTrackLane, RulerWidget,
+    TimeRulerWidget, TimelineClip, TrackClipCanvas, ARRANGE_RULER_HEIGHT, OVERVIEW_HEIGHT,
+    TIME_RULER_HEIGHT,
 };
 use crate::widgets::track_header::{
     view_editable_channel_name, view_track_header, with_resize_edge, ChannelNameStyle,
@@ -32,6 +33,11 @@ use crate::widgets::track_header::{
 };
 
 use super::*;
+use crate::domains::browser::DragMedia;
+use crate::domains::drop_ghost::DropGhost;
+
+/// The height of the row where a drop adds a track.
+const NEW_TRACK_ROW_HEIGHT: f32 = 54.0;
 
 /// Expanded return or master automation scrolls inside this cap so the
 /// pinned footer can never squeeze the track list out of the window.
@@ -48,14 +54,24 @@ impl App {
         let timeline = self.state.arrangement.resolve_timeline().editor;
         if self.state.project_tracks.tracks.is_empty() {
             let browser_drag_active = self.state.browser.drag_source.is_some();
+            let ghost = self
+                .state
+                .browser
+                .new_track_drop_ghost(self.state.transport.bpm);
+            // The ghost says where the drop lands, so the zone would only
+            // repeat it.
             let zone = match self.state.browser.drag_target {
-                Some(crate::state::BrowserDropTarget::EmptyArrangement { .. }) => {
+                Some(crate::state::BrowserDropTarget::EmptyArrangement { .. })
+                    if ghost.is_none() =>
+                {
                     self.state.browser.drop_zone()
                 }
                 _ => None,
             };
-            let prompt_text = if zone.is_some() {
+            let prompt_text = if zone.is_some() || ghost.is_some() {
                 ""
+            } else if self.state.browser.drag_media() == Some(DragMedia::Midi) {
+                "Drop for a new MIDI track"
             } else if browser_drag_active {
                 "Drop for a new audio track"
             } else {
@@ -68,15 +84,32 @@ impl App {
             use crate::widgets::drop_highlight::{
                 drop_highlight, CARD_ZONE_INSET, CARD_ZONE_RADIUS,
             };
+            let geometry = self.state.view.viewport.geometry();
+            // The new track takes the top row; its lane starts at the area's
+            // left edge, where the hover measures beats from.
+            let content: Element<'_, Message> = match ghost {
+                Some(ghost) => column![
+                    container(
+                        text(ghost.media.new_track().label())
+                            .size(11)
+                            .color(th::text())
+                    )
+                    .padding([6, 8]),
+                    new_track_lane(&ghost, geometry),
+                ]
+                .into(),
+                None => centered.into(),
+            };
+            let surface = container(content)
+                .width(Length::Fill)
+                .height(Length::FillPortion(5))
+                .style(|_theme: &Theme| container::Style {
+                    background: Some(th::bg_dark().into()),
+                    ..Default::default()
+                })
+                .into();
             let mut area = mouse_area(drop_highlight(
-                container(centered)
-                    .width(Length::Fill)
-                    .height(Length::FillPortion(5))
-                    .style(|_theme: &Theme| container::Style {
-                        background: Some(th::bg_dark().into()),
-                        ..Default::default()
-                    })
-                    .into(),
+                surface,
                 zone,
                 CARD_ZONE_RADIUS,
                 CARD_ZONE_INSET,
@@ -88,7 +121,6 @@ impl App {
             }));
             if browser_drag_active {
                 let grid = self.state.view.arrange_grid;
-                let geometry = self.state.view.viewport.geometry();
                 area = area
                     .on_move(move |point| {
                         let beat =
@@ -97,9 +129,15 @@ impl App {
                             beat: beat.max(0.0),
                         })
                     })
+                    .on_exit(Message::Browser(BrowserMsg::LeaveDragTarget(
+                        crate::state::BrowserDropTarget::EmptyArrangement { beat: 0.0 },
+                    )))
                     .on_release(Message::DropSampleOnEmptyArrangement);
             }
-            return area.into();
+            return super::desktop_pointer::drop_target(
+                area,
+                crate::domains::desktop_pointer::PointerTarget::NewTrackRow,
+            );
         }
 
         let playhead_beats = self.state.transport.position_beats();
@@ -218,20 +256,6 @@ impl App {
             .iter()
             .map(|t| t.id)
             .collect();
-        let browser_drag_duration = self
-            .state
-            .browser
-            .drag_preview_beats(self.state.transport.bpm);
-        let browser_drag_detail = self.state.browser.drag_label.as_ref().map(|label| {
-            let mode = match self.state.browser.audition_mode {
-                crate::state::AuditionMode::Raw => "RAW",
-                crate::state::AuditionMode::Warp => "WARP",
-            };
-            match browser_drag_duration {
-                Some(beats) => format!("{label} · {mode} · {beats:.2} beats"),
-                None => format!("{label} · {mode}"),
-            }
-        });
 
         // Track rows: header widgets + clip canvas
         // Real vertical layout of the column, so a rubber-band drag can map
@@ -313,6 +337,7 @@ impl App {
             );
 
             // Clip canvas for this track
+            let refusal = self.state.browser.lane_refusal(track.kind);
             let mut clip_canvas_widget = TrackClipCanvas::from_track(
                 track,
                 content,
@@ -339,8 +364,6 @@ impl App {
                 timeline.selection_end_beats,
                 timeline.time_selection_track,
                 browser_drag_active,
-                browser_drag_duration,
-                browser_drag_detail.clone(),
             )
             .with_marquee(
                 row_spans.clone(),
@@ -348,18 +371,25 @@ impl App {
             )
             .with_snap_targets(snap_targets.clone())
             .with_clip_drag(timeline.clip_drag.as_ref().map(|drag| drag.preview.clone()))
-            .with_drop_zone(self.state.browser.lane_drop_zone(track.id));
+            .with_drop_zone(self.state.browser.lane_drop_zone(track.id))
+            .with_drop_ghost(
+                self.state
+                    .browser
+                    .lane_drop_ghost(track.id, bpm)
+                    .map(|ghost| LaneGhost::new(&ghost, geometry.pixels_per_beat())),
+            )
+            .with_drop_refusal(refusal.clone());
             if let Some(preview) = self.state.audio_recording.preview_for_track(track.id) {
                 let name = match preview.source {
                     crate::domains::audio_recording::AudioRecordingSource::HardwareInput => {
-                        "● RECORDING INPUT".into()
+                        "RECORDING INPUT".into()
                     }
                     crate::domains::audio_recording::AudioRecordingSource::TrackOutput(source) => {
                         let source_name = self
                             .state
                             .find_track(source)
                             .map_or("MIDI TRACK", |track| track.name.as_str());
-                        format!("● RESAMPLING {source_name}")
+                        format!("RESAMPLING {source_name}")
                     }
                 };
                 clip_canvas_widget =
@@ -383,7 +413,7 @@ impl App {
                     });
             }
             let track_id = track.id;
-            let compatible = !track.kind.is_midi();
+            let compatible = refusal.is_none();
             let grid = self.state.view.arrange_grid;
             let track_geometry = geometry;
             let mut clip_canvas_area = mouse_area(
@@ -406,7 +436,10 @@ impl App {
                     })
                     .on_exit(Message::Browser(BrowserMsg::ClearDragTarget));
             }
-            let clip_canvas: Element<'_, Message> = clip_canvas_area.into();
+            let clip_canvas = super::desktop_pointer::drop_target(
+                clip_canvas_area,
+                crate::domains::desktop_pointer::PointerTarget::Lane(track_id),
+            );
 
             let header =
                 mouse_area(header).on_right_press(Message::View(ViewMsg::ShowContextMenu {
@@ -424,62 +457,8 @@ impl App {
         }
 
         if self.state.browser.drag_source.is_some() {
-            let grid = self.state.view.arrange_grid;
-            let empty_geometry = geometry;
-            let zone = match self.state.browser.drag_target {
-                Some(crate::state::BrowserDropTarget::EmptyArrangement { .. }) => {
-                    self.state.browser.drop_zone()
-                }
-                _ => None,
-            };
-            // Until the drag reaches it, the lane only hints at what it is;
-            // once there, its zone says it.
-            let hint = if zone.is_some() {
-                ""
-            } else {
-                "New audio track"
-            };
-            let header = container(text("+").size(14).color(th::accent()))
-                .width(Length::Fixed(
-                    crate::widgets::track_header::TRACK_HEADER_TOTAL_WIDTH,
-                ))
-                .height(Length::Fixed(54.0))
-                .align_x(iced::alignment::Horizontal::Center)
-                .align_y(iced::alignment::Vertical::Center)
-                .style(|_theme: &Theme| container::Style {
-                    background: Some(th::bg_surface().into()),
-                    border: iced::Border {
-                        color: th::divider(),
-                        width: 1.0,
-                        radius: 0.0.into(),
-                    },
-                    ..Default::default()
-                });
-            use crate::widgets::drop_highlight::{
-                drop_highlight, CARD_ZONE_INSET, CARD_ZONE_RADIUS,
-            };
-            let lane = container(text(hint).size(12).color(th::text_muted()))
-                .width(Length::Fill)
-                .height(Length::Fixed(54.0))
-                .center_x(Length::Fill)
-                .center_y(Length::Fixed(54.0));
-            let zone = mouse_area(drop_highlight(
-                lane.into(),
-                zone,
-                CARD_ZONE_RADIUS,
-                CARD_ZONE_INSET,
-            ))
-            .on_move(move |point| {
-                let beat = grid.snap_beat(
-                    empty_geometry.x_to_beat(point.x),
-                    empty_geometry.pixels_per_beat(),
-                );
-                Message::Browser(BrowserMsg::DragHoverEmptyArrangement {
-                    beat: beat.max(0.0),
-                })
-            })
-            .on_release(Message::DropSampleOnEmptyArrangement);
-            track_rows = track_rows.push(row![header, zone].height(Length::Fixed(54.0)));
+            track_rows =
+                track_rows.push(self.view_new_track_row(TRACK_HEADER_TOTAL_WIDTH, geometry));
         }
 
         // ── Returns + master: automation-only channels ──
@@ -528,7 +507,11 @@ impl App {
             let dot = text("\u{25CF}").size(9).color(chan_color);
             let name_color = if selected { th::text() } else { th::text_dim() };
             let name: Element<'_, Message> = if is_master {
-                text(&channel.name).size(11).color(name_color).into()
+                text(&channel.name)
+                    .shaping(crate::typography::USER_TEXT_SHAPING)
+                    .size(11)
+                    .color(name_color)
+                    .into()
             } else {
                 view_editable_channel_name(
                     channel,
@@ -611,7 +594,10 @@ impl App {
             }
         }
 
-        let track_body = quiet_scroll::vertical(track_rows).height(Length::Fill);
+        let track_body = quiet_scroll::vertical_above(
+            track_rows,
+            self.view_new_track_space(TRACK_HEADER_TOTAL_WIDTH, geometry),
+        );
         let channel_footer =
             container(quiet_scroll::vertical(channel_rows)).max_height(CHANNEL_FOOTER_MAX_HEIGHT);
 
@@ -654,4 +640,151 @@ impl App {
         }))
         .into()
     }
+}
+
+impl App {
+    /// The row under the last track where a drop adds a track, its header
+    /// `header_width` wide and its lane laid out by `geometry`.
+    pub(super) fn view_new_track_row(
+        &self,
+        header_width: f32,
+        geometry: TimelineGeometry,
+    ) -> Element<'_, Message> {
+        let grid = self.state.view.arrange_grid;
+        let bpm = self.state.transport.bpm;
+        let zone = match self.state.browser.drag_target {
+            Some(crate::state::BrowserDropTarget::EmptyArrangement { .. }) => {
+                self.state.browser.drop_zone()
+            }
+            _ => None,
+        };
+        // Until the drag reaches it, the lane only hints at what it is;
+        // once there, its zone says it.
+        let hint = match (zone.is_some(), self.state.browser.new_track_kind()) {
+            (false, Some(kind)) => kind.label(),
+            _ => "",
+        };
+        let ghost = self.state.browser.new_track_drop_ghost(bpm);
+        let header_text = match &ghost {
+            Some(ghost) => text(ghost.media.new_track().label())
+                .size(11)
+                .color(th::text()),
+            None => text("+").size(14).color(th::accent()),
+        };
+        let header = container(header_text)
+            .width(Length::Fixed(header_width))
+            .height(Length::Fixed(NEW_TRACK_ROW_HEIGHT))
+            .align_x(iced::alignment::Horizontal::Center)
+            .align_y(iced::alignment::Vertical::Center)
+            .style(|_theme: &Theme| container::Style {
+                background: Some(th::bg_surface().into()),
+                border: iced::Border {
+                    color: th::divider(),
+                    width: 1.0,
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
+            });
+        use crate::widgets::drop_highlight::{drop_highlight, CARD_ZONE_INSET, CARD_ZONE_RADIUS};
+        let lane = container(text(hint).size(12).color(th::text_muted()))
+            .width(Length::Fill)
+            .height(Length::Fixed(NEW_TRACK_ROW_HEIGHT))
+            .center_x(Length::Fill)
+            .center_y(Length::Fixed(NEW_TRACK_ROW_HEIGHT));
+        let lane: Element<'_, Message> = match ghost {
+            Some(ghost) => new_track_lane(&ghost, geometry),
+            None => drop_highlight(lane.into(), zone, CARD_ZONE_RADIUS, CARD_ZONE_INSET),
+        };
+        row![
+            new_track_gutter_area(header, grid, geometry),
+            new_track_drop_area(lane, grid, geometry),
+        ]
+        .height(Length::Fixed(NEW_TRACK_ROW_HEIGHT))
+        .into()
+    }
+
+    /// The space under the new-track row, which takes a drop as the row
+    /// does, the lane at the pointer's beat and the gutter `header_width`
+    /// wide under the headers at the lane's start.
+    pub(super) fn view_new_track_space(
+        &self,
+        header_width: f32,
+        geometry: TimelineGeometry,
+    ) -> Element<'_, Message> {
+        let space = iced::widget::Space::new(Length::Fill, Length::Fill);
+        if self.state.browser.drag_source.is_none() {
+            return space.into();
+        }
+        let grid = self.state.view.arrange_grid;
+        row![
+            new_track_gutter_area(
+                iced::widget::Space::new(Length::Fixed(header_width), Length::Fill),
+                grid,
+                geometry,
+            ),
+            new_track_drop_area(space, grid, geometry),
+        ]
+        .height(Length::Fill)
+        .into()
+    }
+}
+
+/// `content` taking a drop for a new track at the beat under the pointer,
+/// its left edge where `geometry` starts.
+fn new_track_drop_area<'a>(
+    content: impl Into<Element<'a, Message>>,
+    grid: crate::state::GridConfig,
+    geometry: TimelineGeometry,
+) -> Element<'a, Message> {
+    new_track_drop(
+        content,
+        crate::domains::desktop_pointer::PointerTarget::NewTrackRow,
+        move |x| grid.snap_beat(geometry.x_to_beat(x), geometry.pixels_per_beat()),
+    )
+}
+
+/// `content` under the track headers taking a drop for a new track at the
+/// beat where the lane starts.
+fn new_track_gutter_area<'a>(
+    content: impl Into<Element<'a, Message>>,
+    grid: crate::state::GridConfig,
+    geometry: TimelineGeometry,
+) -> Element<'a, Message> {
+    let beat = grid.snap_beat(geometry.x_to_beat(0.0), geometry.pixels_per_beat());
+    new_track_drop(
+        content,
+        crate::domains::desktop_pointer::PointerTarget::NewTrackGutter,
+        move |_| beat,
+    )
+}
+
+/// `content` tagged `target`, taking a drop for a new track at the beat
+/// `beat_at` gives for the pointer's x.
+fn new_track_drop<'a>(
+    content: impl Into<Element<'a, Message>>,
+    target: crate::domains::desktop_pointer::PointerTarget,
+    beat_at: impl Fn(f32) -> f64 + 'a,
+) -> Element<'a, Message> {
+    let area = mouse_area(content)
+        .on_move(move |point| {
+            Message::Browser(BrowserMsg::DragHoverEmptyArrangement {
+                beat: beat_at(point.x).max(0.0),
+            })
+        })
+        .on_exit(Message::Browser(BrowserMsg::LeaveDragTarget(
+            crate::state::BrowserDropTarget::EmptyArrangement { beat: 0.0 },
+        )))
+        .on_release(Message::DropSampleOnEmptyArrangement);
+    super::desktop_pointer::drop_target(area, target)
+}
+
+/// The lane of the track a drop adds, with `ghost` in it.
+fn new_track_lane<'a>(ghost: &DropGhost<'_>, geometry: TimelineGeometry) -> Element<'a, Message> {
+    canvas(NewTrackLane {
+        ghost: LaneGhost::new(ghost, geometry.pixels_per_beat()),
+        geometry,
+    })
+    .width(Length::Fill)
+    .height(Length::Fixed(NEW_TRACK_ROW_HEIGHT))
+    .into()
 }

@@ -559,6 +559,7 @@ impl App {
         let face: Element<'_, Message> = if small {
             center(
                 text(title.clone())
+                    .shaping(crate::typography::USER_TEXT_SHAPING)
                     .font(PERFORM_DISPLAY)
                     .size(title_size)
                     .color(th::text()),
@@ -577,13 +578,17 @@ impl App {
                         .size(9)
                         .color(coordinate_color)
                 ],
-                center(text(title).font(PERFORM_DISPLAY).size(13).color(
-                    if mode == PerformMode::Sections {
-                        th::blend(th::text_dim(), th::text(), 0.22)
-                    } else {
-                        th::text()
-                    }
-                ))
+                center(
+                    text(title)
+                        .shaping(crate::typography::USER_TEXT_SHAPING)
+                        .font(PERFORM_DISPLAY)
+                        .size(13)
+                        .color(if mode == PerformMode::Sections {
+                            th::blend(th::text_dim(), th::text(), 0.22)
+                        } else {
+                            th::text()
+                        })
+                )
                 .width(Length::Fill)
                 .height(Length::Fill),
                 text(detail).font(PERFORM_TECH).size(8).color(th::blend(

@@ -352,6 +352,14 @@ impl IAudioProcessorTrait for Probe {
     unsafe fn process(&self, data: *mut ProcessData) -> tresult {
         if self.timing.borrow().flag(24) {
             self.timing.borrow_mut().clear_flag(24);
+            if let (true, Some(input), Some(output)) = (
+                self.instrument,
+                ComRef::from_raw((*data).inputEvents),
+                ComRef::from_raw((*data).outputEvents),
+            ) {
+                // A plugin can output notes and still fail the call.
+                echo_notes_an_octave_up(&input, output);
+            }
             return kResultFalse;
         }
         let _call = crate::ProcessingCall::enter(&self.in_call);
@@ -390,6 +398,9 @@ impl IAudioProcessorTrait for Probe {
             let events = ComRef::from_raw(data.inputEvents);
             let mut event_index = 0;
             let output = &*data.outputs;
+            if let (Some(input), Some(output)) = (&events, ComRef::from_raw(data.outputEvents)) {
+                echo_notes_an_octave_up(input, output);
+            }
             for frame in 0..data.numSamples {
                 if let Some(events) = &events {
                     while event_index < events.getEventCount() {
@@ -637,5 +648,24 @@ impl Drop for Probe {
         if self.processing.get() || self.main_thread != crate::thread_id() {
             crate::lifecycle_error();
         }
+    }
+}
+
+/// Plays like a note-generating plugin, so hosts can test note output.
+unsafe fn echo_notes_an_octave_up(input: &ComRef<'_, IEventList>, output: ComRef<'_, IEventList>) {
+    for index in 0..input.getEventCount() {
+        let mut event: Event = std::mem::zeroed();
+        if input.getEvent(index, &mut event) != kResultOk {
+            continue;
+        }
+        // Generated event types are signed on Windows and unsigned elsewhere.
+        if event.r#type == Event_::EventTypes_::kNoteOnEvent as u16 {
+            event.__field0.noteOn.pitch += 12;
+        } else if event.r#type == Event_::EventTypes_::kNoteOffEvent as u16 {
+            event.__field0.noteOff.pitch += 12;
+        } else {
+            continue;
+        }
+        output.addEvent(&mut event);
     }
 }

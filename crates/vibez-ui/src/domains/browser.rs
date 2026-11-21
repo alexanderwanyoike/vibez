@@ -63,11 +63,32 @@ pub enum BrowserMsg {
         track_id: TrackId,
         drop: DevicePanelDrop,
     },
+    DragHoverClipSlot {
+        track_id: TrackId,
+        row: u32,
+    },
+    DragHoverNewTrackSlot {
+        row: u32,
+    },
+    /// A file from another app entered the window.
+    DesktopFileHovered(PathBuf),
+    DesktopFileDropped(PathBuf),
+    /// The file from another app left the window, or its drag was cancelled.
+    DesktopDragLeft,
+    /// The pointer moved while a file from another app is dragged, after the
+    /// widgets under it reported any target.
+    DesktopPointerMoved,
+    /// A poll found the pointer of another app's drag over no tagged target,
+    /// which may still be over an untagged device card.
+    DesktopPointerOffTargets,
     ClearDragTarget,
     /// The cursor left `target`; another target it entered meanwhile stays.
     LeaveDragTarget(crate::state::BrowserDropTarget),
     CancelDrag(String),
     EndDragSample,
+    /// What was read of the dragged file for its ghost; a failed read shows
+    /// no ghost, and the drop still says why if it fails again.
+    DragGhostRead(Result<Box<crate::domains::drop_ghost::DragGhostRead>, String>),
     LocalRootWatchEvent(LocalRootWatchEvent),
     ReconcileLocalRoot {
         root: PathBuf,
@@ -87,6 +108,20 @@ pub enum BrowserMsg {
     SetDropboxAppKey(String),
 }
 
+impl BrowserMsg {
+    /// Whether this hovers an instrument or device target, which take
+    /// samples only.
+    fn hovers_a_device_target(&self) -> bool {
+        matches!(
+            self,
+            Self::DragHoverSampler { .. }
+                | Self::DragHoverDrumRackPad { .. }
+                | Self::DragHoverDrumRack { .. }
+                | Self::DragHoverDevicePanel { .. }
+        )
+    }
+}
+
 /// Cross-domain effects requested by a browser update.
 #[derive(Debug, Default, PartialEq)]
 pub struct BrowserAction {
@@ -101,20 +136,74 @@ pub struct BrowserAction {
     pub debounce_root_scans: Vec<(PathBuf, u64)>,
     /// The newest debounce token for this root matured and may be scanned.
     pub scan_root: Option<(PathBuf, u64)>,
+    /// Release the drag here, as a button release over it would.
+    pub release: Option<crate::state::BrowserDropTarget>,
+    /// Read the file a drag just started carrying, off the UI thread, for
+    /// its ghost.
+    pub read_drag_ghost: Option<MediaSourceRef>,
+}
+
+/// What a drag carries, which decides the tracks it lands on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DragMedia {
+    Audio,
+    Midi,
+}
+
+impl DragMedia {
+    pub fn of(source: &MediaSourceRef) -> Self {
+        match source {
+            MediaSourceRef::LocalFile { path }
+                if vibez_core::midi_file::is_midi_file_path(path) =>
+            {
+                Self::Midi
+            }
+            _ => Self::Audio,
+        }
+    }
+
+    /// Whether a lane of `kind` takes this media.
+    pub fn lands_on(self, kind: vibez_core::midi::TrackKind) -> bool {
+        kind.is_midi() == (self == Self::Midi)
+    }
+
+    /// The media's name as a sentence starts it.
+    fn title(self) -> &'static str {
+        match self {
+            Self::Audio => "Audio",
+            Self::Midi => "MIDI",
+        }
+    }
+
+    fn noun(self) -> &'static str {
+        match self {
+            Self::Audio => "audio",
+            Self::Midi => "MIDI",
+        }
+    }
+
+    /// What a lane of the other kind says when it turns this media away.
+    fn refused_lane_status(self) -> String {
+        match self {
+            Self::Audio => "Audio can't go on a MIDI lane".into(),
+            Self::Midi => "MIDI can't go on an audio lane".into(),
+        }
+    }
 }
 
 impl crate::state::BrowserDropTarget {
-    /// What a release here does, as the status bar says it.
-    pub fn status(&self) -> String {
+    /// What a release of `media` here does, as the status bar says it.
+    pub fn status(&self, media: DragMedia) -> String {
         use crate::state::BrowserDropTarget as Target;
+        let kind = media.noun();
         match self {
             Target::ArrangementLane {
                 beat,
                 compatible: true,
                 ..
-            } => format!("Audio lane at beat {beat:.2}"),
-            Target::ArrangementLane { .. } => "Audio can't go on a MIDI lane".into(),
-            Target::EmptyArrangement { beat } => format!("New audio track at beat {beat:.2}"),
+            } => format!("{} lane at beat {beat:.2}", media.title()),
+            Target::ArrangementLane { .. } => media.refused_lane_status(),
+            Target::EmptyArrangement { beat } => format!("New {kind} track at beat {beat:.2}"),
             Target::Sampler { .. } => DevicePanelDrop::LoadIntoExisting.hover_status(),
             Target::DrumRackPad { pad_index, .. } => {
                 format!("Load into Drum Rack pad {}", pad_index + 1)
@@ -123,6 +212,10 @@ impl crate::state::BrowserDropTarget {
                 format!("Load into selected Drum Rack pad {}", pad_index + 1)
             }
             Target::DevicePanel { drop, .. } => drop.hover_status(),
+            Target::ClipSlot { row, .. } => format!("Clip slot in row {}", row + 1),
+            Target::NewTrackSlot { row } => {
+                format!("New {kind} track, Clip slot in row {}", row + 1)
+            }
         }
     }
 
@@ -134,6 +227,7 @@ impl crate::state::BrowserDropTarget {
             (Target::DevicePanel { track_id, .. }, Target::DevicePanel { track_id: left, .. }) => {
                 track_id == left
             }
+            (Target::EmptyArrangement { .. }, Target::EmptyArrangement { .. }) => true,
             _ => self == other,
         }
     }
@@ -151,6 +245,32 @@ impl crate::state::BrowserDropTarget {
 }
 
 impl BrowserState {
+    /// What the drag in flight carries.
+    pub fn drag_media(&self) -> Option<DragMedia> {
+        self.drag_source.as_ref().map(DragMedia::of)
+    }
+
+    /// Whether a lane of `kind` takes the drag in flight.
+    pub fn drag_lands_on(&self, kind: vibez_core::midi::TrackKind) -> bool {
+        self.drag_media().is_some_and(|media| media.lands_on(kind))
+    }
+
+    /// Why a lane of `kind` turns the drag in flight away, if it does.
+    pub fn lane_refusal(&self, kind: vibez_core::midi::TrackKind) -> Option<String> {
+        let media = self.drag_media()?;
+        (!media.lands_on(kind)).then(|| media.refused_lane_status())
+    }
+
+    /// Instrument and device targets take samples, never MIDI files; a MIDI
+    /// drag passing over one says where it can go instead.
+    fn refuses_device_targets(&mut self) -> Option<String> {
+        if self.drag_media() != Some(DragMedia::Midi) {
+            return None;
+        }
+        self.drag_target = None;
+        Some(crate::domains::midi_file_import::MIDI_FILE_TARGETS.into())
+    }
+
     /// Whether a release would take the audio, for the ghost's dot; with no
     /// target under the cursor there is nothing to judge.
     pub fn drag_accepted(&self) -> Option<bool> {
@@ -161,7 +281,9 @@ impl BrowserState {
 
     /// The zone to mark where a release would land.
     pub fn drop_zone(&self) -> Option<crate::domains::drop_zone::DropZone> {
-        self.drag_target.as_ref()?.drop_zone()
+        self.drag_target
+            .as_ref()?
+            .drop_zone(self.drag_media().unwrap_or(DragMedia::Audio))
     }
 
     /// The zone `track_id`'s lane marks while a drag hovers it.
@@ -193,11 +315,14 @@ impl BrowserState {
         }
     }
 
-    /// Makes `target` the drop target and returns its status.
-    fn hover(&mut self, target: crate::state::BrowserDropTarget) -> String {
-        let status = target.status();
-        self.drag_target = Some(target);
-        status
+    /// Makes `target` the drop target and says what a release there does; a
+    /// desktop drop waiting for a target is released on it.
+    fn hover(&mut self, target: crate::state::BrowserDropTarget, action: &mut BrowserAction) {
+        action.status = Some(target.status(self.drag_media().unwrap_or(DragMedia::Audio)));
+        self.drag_target = Some(target.clone());
+        if self.desktop_drop_waits_for_target() {
+            self.release_desktop_drop(target, action);
+        }
     }
 
     /// Clears the drop target; while dragging, the status goes back to the
@@ -209,7 +334,11 @@ impl BrowserState {
 
     fn moving_status(&self) -> String {
         let label = self.drag_label.as_deref().unwrap_or("media");
-        format!("Moving {label} - choose an audio lane, empty Arrange, or a MIDI track's devices")
+        let targets = match self.drag_media() {
+            Some(DragMedia::Midi) => "a MIDI lane, empty Arrange, or a MIDI track's Clip slot",
+            _ => "an audio lane, empty Arrange, or a MIDI track's devices",
+        };
+        format!("Moving {label} - choose {targets}")
     }
 
     fn hovers_drum_rack_pad(&self, track_id: TrackId) -> bool {
@@ -233,6 +362,12 @@ impl BrowserState {
 
     pub fn update(&mut self, msg: BrowserMsg) -> BrowserAction {
         let mut action = BrowserAction::default();
+        if msg.hovers_a_device_target() {
+            if let Some(status) = self.refuses_device_targets() {
+                action.status = Some(status);
+                return action;
+            }
+        }
         match msg {
             BrowserMsg::SetKeyboardFocus(focused) => self.keyboard_focus = focused && self.open,
             BrowserMsg::ToggleSampleBrowser => {
@@ -286,7 +421,8 @@ impl BrowserState {
                     .saturating_add(crate::state::BROWSER_RESULTS_PAGE_SIZE);
             }
             BrowserMsg::SelectSampleBrowserEntry(source) => {
-                if self.select_source(source.clone()) {
+                if self.select_source(source.clone()) && DragMedia::of(&source) == DragMedia::Audio
+                {
                     action.load_waveform = Some(source);
                 }
             }
@@ -305,6 +441,7 @@ impl BrowserState {
             BrowserMsg::PendingDragMoved { x, y } => {
                 if self.move_pending_drag(x, y) {
                     action.status = Some(self.moving_status());
+                    action.read_drag_ghost = self.drag_source.clone();
                 }
             }
             BrowserMsg::DragHoverTrack {
@@ -315,27 +452,32 @@ impl BrowserState {
                 if self.drag_source.is_none() {
                     return action;
                 }
-                action.status = Some(self.hover(
+                self.hover(
                     crate::state::BrowserDropTarget::ArrangementLane {
                         track_id,
                         beat,
                         compatible,
                     },
-                ));
+                    &mut action,
+                );
             }
             BrowserMsg::DragHoverEmptyArrangement { beat } => {
                 if self.drag_source.is_none() {
                     return action;
                 }
-                action.status =
-                    Some(self.hover(crate::state::BrowserDropTarget::EmptyArrangement { beat }));
+                self.hover(
+                    crate::state::BrowserDropTarget::EmptyArrangement { beat },
+                    &mut action,
+                );
             }
             BrowserMsg::DragHoverSampler { track_id } => {
                 if self.drag_source.is_none() {
                     return action;
                 }
-                action.status =
-                    Some(self.hover(crate::state::BrowserDropTarget::Sampler { track_id }));
+                self.hover(
+                    crate::state::BrowserDropTarget::Sampler { track_id },
+                    &mut action,
+                );
             }
             BrowserMsg::DragHoverDrumRackPad {
                 track_id,
@@ -344,10 +486,13 @@ impl BrowserState {
                 if self.drag_source.is_none() {
                     return action;
                 }
-                action.status = Some(self.hover(crate::state::BrowserDropTarget::DrumRackPad {
-                    track_id,
-                    pad_index,
-                }));
+                self.hover(
+                    crate::state::BrowserDropTarget::DrumRackPad {
+                        track_id,
+                        pad_index,
+                    },
+                    &mut action,
+                );
             }
             BrowserMsg::DragHoverDrumRack {
                 track_id,
@@ -356,10 +501,13 @@ impl BrowserState {
                 if self.drag_source.is_none() || self.hovers_drum_rack_pad(track_id) {
                     return action;
                 }
-                action.status = Some(self.hover(crate::state::BrowserDropTarget::DrumRack {
-                    track_id,
-                    pad_index,
-                }));
+                self.hover(
+                    crate::state::BrowserDropTarget::DrumRack {
+                        track_id,
+                        pad_index,
+                    },
+                    &mut action,
+                );
             }
             BrowserMsg::DragHoverDevicePanel { track_id, drop } => {
                 // The panel's hover arrives after that of any card inside it,
@@ -367,8 +515,9 @@ impl BrowserState {
                 if self.drag_source.is_none() || self.hovers_instrument_card(track_id) {
                     return action;
                 }
-                action.status = Some(
-                    self.hover(crate::state::BrowserDropTarget::DevicePanel { track_id, drop }),
+                self.hover(
+                    crate::state::BrowserDropTarget::DevicePanel { track_id, drop },
+                    &mut action,
                 );
             }
             BrowserMsg::LeaveDragTarget(target) => {
@@ -380,6 +529,56 @@ impl BrowserState {
                     action.status = self.clear_drag_target();
                 }
             }
+            BrowserMsg::DragHoverClipSlot { track_id, row } => {
+                if self.drag_source.is_none() {
+                    return action;
+                }
+                self.hover(
+                    crate::state::BrowserDropTarget::ClipSlot { track_id, row },
+                    &mut action,
+                );
+            }
+            BrowserMsg::DragHoverNewTrackSlot { row } => {
+                if self.drag_source.is_none() {
+                    return action;
+                }
+                self.hover(
+                    crate::state::BrowserDropTarget::NewTrackSlot { row },
+                    &mut action,
+                );
+            }
+            BrowserMsg::DesktopFileHovered(path) => {
+                let hovering = Some(crate::state::DesktopDrop::Hovering);
+                let was_hovering = self.desktop_drop == hovering;
+                action.status = self.hover_desktop_file(path);
+                // A hover that starts the drag, or restarts a waiting drop
+                // that cleared its ghost, reads the file.
+                if self.desktop_drop == hovering && !was_hovering {
+                    action.read_drag_ghost = self.drag_source.clone();
+                }
+            }
+            BrowserMsg::DesktopFileDropped(path) => self.drop_desktop_file(&path, &mut action),
+            BrowserMsg::DesktopDragLeft => {
+                if self.drags_from_desktop() {
+                    self.cancel_media_drag();
+                    action.status = Some("Drag cancelled".into());
+                }
+            }
+            BrowserMsg::DesktopPointerMoved => match self.desktop_drop {
+                Some(crate::state::DesktopDrop::Hovering) => {
+                    self.desktop_drop = Some(crate::state::DesktopDrop::PointerSeen);
+                }
+                Some(crate::state::DesktopDrop::Dropped) => self.miss_desktop_drop(&mut action),
+                _ => {}
+            },
+            BrowserMsg::DesktopPointerOffTargets => {
+                if self.desktop_drop == Some(crate::state::DesktopDrop::PointerSeen) {
+                    self.desktop_drop = Some(crate::state::DesktopDrop::Hovering);
+                }
+                if self.drag_target.is_some() {
+                    action.status = self.clear_drag_target();
+                }
+            }
             BrowserMsg::ClearDragTarget => {
                 action.status = self.clear_drag_target();
             }
@@ -387,6 +586,8 @@ impl BrowserState {
                 self.cancel_media_drag();
                 action.status = Some(reason);
             }
+            BrowserMsg::DragGhostRead(Ok(read)) => self.install_ghost_cache(*read),
+            BrowserMsg::DragGhostRead(Err(_)) => {}
             BrowserMsg::EndDragSample => {
                 if self.drag_source.is_some() {
                     self.cancel_media_drag();
@@ -586,6 +787,17 @@ impl BrowserState {
         action
     }
 }
+
+#[path = "browser_desktop_drop.rs"]
+mod desktop_drop;
+
+#[cfg(test)]
+#[path = "browser_desktop_drop_tests.rs"]
+mod desktop_drop_tests;
+
+#[cfg(test)]
+#[path = "browser_midi_drag_tests.rs"]
+mod midi_drag_tests;
 
 #[cfg(test)]
 #[path = "browser_tests.rs"]

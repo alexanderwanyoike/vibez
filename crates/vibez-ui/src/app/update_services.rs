@@ -319,6 +319,12 @@ impl App {
             Message::DropSampleOnEmptyArrangement => {
                 return self.on_drop_sample_on_empty_arrangement()
             }
+            Message::MidiFileRead {
+                target,
+                generation,
+                result,
+            } => self.on_midi_file_read(target, generation, result),
+            Message::ChooseMidiFileLayout(layout) => self.on_choose_midi_file_layout(layout),
             Message::DropSampleOnDrumPad {
                 track_id,
                 pad_index,
@@ -346,6 +352,12 @@ impl App {
             Message::BrowserWaveformReady(source, Err(err)) => {
                 self.state.browser.fail_waveform_load(&source, err);
             }
+            Message::BrowserMidiPreviewReady {
+                source,
+                generation,
+                play,
+                result,
+            } => self.on_midi_preview_ready(source, generation, play, result),
             Message::BrowserAuditionReady {
                 source,
                 generation,

@@ -6,7 +6,7 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
 
 use iced::widget::canvas;
-use iced::{mouse, Rectangle, Renderer};
+use iced::{Rectangle, Renderer};
 use vibez_core::id::ClipId;
 
 use crate::theme;
@@ -36,10 +36,9 @@ impl StaticLayer {
         lane: &TrackClipCanvas,
         renderer: &Renderer,
         bounds: Rectangle,
-        cursor: mouse::Cursor,
         draw: impl FnOnce(&mut canvas::Frame),
     ) -> canvas::Geometry {
-        let drawn_for = (lane.static_layer_key(bounds, cursor), theme::epoch());
+        let drawn_for = (lane.static_layer_key(bounds), theme::epoch());
         if self.drawn_for.get() != drawn_for {
             self.cache.clear();
             self.drawn_for.set(drawn_for);
@@ -80,7 +79,7 @@ impl TrackClipCanvas {
 
     /// Everything the static layer draws, besides the theme, hashed so the
     /// layer is drawn again only when one of them changes.
-    pub(super) fn static_layer_key(&self, bounds: Rectangle, cursor: mouse::Cursor) -> u64 {
+    pub(super) fn static_layer_key(&self, bounds: Rectangle) -> u64 {
         let mut hasher = DefaultHasher::new();
         let ppb = self.pixels_per_beat();
         (
@@ -106,7 +105,6 @@ impl TrackClipCanvas {
             self.selected,
             self.muted,
             self.is_instrument,
-            self.drop_hover(bounds, cursor),
             [
                 self.track_color.r,
                 self.track_color.g,

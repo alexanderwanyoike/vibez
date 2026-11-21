@@ -96,6 +96,39 @@ impl App {
     }
 
     pub(super) fn route_view_message(&mut self, msg: ViewMsg) -> Task<Message> {
+        let drag = self.route_pointer_to_browser_drag(&msg);
+        Task::batch([drag, self.route_view_message_after_drag(msg)])
+    }
+
+    /// Hands the pointer to the Browser drag; a drag that starts moving
+    /// reads its file for the ghost.
+    fn route_pointer_to_browser_drag(&mut self, msg: &ViewMsg) -> Task<Message> {
+        let pending_drag_msg = match msg {
+            ViewMsg::CursorMoved(x, y) if self.state.browser.pending_drag.is_some() => {
+                Some(BrowserMsg::PendingDragMoved { x: *x, y: *y })
+            }
+            // Pointer events reach this router after the widgets under the
+            // pointer reported any drop target, so a desktop drop the pointer
+            // left no target under can be told so.
+            ViewMsg::CursorMoved(..) if self.state.browser.drags_from_desktop() => {
+                Some(BrowserMsg::DesktopPointerMoved)
+            }
+            ViewMsg::MouseReleased if self.state.browser.pending_drag.is_some() => {
+                Some(BrowserMsg::EndDragSample)
+            }
+            ViewMsg::MouseReleased if self.state.browser.drag_source.is_some() => {
+                Some(BrowserMsg::EndDragSample)
+            }
+            _ => None,
+        };
+        let Some(browser_msg) = pending_drag_msg else {
+            return Task::none();
+        };
+        let action = self.state.browser.update(browser_msg);
+        self.apply_browser_action(action)
+    }
+
+    fn route_view_message_after_drag(&mut self, msg: ViewMsg) -> Task<Message> {
         if matches!(&msg, ViewMsg::ToggleEditMenu) {
             self.state.project.file_menu_open = false;
         }
@@ -174,24 +207,6 @@ impl App {
             );
             if action.persist_settings {
                 self.persist_ui_settings();
-            }
-        }
-        let pending_drag_msg = match &msg {
-            ViewMsg::CursorMoved(x, y) if self.state.browser.pending_drag.is_some() => {
-                Some(BrowserMsg::PendingDragMoved { x: *x, y: *y })
-            }
-            ViewMsg::MouseReleased if self.state.browser.pending_drag.is_some() => {
-                Some(BrowserMsg::EndDragSample)
-            }
-            ViewMsg::MouseReleased if self.state.browser.drag_source.is_some() => {
-                Some(BrowserMsg::EndDragSample)
-            }
-            _ => None,
-        };
-        if let Some(browser_msg) = pending_drag_msg {
-            let action = self.state.browser.update(browser_msg);
-            if let Some(status) = action.status {
-                self.state.status_text = status;
             }
         }
         let msg = self.clip_editor_zoom(&msg).unwrap_or(msg);

@@ -149,6 +149,8 @@ overlay and on-screen selector update the same selection used by the Section
 overview, while per-mode target banks remain runtime interaction state.
 Window focus loss drains all held computer keys through matching note-offs and
 clears the Shift overlay so OS-level focus changes cannot leave a note sounding.
+Keys on the hardware MIDI input likewise remember the Track each press played,
+so selecting another Track cannot redirect or drop the release.
 Widget-captured presses are not forwarded, so text fields suppress pad input.
 The mapping and fixed computer-key velocity (default 100) persist in the user's
 `ui.json` settings and are absent from the project document and undo snapshots.
@@ -191,6 +193,9 @@ engine owns two explicit clock domains: the canonical Arrange cursor advances
 only while Arrange renders, while a zero-based monotonic Perform clock advances
 during Section playback and stopped-start count-in. Section queue, Record,
 Note Repeat, monitored input, Track Mute, and Capture events use the latter.
+While Clips play, instruments and effects also hear it as their song position,
+delayed by their compensated input latency, so a Clip loop never restarts a
+tempo-synced device; Clip content and Clip automation keep the Clip's own clock.
 `PlaybackPosition` therefore always means Arrange cursor;
 `PerformancePosition` is the independent value shown as Performance time.
 `PerformanceCaptureStarted`, `SectionTransitioned`, and
@@ -557,7 +562,11 @@ The engine lives on the cpal audio callback. Its rules:
   clip is overwritten instead of queued, so only the latest position waits.
   `MoveNoteClip` and `SetNoteClipBounds` release only the notes that clip
   started and no longer holds under the playhead; the track remembers which
-  clip started each sounding pitch.
+  clip started each sounding pitch. A held live key owns its pitch over Clip
+  notes, so a Clip being recorded neither restarts nor cuts the note it plays
+  back, and the pitch returns to the Clip at its next note-on. Transport stop
+  and Clip edits leave a held key sounding, since its voice is no longer the
+  Clip's to release.
 - Arrange playback stops on its own only when the playhead reaches the song
   end; a playhead already past it keeps going. Undo and Capture wrap the
   content they re-add in `BeginContentRebuild`/`EndContentRebuild`, and the
@@ -679,6 +688,60 @@ audible through the normal project mix while recording; Resample never injects
 it into the target Audio Track and cannot create a feedback edge. This is live
 Resample, distinct from the existing offline Bounce renderer.
 
+**MIDI From** lets a MIDI Track play the notes another Track's instrument
+outputs (a phrase or arpeggiator plugin), as Ableton's MIDI From does. The
+routing graph orders the source's Source stage before the receiver's in every
+block, and rejects a MIDI From loop as a feedback loop, but adds no audio edge,
+so compensation, solo and gain never see it. After rendering, each Track keeps
+the notes its instrument output that block. The receiver admits its source's
+notes through `RoutedNotes`, which plays them at their frames, in the source's
+order within a frame, on either render path and gives every note-on exactly
+one note-off. A note-on for a held pitch releases it first, a stray note-off
+is dropped, and a note-off on its note-on's frame moves a frame later, because
+a receiving plugin plays note-offs first within a frame. Each block the
+receiver names its source by track and instrument; when that changes (a new
+or removed MIDI From, a replaced or removed instrument, a source that did not
+render), and when the receiver skips a block or the transport stops for any
+reason, held routed notes end at the next block start. Clip notes and routed
+notes play one instrument, so a note-off from either ends a pitch both hold.
+Each admitted
+note is also reported as the receiver's `SourceNoteInput` and
+`InstrumentNoteInput` at its exact sample, so Section Record, Clip Record and
+Capture record it like played input. A Project Track saves its MIDI From as
+an optional `midi_from` value (absent from older projects); choosing one is a
+single undo step, only plugin-instrument MIDI Tracks that would not form a
+loop are offered, removing the source Track clears it, and a Bounce of the
+receiver renders the source's instrument first. The source keeps sounding its own
+instrument, its mute silences only its audio, and the receiver plays routed
+notes whether or not it is the record target.
+
+The Browser's **MIDI audition** plays a MIDI file through a Track's
+instrument the same way, but never as input. `MidiAuditionPattern` places one
+pass of the file's notes on the samples of each block, played once or looped,
+with notes held past its length ending there. Before any Track renders, the
+Audition Bus works out the block's notes and their player: the target Track
+when it has an instrument, otherwise a preview voice the UI supplies and the
+bus mixes after master at the Audition gain. Each Track admits them through a
+second `RoutedNotes` keyed by an audition generation, so a new audition, a
+Stop, an audio audition or a change of player ends held notes at the next
+block start, and nothing reports them as `SourceNoteInput`, so no recording
+takes them. A synchronized (Warp) audition starts on the next bar while the
+transport plays, and moves to the bar Play starts on, like a warped audio
+audition. The preview voice renders only while it plays an audition or still
+rings, and a replaced voice is disposed off the audio thread. A MIDI file has
+no audio tempo to keep, so both treatments play at project tempo; Raw plays it
+once from now. Because a target Track plays the audition through its own
+chain, a Resample of that Track hears it, and a phrase plugin on it passes
+what it plays on to MIDI From receivers, as a played keyboard would.
+
+In the Browser, selecting a MIDI file reads it off the UI thread and previews
+the Clip a drop would land, so the producer sees and hears what landing gives.
+The Audition footer draws it as a piano-roll strip with bar lines, placing
+notes on the same note rows as Clip thumbnails. With Audition On it plays
+through the selected Track's instrument when that Track can play MIDI, and
+otherwise through the preview voice, which the UI builds for each hardware
+sample rate. Raw plays the file once at once; Warp loops it from the next bar.
+
 `EngineTrack` is the shared project channel strip: it owns the instrument,
 effects, sends, gain/pan, mute/solo, meters, and preallocated render scratch.
 Time-based content is a separate `PreparedPlaybackSource` behind an owned
@@ -746,7 +809,12 @@ are handled in three stages:
    captures plugin state for saving. VST3 instruments receive the engine's
    timed note queue through a callback-lifetime `IEventList`; events are sorted
    by sample offset and preserve within-block note-on/note-off timing before
-   `IAudioProcessor::process` runs.
+   `IAudioProcessor::process` runs. Notes a plugin outputs (CLAP `try_push`,
+   or a callback-lifetime output `IEventList` for VST3) land in a
+   fixed-capacity `NoteOutput` that each process call clears. Note-ons stop
+   short of capacity so note-offs always fit, and a dropped note is counted
+   and refused to the plugin. A hosted instrument exposes the last
+   render's notes, with frame offsets, through `Instrument::note_output`.
 
 Plugin editor windows use a platform backend: AppKit on macOS and the existing
 X11 backend elsewhere. The macOS backend owns an `NSWindow` and its content

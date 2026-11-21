@@ -61,8 +61,6 @@ fn track_canvas_at(
         0.0,
         None,
         false,
-        None,
-        None,
     )
 }
 
@@ -466,7 +464,7 @@ fn recording_preview_is_visible_but_not_hit_testable() {
         clip_id: preview_id,
         position_beats: 0.0,
         duration_beats: 4.0,
-        name: "● RECORDING LIVE".into(),
+        name: "RECORDING LIVE".into(),
         notes: Arc::new(NoteSummary::new([(60, 0.0, 0.5)], 1.0)),
         start_marker_beats: 0.0,
         loop_enabled: false,
@@ -488,7 +486,7 @@ fn audio_recording_waveform_is_visible_but_not_hit_testable() {
         clip_id: preview_id,
         position: 0,
         duration: 44_100,
-        name: "● RECORDING INPUT".into(),
+        name: "RECORDING INPUT".into(),
         peaks: Arc::new(vec![(-0.8, 0.6); 32]),
         peak_span_frames: Some(64),
         loop_enabled: false,
@@ -1861,7 +1859,7 @@ const LANE: Rectangle = Rectangle {
 fn cached_layer_key(content: &TrackTimelineContent, edit: impl Fn(&mut TrackClipCanvas)) -> u64 {
     let mut canvas = track_canvas(content, 1.0);
     edit(&mut canvas);
-    canvas.static_layer_key(LANE, mouse::Cursor::Unavailable)
+    canvas.static_layer_key(LANE)
 }
 
 fn dragging(canvas: &mut TrackClipCanvas, anchor: ClipId) {
@@ -1928,13 +1926,10 @@ fn a_lanes_cached_layer_is_redrawn_when_a_resting_clip_or_the_view_changes() {
         canvas.loop_start_beats = 4.0;
         canvas.loop_end_beats = 12.0;
     });
-    let taller = track_canvas(&content, 1.0).static_layer_key(
-        Rectangle {
-            height: 2.0 * LANE.height,
-            ..LANE
-        },
-        mouse::Cursor::Unavailable,
-    );
+    let taller = track_canvas(&content, 1.0).static_layer_key(Rectangle {
+        height: 2.0 * LANE.height,
+        ..LANE
+    });
     let mut moved = content.clone();
     moved.note_clips[1].position_beats = 36.0;
     let mut edited = content.clone();

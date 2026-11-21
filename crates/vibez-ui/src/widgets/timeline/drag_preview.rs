@@ -126,6 +126,7 @@ impl TrackClipCanvas {
             size: READOUT_SIZE.into(),
             font,
             vertical_alignment: Vertical::Center,
+            shaping: crate::typography::USER_TEXT_SHAPING,
             ..Default::default()
         });
     }

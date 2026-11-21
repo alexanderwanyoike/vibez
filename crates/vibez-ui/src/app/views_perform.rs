@@ -202,6 +202,7 @@ impl App {
         } else {
             button(
                 text(section.name.clone())
+                    .shaping(crate::typography::USER_TEXT_SHAPING)
                     .font(PERFORM_DISPLAY)
                     .size(17)
                     .color(th::text()),

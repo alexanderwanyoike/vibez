@@ -302,6 +302,15 @@ pub enum BrowserImportTarget {
     ArrangementNewTrackAt {
         position_samples: u64,
     },
+    /// A new track whose Clip goes in `section_id` at `position_samples`.
+    SectionNewTrackAt {
+        section_id: SectionId,
+        position_samples: u64,
+    },
+    /// A new track whose Clip goes in the clip launcher's `row`.
+    LauncherNewTrackAt {
+        row: u32,
+    },
     Sampler(TrackId),
     /// The Sampler a device panel drop implies, which is the track's own or a
     /// new one in place of any other instrument.

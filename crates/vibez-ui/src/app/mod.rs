@@ -24,7 +24,6 @@ use vibez_plugin_host::gui::PluginGuiKey;
 use crate::services::plugin_loader::{PluginInstrumentLoadResult, PluginLoadResult};
 
 use crate::domains::audio_settings::AudioSettingsState;
-use crate::icons;
 use crate::message::{Message, ProjectLoadResult};
 use crate::plugin_window::{PluginRawPtr, PluginWindowManager};
 use crate::state::{AppState, AudioStreamHealth};
@@ -39,6 +38,8 @@ struct App {
     state: AppState,
     sidechain_sync_inputs: Option<sidechain_sync::RoutingInputs>,
     track_meter_peaks: std::collections::HashMap<vibez_core::id::TrackId, (f32, f32)>,
+    /// Follows the pointer during another app's drag.
+    pointer_poll: desktop_pointer::PointerPoll,
     edge_shortcuts: EdgeShortcutState,
     cmd_tx: crate::domains::EngineCommandQueue,
     event_rx: Option<Consumer<EngineEvent>>,
@@ -102,6 +103,7 @@ struct App {
     // External MIDI input (USB keyboard, Ableton Push, virtual cable...).
     // Dropping the handle closes the port.
     midi_input: Option<vibez_audio_io::midi_input::MidiInputHandle>,
+    hardware_keys: crate::domains::hardware_keys::HardwareKeys,
     /// Cached list of port names last seen by `list_midi_input_ports`.
     /// Populated when the user opens the MIDI picker; used so the UI
     /// can show a dropdown without re-scanning on every frame.
@@ -127,6 +129,7 @@ pub fn run() -> iced::Result {
         64,
     )
     .ok();
+    crate::typography::load_bundled_fonts();
     iced::application(App::title, App::update_and_refresh_clips, App::view)
         .theme(App::theme)
         .scale_factor(App::scale_factor)
@@ -152,11 +155,6 @@ pub fn run() -> iced::Result {
             settings
         })
         .window_size((1400.0, 900.0))
-        .font(icons::ICON_FONT_BYTES)
-        .font(crate::typography::PLEX_SANS_CONDENSED_MEDIUM_BYTES)
-        .font(crate::typography::PLEX_SANS_CONDENSED_SEMIBOLD_BYTES)
-        .font(crate::typography::PLEX_MONO_MEDIUM_BYTES)
-        .font(crate::typography::PLEX_MONO_SEMIBOLD_BYTES)
         .run_with(App::new)
 }
 
@@ -192,6 +190,9 @@ mod instrument_devices;
 mod keyboard;
 mod local_watcher;
 mod menu_lifecycle;
+mod midi_from;
+#[cfg(test)]
+mod midi_from_tests;
 mod param_entry;
 mod phaser_devices;
 mod reverb_devices;
@@ -245,8 +246,10 @@ mod views_control_bar_style;
 mod views_control_status;
 mod views_detail;
 mod views_devices;
+mod views_dialog;
 mod views_file_menu;
 mod views_grid_menu;
+mod views_midi_file_layout;
 mod views_mixer;
 mod views_overlays;
 mod views_perform;
@@ -271,8 +274,50 @@ mod window_policy;
 
 mod sample_retirement;
 
+mod desktop_drop;
+
+mod desktop_pointer;
+pub(crate) use desktop_pointer::PointerWindow;
+#[cfg(target_os = "macos")]
+mod desktop_pointer_macos;
+#[cfg(windows)]
+mod desktop_pointer_windows;
+#[cfg(all(test, windows))]
+mod desktop_pointer_windows_tests;
+#[cfg(not(any(target_os = "macos", windows)))]
+mod desktop_pointer_x11;
+mod drop_target_probe;
+
+#[cfg(test)]
+mod desktop_pointer_tests;
+
+mod drag_ghost;
+
+#[cfg(test)]
+mod drag_ghost_tests;
+
+#[cfg(test)]
+mod new_track_drop_tests;
+
+#[cfg(test)]
+mod empty_space_drop_tests;
+#[cfg(test)]
+mod view_harness;
+
+mod midi_audition;
+mod midi_file_drop;
+
 #[cfg(test)]
 mod device_panel_drop_tests;
+
+#[cfg(test)]
+mod midi_file_drop_tests;
+
+#[cfg(test)]
+mod browser_midi_audition_tests;
+
+#[cfg(test)]
+mod desktop_drop_tests;
 
 #[cfg(test)]
 mod instrument_media_retirement_tests;
@@ -520,6 +565,7 @@ impl App {
             device_presets: Default::default(),
             sidechain_sync_inputs: None,
             track_meter_peaks: Default::default(),
+            pointer_poll: Default::default(),
             plugin_instrument_rx,
             plugin_instrument_tx,
             plugin_window_manager,
@@ -540,15 +586,14 @@ impl App {
             section_residency_request: Default::default(),
             remote_catalog_pending: Vec::new(),
             midi_input,
+            hardware_keys: Default::default(),
             midi_input_ports: Vec::new(),
             interface_scale,
             save_runtime: save_runtime::SaveRuntime::default(),
         };
 
         // Inform the engine of the actual hardware clock and project tempo.
-        app.send_command(EngineCommand::SetSampleRate(
-            app.state.transport.sample_rate,
-        ));
+        app.apply_engine_sample_rate(app.state.transport.sample_rate);
         app.send_command(EngineCommand::SetBpm(app.state.transport.bpm));
         app.send_command(EngineCommand::SetAuditionGain(
             app.state.browser.audition_gain,
@@ -779,6 +824,7 @@ impl App {
                 iced::Event::Window(iced::window::Event::CloseRequested) => {
                     Some(Message::WindowCloseRequested)
                 }
+                iced::Event::Window(event) => desktop_drop::desktop_drop_message(&event),
                 _ => None,
             }),
         ])
@@ -792,6 +838,7 @@ mod clip_launcher;
 mod clip_launcher_resume_tests;
 mod clip_record;
 mod views_clip_launcher;
+mod views_clip_launcher_new_track;
 
 #[cfg(test)]
 mod clip_project_tests;

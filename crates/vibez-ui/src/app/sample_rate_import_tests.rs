@@ -130,6 +130,6 @@ fn a_raw_audition_at_another_rate_is_prepared_before_it_plays() {
 
     let _ = app.play_browser_mode(source, one_second_at_file_rate());
 
-    assert!(app.state.browser.audition_audio.is_none());
+    assert!(app.state.browser.audition_audio.current().is_none());
     assert!(app.state.browser.audition_loading);
 }

@@ -2,6 +2,7 @@
 //! Split from engine.rs. Runs in the audio callback: keep allocation-free and lock-free.
 
 use super::*;
+use crate::engine_midi_audition::MidiAuditionVoice;
 use crate::events::SectionSourceRefreshedEvent;
 use vibez_core::id::ClipId;
 
@@ -901,16 +902,10 @@ impl AudioEngine {
                 start,
                 looped,
             } => {
+                self.audition.midi.stop();
                 let fade_frames = audition_fade_frames(self.sample_rate);
                 if self.transport.is_playing() && start == AuditionStart::NextBar {
-                    let clock_position = self.effective_position();
-                    let target = next_audition_boundary(
-                        clock_position,
-                        self.transport.bpm(),
-                        self.sample_rate,
-                        4,
-                    );
-                    let frames_until_start = target.saturating_sub(clock_position);
+                    let frames_until_start = self.frames_until_next_audition_bar();
                     self.audition
                         .queue(audio, frames_until_start, fade_frames, looped, true);
                     self.present_event(EngineEvent::AuditionQueued, allowance);
@@ -932,13 +927,41 @@ impl AudioEngine {
                 let queued_only = self.audition.queued.is_some()
                     && self.audition.active.is_none()
                     && !self.audition.has_outgoing();
+                let fadeless = queued_only
+                    || (self.audition.midi.is_running()
+                        && self.audition.active.is_none()
+                        && !self.audition.has_outgoing());
                 self.audition.stop(audition_fade_frames(self.sample_rate));
-                if queued_only {
+                self.audition.midi.stop();
+                if fadeless {
                     self.present_event(EngineEvent::AuditionStopped, allowance);
                 }
             }
             EngineCommand::SetAuditionGain(gain) => {
                 self.audition.gain = gain.clamp(0.0, 2.0);
+            }
+            EngineCommand::StartMidiAudition {
+                pattern,
+                target,
+                start,
+                looped,
+            } => {
+                self.audition.stop(audition_fade_frames(self.sample_rate));
+                let synchronized = start == AuditionStart::NextBar;
+                let voice = MidiAuditionVoice::new(pattern, target, looped, synchronized);
+                if self.transport.is_playing() && synchronized {
+                    let frames_until_start = self.frames_until_next_audition_bar();
+                    self.audition.midi.queue(voice, frames_until_start);
+                    self.present_event(EngineEvent::AuditionQueued, allowance);
+                } else {
+                    self.audition.midi.start(voice);
+                    self.present_event(EngineEvent::AuditionStarted, allowance);
+                }
+            }
+            EngineCommand::SetAuditionVoice(voice) => {
+                if let Some(old) = self.audition.midi.replace_preview_voice(voice) {
+                    self.dispose_instrument(old, allowance);
+                }
             }
 
             // -- External MIDI input --
@@ -979,7 +1002,7 @@ impl AudioEngine {
                     };
                     let (source, event) =
                         EngineEvent::repeated_pair(track_id, trigger, recording, recording.into());
-                    if !presentation_queue::emit_repeated(
+                    if !presentation_queue::emit_pair(
                         source,
                         event,
                         &mut self.event_tx,
@@ -1051,6 +1074,14 @@ impl AudioEngine {
             } => self.command_set_instrument(track_id, instrument, allowance),
         }
         bus_cleanup
+    }
+
+    /// How long a synchronized audition waits for the next bar of the
+    /// clock the project is heard on.
+    fn frames_until_next_audition_bar(&self) -> u64 {
+        let clock_position = self.effective_position();
+        next_audition_boundary(clock_position, self.transport.bpm(), self.sample_rate, 4)
+            .saturating_sub(clock_position)
     }
 
     pub(super) fn recalculate_audio_length(&mut self) {

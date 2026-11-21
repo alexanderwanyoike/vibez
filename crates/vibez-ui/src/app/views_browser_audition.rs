@@ -12,11 +12,13 @@ use crate::state::{AuditionMode, SampleBrowserMode};
 use crate::theme as th;
 use crate::widgets::control_style;
 use crate::widgets::device_chrome::tiny_button;
+use crate::widgets::fitted_label::FittedLabel;
 
 impl App {
     pub(super) fn view_browser_audition_footer(&self) -> Element<'_, Message> {
         let selected_local = self.selected_sample_browser_entry();
         let selected_dropbox = self.selected_dropbox_entry();
+        let selected_midi = self.state.browser.selected_is_midi();
         let selected_label = match self.state.browser.mode {
             SampleBrowserMode::Local => selected_local
                 .map(|entry| entry.name.clone())
@@ -74,59 +76,54 @@ impl App {
             Message::SetAuditionMode(AuditionMode::Warp),
         );
 
-        let waveform: Element<'_, Message> = container(
+        let picture: Element<'_, Message> = if selected_midi {
+            let preview = self.state.browser.midi_preview.as_ref();
+            canvas(crate::widgets::browser_midi_strip::BrowserMidiStrip {
+                strip: preview.map(|preview| Arc::clone(&preview.strip)),
+                playhead_fraction: self
+                    .state
+                    .browser
+                    .midi_audition_playhead(self.state.transport.samples_per_beat()),
+            })
+            .width(Length::Fill)
+            .height(Length::Fixed(26.0))
+            .into()
+        } else {
             canvas(crate::widgets::browser_waveform::BrowserWaveform {
                 audio: self.state.browser.waveform_audio.clone(),
                 playhead_fraction: self.state.browser.audition_playhead_fraction(),
             })
             .width(Length::Fill)
-            .height(Length::Fixed(26.0)),
-        )
-        .width(Length::Fill)
-        .padding([0, 4])
-        .style(|_theme: &Theme| container::Style {
-            background: Some(th::display_bg().into()),
-            border: iced::Border {
-                radius: 6.0.into(),
+            .height(Length::Fixed(26.0))
+            .into()
+        };
+        let waveform: Element<'_, Message> = container(picture)
+            .width(Length::Fill)
+            .padding([0, 4])
+            .style(|_theme: &Theme| container::Style {
+                background: Some(th::display_bg().into()),
+                border: iced::Border {
+                    radius: 6.0.into(),
+                    ..Default::default()
+                },
                 ..Default::default()
-            },
-            ..Default::default()
-        })
-        .into();
+            })
+            .into();
 
+        let status = self.state.browser.audition_status();
+        let status_width = if status.keeps_its_width() {
+            Length::Fixed(audition_status_width())
+        } else {
+            Length::Shrink
+        };
         let controls = row![
             play,
             stop,
-            text(if self.state.browser.remote.preview_in_progress {
-                "FETCHING"
-            } else if self.state.browser.audition_loading
-                && self.state.browser.audition_playing
-                && self.state.browser.audition_playback_mode == Some(AuditionMode::Raw)
-            {
-                "WARPING"
-            } else if self.state.browser.audition_loading {
-                "PREPARING"
-            } else if self.state.browser.audition_queued {
-                "QUEUED"
-            } else if self.state.browser.audition_playing {
-                match self.state.browser.audition_playback_mode {
-                    Some(AuditionMode::Raw)
-                        if self.state.browser.audition_mode == AuditionMode::Warp =>
-                    {
-                        "WARPING"
-                    }
-                    Some(mode) => mode.label(),
-                    None => "PLAYING",
-                }
-            } else if self.state.browser.waveform_error.is_some() {
-                "UNAVAILABLE"
-            } else if self.state.browser.waveform_audio.is_some() {
-                self.state.browser.audition_mode.label()
-            } else {
-                "SELECT"
-            })
-            .size(9)
-            .color(th::text_dim()),
+            text(status.label())
+                .size(9)
+                .color(th::text_dim())
+                .shaping(iced::widget::text::Shaping::Advanced)
+                .width(status_width),
             waveform
         ]
         .spacing(5)
@@ -177,12 +174,7 @@ impl App {
                 follow_toggle,
                 raw,
                 warp,
-                text(selected_label)
-                    .size(10)
-                    .color(th::text_dim())
-                    .width(Length::Fill)
-                    .align_x(iced::alignment::Horizontal::Right)
-                    .wrapping(iced::widget::text::Wrapping::None)
+                self.view_audition_source_label(selected_label, selected_midi)
             ]
             .spacing(5)
             .align_y(iced::Alignment::Center),
@@ -207,4 +199,41 @@ impl App {
         .width(Length::Fill)
         .into()
     }
+
+    /// The selected source's name; a MIDI file's is cut to fit beside who
+    /// will play it, so the header stays one line.
+    fn view_audition_source_label(&self, name: String, midi: bool) -> Element<'_, Message> {
+        if !midi {
+            return text(name)
+                .size(10)
+                .color(th::text_dim())
+                .width(Length::Fill)
+                .align_x(iced::alignment::Horizontal::Right)
+                .wrapping(iced::widget::text::Wrapping::None)
+                .into();
+        }
+        let player = crate::domains::midi_audition::audition_player(
+            self.state
+                .browser
+                .midi_audition_player(super::midi_input::configured_target(&self.state)),
+            &self.state.project_tracks.tracks,
+        );
+        row![
+            FittedLabel::name(name, 10.0, th::text_dim()).view(14.0),
+            text(player)
+                .size(10)
+                .color(th::text_muted())
+                .wrapping(iced::widget::text::Wrapping::None)
+        ]
+        .spacing(6)
+        .width(Length::Fill)
+        .align_y(iced::Alignment::Center)
+        .into()
+    }
+}
+
+/// Wide enough for the longest status that keeps its width, measured with
+/// the status's own shaping.
+fn audition_status_width() -> f32 {
+    crate::widgets::device_controls::text_width("PREPARING", 9.0, iced::Font::DEFAULT).ceil()
 }

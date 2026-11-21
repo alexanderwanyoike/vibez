@@ -100,6 +100,7 @@ fn bare_track(name: &str) -> TrackInfo {
         plugin_instrument: None,
         automation: Vec::new(),
         sends: Vec::new(),
+        midi_from: None,
     }
 }
 
@@ -744,6 +745,7 @@ fn synth_note_clip_produces_audio() {
         plugin_instrument: None,
         automation: Vec::new(),
         sends: Vec::new(),
+        midi_from: None,
     };
     let note_clip = NoteClipInfo {
         id: cid,
@@ -806,6 +808,7 @@ fn warns_on_midi_track_with_no_native_instrument() {
         plugin_instrument: None,
         automation: Vec::new(),
         sends: Vec::new(),
+        midi_from: None,
     };
     let req = BounceRequest {
         master: None,
@@ -891,6 +894,9 @@ mod plugin_tests;
 
 #[path = "render_sidechain_tests.rs"]
 mod sidechain_tests;
+
+#[path = "render_midi_from_tests.rs"]
+mod midi_from_tests;
 
 #[path = "render_device_observation_tests.rs"]
 mod device_observation_tests;

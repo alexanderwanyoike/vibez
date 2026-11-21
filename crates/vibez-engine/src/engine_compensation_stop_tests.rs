@@ -40,12 +40,14 @@ fn setup() -> (
                 inputs: vec![],
                 assignments: vec![],
             }],
+            midi_from: None,
         },
         RoutingChannel {
             id: TrackId::MASTER,
             is_bus: true,
             sends: vec![],
             effects: vec![],
+            midi_from: None,
         },
     ];
     let reports = [(

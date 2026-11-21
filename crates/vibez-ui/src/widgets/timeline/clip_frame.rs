@@ -154,7 +154,7 @@ pub(super) fn draw_clip_front(
     body: Rectangle,
     colors: &ClipColors,
     name: &str,
-    looped: bool,
+    icon: Option<char>,
     viewport_width: f32,
 ) {
     if let Some(selection) = colors.selection {
@@ -180,7 +180,7 @@ pub(super) fn draw_clip_front(
         );
     }
 
-    draw_clip_title(frame, name, body, looped, colors.text, viewport_width);
+    draw_clip_title(frame, name, body, icon, colors.text, viewport_width);
 }
 
 #[cfg(test)]

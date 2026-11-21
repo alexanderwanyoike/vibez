@@ -52,20 +52,6 @@ impl App {
         } else {
             58.0
         };
-        let browser_drag_duration = self
-            .state
-            .browser
-            .drag_preview_beats(self.state.transport.bpm);
-        let browser_drag_detail = self.state.browser.drag_label.as_ref().map(|label| {
-            let mode = match self.state.browser.audition_mode {
-                crate::state::AuditionMode::Raw => "RAW",
-                crate::state::AuditionMode::Warp => "WARP",
-            };
-            match browser_drag_duration {
-                Some(beats) => format!("{label} · {mode} · {beats:.2} beats"),
-                None => format!("{label} · {mode}"),
-            }
-        });
 
         let timeline: Element<'_, Message> = if selected.is_none() {
             center(
@@ -88,7 +74,10 @@ impl App {
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
-        } else if self.state.project_tracks.tracks.is_empty() {
+        // A drag shows the timeline even with no tracks, for its new-track row.
+        } else if self.state.project_tracks.tracks.is_empty()
+            && self.state.browser.drag_source.is_none()
+        {
             center(
                 column![
                     text("NO PROJECT TRACKS")
@@ -259,6 +248,7 @@ impl App {
                 let has_content = clip_count > 0 || !content.automation.is_empty();
                 let track_id = track.id;
                 let name = text(track.name.clone())
+                    .shaping(crate::typography::USER_TEXT_SHAPING)
                     .size(12)
                     .font(crate::typography::TRACK_TITLE)
                     .color(if track.mute {
@@ -351,6 +341,7 @@ impl App {
                         _ => None,
                     })
                     .collect();
+                let refusal = self.state.browser.lane_refusal(track.kind);
                 let mut clip_canvas = TrackClipCanvas::from_track(
                     track,
                     content,
@@ -375,8 +366,6 @@ impl App {
                     editor.selection_end_beats,
                     editor.time_selection_track,
                     self.state.browser.drag_source.is_some(),
-                    browser_drag_duration,
-                    browser_drag_detail.clone(),
                 )
                 .with_marquee(
                     row_spans.clone(),
@@ -385,6 +374,18 @@ impl App {
                 .with_snap_targets(snap_targets.clone())
                 .with_clip_drag(editor.clip_drag.as_ref().map(|drag| drag.preview.clone()))
                 .with_drop_zone(self.state.browser.lane_drop_zone(track.id))
+                .with_drop_ghost(
+                    self.state
+                        .browser
+                        .lane_drop_ghost(track.id, self.state.transport.bpm)
+                        .map(|ghost| {
+                            crate::widgets::timeline::LaneGhost::new(
+                                &ghost,
+                                viewport.geometry().pixels_per_beat(),
+                            )
+                        }),
+                )
+                .with_drop_refusal(refusal.clone())
                 .with_vertical_track_scrolling();
                 if let Some(preview) = recording_preview.as_ref().filter(|preview| {
                     preview.target_id == section_id && preview.track_id == track.id
@@ -393,7 +394,7 @@ impl App {
                         clip_id: preview.clip_id,
                         position_beats: preview.position_beats,
                         duration_beats: preview.length_beats,
-                        name: "● RECORDING LIVE".into(),
+                        name: "RECORDING LIVE".into(),
                         notes: Arc::new(NoteSummary::new(
                             preview.notes.iter().map(|note| {
                                 (
@@ -417,7 +418,7 @@ impl App {
                 clip_canvas = clip_canvas.with_playback_playhead(playback_playhead_beats);
                 let geometry = viewport.geometry();
                 let grid = self.state.view.arrange_grid;
-                let compatible = !track.kind.is_midi();
+                let compatible = refusal.is_none();
                 let focused_clip_canvas: Element<'_, Message> = Element::from(
                     canvas(clip_canvas)
                         .width(Length::Fill)
@@ -443,6 +444,10 @@ impl App {
                 } else {
                     focused_clip_canvas
                 };
+                let clip_lane = super::desktop_pointer::drop_target(
+                    clip_lane,
+                    crate::domains::desktop_pointer::PointerTarget::Lane(track_id),
+                );
                 track_rows = track_rows.push(
                     row![gutter, clip_lane]
                         .width(Length::Fill)
@@ -468,16 +473,20 @@ impl App {
                 }
             }
 
-            let body = crate::widgets::quiet_scroll::vertical(
+            if self.state.browser.drag_source.is_some() {
+                track_rows = track_rows
+                    .push(self.view_new_track_row(SECTION_TRACK_GUTTER_WIDTH, viewport.geometry()));
+            }
+
+            let body = crate::widgets::quiet_scroll::vertical_above(
                 container(track_rows)
                     .width(Length::Fill)
                     .style(|_theme: &Theme| container::Style {
                         background: Some(th::bg_surface().into()),
                         ..Default::default()
                     }),
-            )
-            .width(Length::Fill)
-            .height(Length::Fill);
+                self.view_new_track_space(SECTION_TRACK_GUTTER_WIDTH, viewport.geometry()),
+            );
             let navigation_header = column![ruler_row, minimap_row]
                 .width(Length::Fill)
                 .height(Length::Fixed(section_navigation_header_height()));

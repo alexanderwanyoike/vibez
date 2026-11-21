@@ -5,6 +5,19 @@ mod fixture_library;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+/// Fixture flag making the next process call fail.
+#[allow(dead_code)]
+pub const FAIL_NEXT_PROCESS: u32 = 1 << 24;
+
+/// The fixture's saved state: its actual and reported latency and its flags.
+#[allow(dead_code)]
+pub fn state(actual: u32, reported: u32, flags: u32) -> Vec<u8> {
+    [actual, reported, flags]
+        .into_iter()
+        .flat_map(u32::to_le_bytes)
+        .collect()
+}
+
 pub struct Fixture {
     pub root: PathBuf,
     pub clap: PathBuf,

@@ -976,6 +976,7 @@ mod tests {
                 is_bus: id.is_master(),
                 sends: vec![],
                 effects: vec![],
+                midi_from: None,
             }
         });
         producer

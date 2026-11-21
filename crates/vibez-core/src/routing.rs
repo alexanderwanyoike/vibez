@@ -113,6 +113,8 @@ pub struct RoutingChannel {
     pub effects: Vec<RoutingEffect>,
     /// Declared connections are independent of their current DSP gain.
     pub sends: Vec<TrackId>,
+    /// The track whose played notes this channel's instrument also plays.
+    pub midi_from: Option<TrackId>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -219,8 +221,20 @@ impl RoutingGraph {
                 }
             }
         }
+        // MIDI From only orders rendering. Notes carry no audio, latency or gain,
+        // so they stay out of `edges` and every audio and compensation pass.
+        let note_routes: Vec<(usize, usize)> = channels
+            .iter()
+            .filter_map(|channel| {
+                let from = graph.index(channel.midi_from?, NodeStage::Source)?;
+                Some((from, graph.index(channel.id, NodeStage::Source)?))
+            })
+            .collect();
         let mut pending: Vec<usize> = (0..graph.nodes.len())
-            .map(|node| graph.edges.iter().filter(|edge| edge.to == node).count())
+            .map(|node| {
+                graph.edges.iter().filter(|edge| edge.to == node).count()
+                    + note_routes.iter().filter(|&&(_, to)| to == node).count()
+            })
             .collect();
         for (node, dependencies) in pending.iter().enumerate() {
             if *dependencies == 0 {
@@ -230,10 +244,21 @@ impl RoutingGraph {
         let mut cursor = 0;
         while cursor < graph.order.len() {
             let node = graph.order[cursor];
-            for edge in graph.edges.iter().filter(|edge| edge.from == node) {
-                pending[edge.to] -= 1;
-                if pending[edge.to] == 0 {
-                    graph.order.push(edge.to);
+            let targets = graph
+                .edges
+                .iter()
+                .filter(|edge| edge.from == node)
+                .map(|edge| edge.to)
+                .chain(
+                    note_routes
+                        .iter()
+                        .filter(|&&(from, _)| from == node)
+                        .map(|&(_, to)| to),
+                );
+            for to in targets {
+                pending[to] -= 1;
+                if pending[to] == 0 {
+                    graph.order.push(to);
                 }
             }
             cursor += 1;
@@ -368,6 +393,7 @@ mod tests {
                 assignments: vec![],
                 inactive_inputs: vec![],
             }],
+            midi_from: None,
         }
     }
 
@@ -432,6 +458,7 @@ mod tests {
             is_bus: true,
             effects: vec![],
             sends: vec![send],
+            midi_from: None,
         };
         assert_eq!(
             RoutingGraph::prepare(&[bus(a, b), bus(b, a)]).unwrap_err(),
@@ -460,12 +487,14 @@ mod tests {
                 is_bus: false,
                 effects: vec![],
                 sends,
+                midi_from: None,
             },
             RoutingChannel {
                 id: bus,
                 is_bus: true,
                 effects: vec![],
                 sends: vec![],
+                midi_from: None,
             },
         ])
         .unwrap();
@@ -477,5 +506,54 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    fn midi_track(id: TrackId, midi_from: Option<TrackId>) -> RoutingChannel {
+        RoutingChannel {
+            id,
+            is_bus: false,
+            effects: vec![],
+            sends: vec![],
+            midi_from,
+        }
+    }
+
+    fn position(graph: &RoutingGraph, channel: TrackId) -> usize {
+        let node = graph.index(channel, NodeStage::Source).unwrap();
+        graph.order.iter().position(|&index| index == node).unwrap()
+    }
+
+    #[test]
+    fn a_midi_from_source_renders_before_its_receiver_without_an_audio_edge() {
+        let (source, receiver) = (TrackId::new(), TrackId::new());
+        let plain =
+            RoutingGraph::prepare(&[midi_track(receiver, None), midi_track(source, None)]).unwrap();
+        let routed =
+            RoutingGraph::prepare(&[midi_track(receiver, Some(source)), midi_track(source, None)])
+                .unwrap();
+
+        assert!(position(&routed, source) < position(&routed, receiver));
+        assert_eq!(routed.edges, plain.edges);
+    }
+
+    #[test]
+    fn a_midi_from_loop_is_a_feedback_loop() {
+        let (first, second) = (TrackId::new(), TrackId::new());
+
+        assert_eq!(
+            RoutingGraph::prepare(&[
+                midi_track(first, Some(second)),
+                midi_track(second, Some(first)),
+            ])
+            .unwrap_err(),
+            RoutingError::FeedbackLoop
+        );
+    }
+
+    #[test]
+    fn a_midi_from_source_outside_the_project_is_ignored() {
+        let track = TrackId::new();
+
+        assert!(RoutingGraph::prepare(&[midi_track(track, Some(TrackId::new()))]).is_ok());
     }
 }

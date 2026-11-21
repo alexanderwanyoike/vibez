@@ -72,44 +72,16 @@ fn drum_rack_slice_choice(
     selected: bool,
     markers: AudioSliceMarkers,
 ) -> Element<'static, Message> {
-    button(
-        column![
-            text(label)
-                .size(13)
-                .color(if selected { th::accent() } else { th::text() }),
-            text(if count == 0 {
-                "No interior slices".into()
-            } else {
-                format!("{count} slices")
-            })
-            .size(10)
-            .color(th::text_dim())
-        ]
-        .spacing(3),
-    )
-    .on_press(Message::SetDrumRackSliceMarkers(markers))
-    .padding([9, 11])
-    .width(Length::Fill)
-    .style(move |_theme: &Theme, status| button::Style {
-        background: Some(
-            if selected {
-                th::accent_dim()
-            } else if matches!(status, button::Status::Hovered | button::Status::Pressed) {
-                th::bg_hover()
-            } else {
-                th::bg_elevated()
-            }
-            .into(),
-        ),
-        text_color: th::text(),
-        border: iced::Border {
-            color: if selected { th::accent() } else { th::border() },
-            width: 1.0,
-            radius: 4.0.into(),
+    super::views_dialog::dialog_choice(
+        label.into(),
+        if count == 0 {
+            "No interior slices".into()
+        } else {
+            format!("{count} slices")
         },
-        ..Default::default()
-    })
-    .into()
+        selected,
+        Message::SetDrumRackSliceMarkers(markers),
+    )
 }
 
 fn drum_rack_slice_can_create(slice_count: usize) -> bool {
@@ -174,64 +146,40 @@ impl App {
                     ..Default::default()
                 }
             });
-        let card = container(
-            column![
-                text("Slice to Drum Rack").size(18).color(th::text()),
-                text("Choose which timing markers become pads.")
-                    .size(11)
-                    .color(th::text_dim()),
-                row![
-                    drum_rack_slice_choice(
-                        "Transient markers",
-                        transient_count,
-                        dialog.markers == AudioSliceMarkers::Transients,
-                        AudioSliceMarkers::Transients,
-                    ),
-                    drum_rack_slice_choice(
-                        "Warp markers",
-                        warp_count,
-                        dialog.markers == AudioSliceMarkers::Warp,
-                        AudioSliceMarkers::Warp,
-                    ),
-                ]
-                .spacing(8),
-                text(guidance).size(11).color(if can_create {
-                    th::text_dim()
-                } else {
-                    th::danger()
-                }),
-                text("A MIDI clip will be created to reconstruct the original rhythm.")
-                    .size(10)
-                    .color(th::text_muted()),
-                row![horizontal_space(), cancel, create]
-                    .spacing(8)
-                    .align_y(iced::Alignment::Center),
+        let card = column![
+            text("Slice to Drum Rack").size(18).color(th::text()),
+            text("Choose which timing markers become pads.")
+                .size(11)
+                .color(th::text_dim()),
+            row![
+                drum_rack_slice_choice(
+                    "Transient markers",
+                    transient_count,
+                    dialog.markers == AudioSliceMarkers::Transients,
+                    AudioSliceMarkers::Transients,
+                ),
+                drum_rack_slice_choice(
+                    "Warp markers",
+                    warp_count,
+                    dialog.markers == AudioSliceMarkers::Warp,
+                    AudioSliceMarkers::Warp,
+                ),
             ]
-            .spacing(12),
-        )
-        .width(Length::Fixed(440.0))
-        .padding(18)
-        .style(|_theme: &Theme| container::Style {
-            background: Some(th::bg_surface().into()),
-            border: iced::Border {
-                color: th::border_light(),
-                width: 1.0,
-                radius: 6.0.into(),
-            },
-            ..Default::default()
-        });
-
-        mouse_area(
-            center(card)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .style(|_theme: &Theme| container::Style {
-                    background: Some(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.55).into()),
-                    ..Default::default()
-                }),
-        )
-        .on_press(Message::CancelDrumRackSlice)
-        .into()
+            .spacing(8),
+            text(guidance).size(11).color(if can_create {
+                th::text_dim()
+            } else {
+                th::danger()
+            }),
+            text("A MIDI clip will be created to reconstruct the original rhythm.")
+                .size(10)
+                .color(th::text_muted()),
+            row![horizontal_space(), cancel, create]
+                .spacing(8)
+                .align_y(iced::Alignment::Center),
+        ]
+        .spacing(12);
+        super::views_dialog::dialog_overlay(card, 440.0, Message::CancelDrumRackSlice)
     }
 
     pub(super) fn view_track_deletion_overlay(&self) -> Element<'_, Message> {
@@ -277,7 +225,10 @@ impl App {
                                     background: Some(th::danger().into()),
                                     ..Default::default()
                                 }),
-                            text(label).size(11).color(th::text())
+                            text(label)
+                                .shaping(crate::typography::USER_TEXT_SHAPING)
+                                .size(11)
+                                .color(th::text())
                         ]
                         .spacing(8)
                         .align_y(iced::Alignment::Center),
@@ -322,6 +273,7 @@ impl App {
         let card = container(
             column![
                 text(format!("Delete {track_name}?"))
+                    .shaping(crate::typography::USER_TEXT_SHAPING)
                     .font(crate::typography::PERFORM_DISPLAY)
                     .size(18)
                     .color(th::text()),

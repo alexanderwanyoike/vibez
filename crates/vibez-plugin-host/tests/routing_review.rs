@@ -191,12 +191,14 @@ fn actual_engine_delivers_the_cached_native_failure_to_its_ui_consumer() {
             assignments: vec![],
             inactive_inputs: vec![],
         }],
+        midi_from: None,
     };
     let master = RoutingChannel {
         id: TrackId::MASTER,
         is_bus: true,
         sends: vec![],
         effects: vec![],
+        midi_from: None,
     };
     let (mut engine, mut commands, mut events) = AudioEngine::new();
     commands.push(EngineCommand::SetSampleRate(48000)).unwrap();

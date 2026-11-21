@@ -19,6 +19,19 @@ pub fn vertical<'a>(content: impl Into<Element<'a, Message>>) -> Scrollable<'a, 
     scroll(content, Direction::Vertical(scrollbar()))
 }
 
+/// `content` scrolling up and down, shrunk to its height, above `below`
+/// filling what it leaves. The space under short content then belongs to
+/// `below` rather than the scroll, so it can take a drop.
+pub fn vertical_above<'a>(
+    content: impl Into<Element<'a, Message>>,
+    below: impl Into<Element<'a, Message>>,
+) -> Element<'a, Message> {
+    iced::widget::column![vertical(content).width(iced::Length::Fill), below.into()]
+        .width(iced::Length::Fill)
+        .height(iced::Length::Fill)
+        .into()
+}
+
 /// `content` scrolling sideways behind the quiet bar.
 pub fn horizontal<'a>(content: impl Into<Element<'a, Message>>) -> Scrollable<'a, Message> {
     scroll(content, Direction::Horizontal(scrollbar()))

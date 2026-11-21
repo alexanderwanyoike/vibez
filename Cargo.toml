@@ -14,7 +14,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.6.7"
+version = "0.6.8"
 edition = "2021"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/vibez-daw/vibez"
@@ -40,10 +40,13 @@ rtrb = "0.3"
 audio_thread_priority = "0.32"
 midir = "0.10"
 rustfft = "6.4"
+# Standard MIDI File reading; "parallel" would pull in rayon.
+midly = { version = "0.5", default-features = false, features = ["std"] }
 
 # GUI
 iced = { version = "0.13", features = ["advanced", "canvas", "lazy", "tokio"] }
 iced_runtime = "0.13"
+iced_tiny_skia = { version = "0.13", default-features = false }
 
 # Shared
 serde = { version = "1", features = ["derive"] }

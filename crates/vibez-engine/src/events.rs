@@ -97,7 +97,7 @@ pub(crate) struct SourceSectionClock {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct RepeatNoticePosition {
+pub(crate) struct HeardNotePosition {
     pub(crate) effective_at_samples: u64,
     pub(crate) canonical_at_samples: u64,
     pub(crate) section_id: Option<SectionId>,

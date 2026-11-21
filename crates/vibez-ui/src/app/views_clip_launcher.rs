@@ -1,5 +1,6 @@
 //! Clip Project creation and grid authoring use the shared Vibez shell.
 
+use crate::domains::browser::BrowserMsg;
 use iced::widget::{
     button, canvas, center, column, container, horizontal_space, mouse_area, pick_list, row, stack,
     text, text_input, tooltip,
@@ -16,6 +17,9 @@ use crate::typography::{PERFORM_DISPLAY, PERFORM_LABEL, PERFORM_TECH};
 use crate::widgets::control_style;
 
 use super::App;
+
+/// Clip slot rows the launcher shows at once.
+pub(super) const LAUNCHER_ROWS: u32 = 6;
 
 fn surface(_theme: &Theme) -> container::Style {
     container::Style {
@@ -314,6 +318,7 @@ impl App {
         ];
         super::views_perform_header::RecordGroup {
             status: text(status)
+                .shaping(crate::typography::USER_TEXT_SHAPING)
                 .font(PERFORM_TECH)
                 .size(9)
                 .wrapping(iced::widget::text::Wrapping::None)
@@ -342,6 +347,7 @@ impl App {
         row![
             container(
                 text(clip.name())
+                    .shaping(crate::typography::USER_TEXT_SHAPING)
                     .size(10)
                     .color(th::text())
                     .wrapping(iced::widget::text::Wrapping::None),
@@ -447,7 +453,9 @@ impl App {
                 .into()
         };
         workspace = workspace.push(container(toolbar).padding([if compact { 4 } else { 10 }, 12]));
-        if self.state.project_tracks.tracks.is_empty() {
+        // A drag gets a column beside the last track to drop a new one in.
+        let new_track_column = self.state.browser.drag_source.is_some();
+        if self.state.project_tracks.tracks.is_empty() && !new_track_column {
             workspace = workspace.push(
                 center(
                     column![
@@ -469,18 +477,22 @@ impl App {
             let first_track = self.state.perform.clip_editor.first_track;
             let first_row = self.state.perform.clip_editor.first_row;
             let visible_tracks = ((width - 54.0) / 145.0).floor().max(4.0) as usize;
-            let shown_tracks = self
+            let tracks_shown = self
                 .state
                 .project_tracks
                 .tracks
                 .len()
                 .saturating_sub(first_track)
-                .min(visible_tracks)
-                .max(4);
+                .min(visible_tracks);
+            // The column sits beside the last track, so it shows only while
+            // that track is in view, and the lanes narrow to make room.
+            let new_track_column = new_track_column
+                && first_track + tracks_shown >= self.state.project_tracks.tracks.len();
+            let shown_tracks = (tracks_shown + usize::from(new_track_column)).max(4);
             let lane_width = (width - 46.0) / shown_tracks as f32;
             let header_height = if compact { 26.0 } else { 42.0 };
             let mut numbers = column![iced::widget::Space::new(1, header_height)].spacing(0);
-            for offset in 0..6u32 {
+            for offset in 0..LAUNCHER_ROWS {
                 numbers = numbers.push(
                     container(
                         text(format!("{:02}", first_row + offset + 1))
@@ -571,7 +583,7 @@ impl App {
                     .height(header_height)]
                 .spacing(0)
                 .width(Length::Fixed(lane_width));
-                for offset in 0..6u32 {
+                for offset in 0..LAUNCHER_ROWS {
                     let slot_row = first_row + offset;
                     let recording =
                         self.state
@@ -676,19 +688,31 @@ impl App {
                         border: iced::Border::default(),
                         ..Default::default()
                     });
-                    let cell: Element<'_, Message> = if !track.kind.is_midi()
-                        && slot.is_none()
-                        && self.state.browser.drag_source.is_some()
-                    {
-                        mouse_area(slot_cell)
-                            .on_release(Message::ImportLauncherClip {
+                    let cell: Element<'_, Message> =
+                        if slot.is_none() && self.state.browser.drag_lands_on(track.kind) {
+                            let slot = crate::state::BrowserDropTarget::ClipSlot {
                                 track_id: track.id,
                                 row: slot_row,
-                            })
-                            .into()
-                    } else {
-                        slot_cell.into()
-                    };
+                            };
+                            super::desktop_pointer::drop_target(
+                                mouse_area(slot_cell)
+                                    .on_enter(Message::Browser(BrowserMsg::DragHoverClipSlot {
+                                        track_id: track.id,
+                                        row: slot_row,
+                                    }))
+                                    .on_exit(Message::Browser(BrowserMsg::LeaveDragTarget(slot)))
+                                    .on_release(Message::ImportLauncherClip {
+                                        track_id: track.id,
+                                        row: slot_row,
+                                    }),
+                                crate::domains::desktop_pointer::PointerTarget::ClipSlot {
+                                    track_id: track.id,
+                                    row: slot_row,
+                                },
+                            )
+                        } else {
+                            slot_cell.into()
+                        };
                     let play: Element<'_, Message> = if let Some(clip) = slot {
                         let triggered = self.state.perform.clip_is_triggered(clip);
                         self.view_clip_cell_action(
@@ -805,13 +829,24 @@ impl App {
                 }
                 grid = grid.push(lane);
             }
-            workspace = workspace.push(
-                crate::widgets::quiet_scroll::vertical(
-                    container(grid).padding([0, 12]).width(Length::Fill),
-                )
-                .width(Length::Fill)
-                .height(Length::Fill),
-            );
+            if new_track_column {
+                grid = grid.push(self.view_new_track_column(
+                    first_row,
+                    header_height,
+                    slot_height,
+                    lane_width,
+                    compact,
+                ));
+            }
+            let below: Element<'_, Message> = if new_track_column {
+                super::views_clip_launcher_new_track::below_new_track_column(first_row)
+            } else {
+                iced::widget::Space::new(Length::Fill, Length::Fill).into()
+            };
+            workspace = workspace.push(crate::widgets::quiet_scroll::vertical_above(
+                container(grid).padding([0, 12]).width(Length::Fill),
+                below,
+            ));
         }
         let footer = row![
             text(if keyboard_active {
@@ -885,13 +920,14 @@ impl App {
         let active = self.state.perform.capture.is_active();
         button(
             row![
-                text(if active {
-                    "● CAPTURING"
-                } else {
-                    "○ CAPTURE"
-                })
-                .font(PERFORM_LABEL)
-                .size(10),
+                row![
+                    icons::icon(icons::CIRCLE).size(10),
+                    text(if active { "CAPTURING" } else { "CAPTURE" })
+                        .font(PERFORM_LABEL)
+                        .size(10),
+                ]
+                .spacing(4)
+                .align_y(iced::Alignment::Center),
                 text("F5").font(PERFORM_TECH).size(9),
             ]
             .spacing(8)

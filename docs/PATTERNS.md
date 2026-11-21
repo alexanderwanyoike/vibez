@@ -49,6 +49,10 @@ remain editable at capacity, while another target cannot grow callback storage.
 Offline channel preparation preserves that reserved storage.
 `engine_command_allocation_tests` measures every command; its list of commands
 that still allocate may only shrink.
+When the engine keeps an `Arc` until a later command replaces it (the Browser
+audition's audio and MIDI patterns), the UI keeps that `Arc` and the last few
+it replaced in an `EngineHeld`, so the audio thread never drops the final
+owner.
 
 Ordinary owner returns use one private `RetirementQueue` with 32 fixed slots.
 Reserve the command's existing worst-case allowance before popping it, then
@@ -486,6 +490,40 @@ exists there. Files are named for the domain they serve; mechanism names
 (`helpers`, `utils`) are banned because they cannot refuse new code. Every
 file opens with a `//!` stating its single responsibility in one sentence;
 when the sentence no longer covers the file, the file splits.
+
+## 9. Drop targets another app's drag can reach
+
+Another app's drag holds the pointer, and winit 0.30 passes on none of its
+positions, so widgets see no motion until the drop. A drop target that should
+answer during such a drag wraps itself in
+`desktop_pointer::drop_target(content, PointerTarget::…)`, a container with an
+id. While the drag hovers, the UI tick reads the pointer itself, through the
+platform's `PointerWindow` (QueryPointer on X11, GetCursorPos on Windows,
+NSEvent's mouse location on macOS), and `DropTargetProbe`, a widget
+`Operation`, looks for the ids `App::pointer_targets` lists and finds the one
+under the pointer, allowing for scrolling. `BrowserState::pointer_messages`
+then sends the hover message the widget itself would have sent. A new kind of
+target adds a `PointerTarget` variant, tags its widget, lists it in
+`pointer_targets`, and maps to its hover. Empty space that takes a drop as an
+existing target does wears that target's tag instead. The space below
+Arrange's and a Section's tracks is the new-track row's, and the launcher's
+space beside and below its new-track column is that column's slot for the row
+there, or for the last row shown. The strip under the track headers beside
+the new-track row and below it is a kind of its own, `NewTrackGutter`, since
+it lands at the lane's left edge wherever the pointer is. Device cards and
+Drum Rack pads are not tagged, so a poll that finds no tagged target leaves
+the drop free, and the card under the released pointer takes it. Wayland has no `PointerWindow`,
+since a client cannot ask the compositor where the pointer is, so a drop there
+waits for the released pointer too.
+
+## 10. Text that shows a producer's names
+
+Track, Clip and Section names can be in any script. iced 0.13 shapes text
+with `Shaping::Basic` unless told otherwise, and basic shaping draws a
+character the font lacks as an empty box, so any `text`, canvas `Text` or
+`pick_list` that shows a name, alone or inside a longer line, sets its
+shaping to `typography::USER_TEXT_SHAPING`. iced has no app-wide default, so
+each such site opts in. Fixed interface strings keep the default.
 
 ---
 

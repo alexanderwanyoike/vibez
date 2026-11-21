@@ -300,6 +300,7 @@ impl App {
             column![
                 text("AUDIO CLIP").size(8).color(th::text_dim()),
                 text(clip.name.clone())
+                    .shaping(crate::typography::USER_TEXT_SHAPING)
                     .size(11)
                     .color(th::text())
                     .width(Length::Fill),

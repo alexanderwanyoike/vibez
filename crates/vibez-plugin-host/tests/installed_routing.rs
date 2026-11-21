@@ -267,18 +267,21 @@ fn independently_installed_instruments_feed_engine_sidechain_inputs() {
                     tap: SourceTap::AfterEffects,
                 }],
             }],
+            midi_from: None,
         };
         let source_model = RoutingChannel {
             id: source,
             is_bus: false,
             effects: vec![],
             sends: vec![],
+            midi_from: None,
         };
         let master = RoutingChannel {
             id: TrackId::MASTER,
             is_bus: false,
             effects: vec![],
             sends: vec![],
+            midi_from: None,
         };
         commands
             .push(EngineCommand::SetRouting(

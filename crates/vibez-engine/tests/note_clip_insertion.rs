@@ -113,6 +113,7 @@ fn native_note_consumer_fulfills_stale_hints_and_preserves_first_duplicate_note_
             is_bus: id.is_master(),
             sends: Vec::new(),
             effects: Vec::new(),
+            midi_from: None,
         })
         .collect();
     commands

@@ -117,6 +117,7 @@ impl App {
             plugin_instrument,
             automation: Vec::new(),
             sends: track.sends.clone(),
+            midi_from: track.midi_from,
         }
     }
 }

@@ -9,7 +9,7 @@ use vibez_core::audio_buffer::DecodedAudio;
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::midi::{InstrumentKind, TrackKind};
 use vibez_core::track::MediaSourceRef;
-use vibez_engine::commands::{AuditionStart, EngineCommand};
+use vibez_engine::commands::EngineCommand;
 
 use crate::domains::device_panel_drop::DevicePanelDrop;
 use crate::message::{BrowserImportTarget, Message, PreparedBrowserImport};
@@ -52,6 +52,9 @@ struct BrowserNavigableResult {
     row_index: usize,
     visible_rows: usize,
 }
+
+/// What a drop says when its Section was deleted while the file was read.
+const SECTION_DROP_GONE: &str = "Section drop target no longer exists";
 
 impl App {
     pub(super) fn select_adjacent_browser_result(&mut self, direction: i8) -> Task<Message> {
@@ -251,7 +254,10 @@ impl App {
         let Some(source) = browser.selected_source.clone() else {
             return Task::none();
         };
-        match browser.waveform_for_source(&source) {
+        if self.audition_read_midi_file(&source) {
+            return Task::none();
+        }
+        match self.state.browser.waveform_for_source(&source) {
             Some(raw) => self.play_browser_mode(source, raw),
             None => Task::none(),
         }
@@ -267,32 +273,19 @@ impl App {
         audio: Arc<DecodedAudio>,
         playback_mode: AuditionMode,
     ) {
-        let warped = playback_mode == AuditionMode::Warp;
-        let queued = self.state.transport.is_playing() && warped;
-        // Retain a UI-side clone (never cleared on stop) so the engine
-        // voice can never drop the final Arc inside the RT callback.
-        // A superseded buffer moves into the retired ring rather than
-        // dropping here, because up to three outgoing engine voices may
-        // still hold it while fading.
-        if let Some(prev) = self
-            .state
-            .browser
-            .audition_audio
-            .replace(Arc::clone(&audio))
-        {
-            let retired = &mut self.state.browser.audition_audio_retired;
-            retired.rotate_right(1);
-            retired[0] = Some(prev);
-        }
+        self.state.browser.audition_pattern.retire();
+        self.state.browser.audition_audio.hand(Arc::clone(&audio));
         self.send_command(EngineCommand::StartAudition {
             audio,
-            start: if warped {
-                AuditionStart::NextBar
-            } else {
-                AuditionStart::Immediate
-            },
-            looped: warped,
+            start: playback_mode.engine_start(),
+            looped: playback_mode.loops(),
         });
+        self.audition_requested(playback_mode);
+    }
+
+    /// Records an audition just handed to the engine and says so.
+    pub(super) fn audition_requested(&mut self, playback_mode: AuditionMode) {
+        let queued = self.state.transport.is_playing() && playback_mode.loops();
         self.state
             .browser
             .mark_audition_requested(queued, playback_mode);
@@ -466,6 +459,19 @@ impl App {
         Some(id)
     }
 
+    /// A new audio track for an import into Perform, which shows it at once;
+    /// `None`, saying so, when the project holds no more tracks.
+    fn new_audio_track_for_perform_import(&mut self) -> Option<TrackId> {
+        let Some(track_id) = self.ensure_audio_track_for_import(None) else {
+            self.state.status_text = crate::domains::arrangement::PROJECT_TRACKS_FULL.into();
+            return None;
+        };
+        self.state
+            .perform
+            .sync_project_tracks(&self.state.project_tracks.tracks);
+        Some(track_id)
+    }
+
     pub(super) fn prepare_browser_sample_import(
         &mut self,
         target: BrowserImportTarget,
@@ -524,6 +530,25 @@ impl App {
     ) -> Task<Message> {
         match target {
             BrowserImportTarget::LauncherClipAt { track_id, row } => {
+                self.add_audio_launcher_clip(track_id, row, payload)
+            }
+            BrowserImportTarget::SectionNewTrackAt {
+                section_id,
+                position_samples,
+            } => {
+                if self.state.perform.sections.by_id(section_id).is_none() {
+                    self.state.status_text = SECTION_DROP_GONE.into();
+                    return Task::none();
+                }
+                let Some(track_id) = self.new_audio_track_for_perform_import() else {
+                    return Task::none();
+                };
+                self.add_audio_clip_to_section_at(section_id, track_id, position_samples, payload)
+            }
+            BrowserImportTarget::LauncherNewTrackAt { row } => {
+                let Some(track_id) = self.new_audio_track_for_perform_import() else {
+                    return Task::none();
+                };
                 self.add_audio_launcher_clip(track_id, row, payload)
             }
             BrowserImportTarget::ArrangementClip(preferred_track) => {
@@ -824,7 +849,7 @@ impl App {
                 .clips
                 .push(clip);
         } else {
-            self.state.status_text = "Section drop target no longer exists".into();
+            self.state.status_text = SECTION_DROP_GONE.into();
             return Task::none();
         }
         self.refresh_playing_section_after_edit(section_id);

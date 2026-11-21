@@ -109,7 +109,7 @@ fn in_segment_repeat_source_is_immediate_without_advancing_its_heard_copy() {
     });
     assert_eq!(
         crate::retirement::tests::allocations(|| {
-            assert!(presentation_queue::emit_repeated(
+            assert!(presentation_queue::emit_pair(
                 source,
                 heard,
                 &mut engine.event_tx,
@@ -340,6 +340,7 @@ fn state_queued_after_completed_callback_waits_only_its_real_latency() {
             assignments: vec![],
             inactive_inputs: vec![],
         }],
+        midi_from: None,
     }];
     let reports = [(
         RoutingNode {

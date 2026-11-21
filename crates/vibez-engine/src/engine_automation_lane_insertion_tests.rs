@@ -125,6 +125,7 @@ fn appending_a_lane_at_full_capacity_preserves_audio_and_owners_without_callback
         is_bus: id.is_master(),
         sends: vec![],
         effects: vec![],
+        midi_from: None,
     });
     let mut routing = crate::routing::PreparedRouting::prepare(&channels, 64).unwrap();
     routing

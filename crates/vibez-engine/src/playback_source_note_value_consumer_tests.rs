@@ -66,6 +66,7 @@ fn native_many_note_consumer_keeps_indices_equal_starts_and_ceil_audio_while_ser
             is_bus: id.is_master(),
             sends: Vec::new(),
             effects: Vec::new(),
+            midi_from: None,
         })
         .collect();
     commands

@@ -4,6 +4,7 @@ use iced::mouse;
 use iced::widget::canvas;
 use iced::{Rectangle, Renderer};
 
+use crate::icons;
 use crate::theme;
 
 use super::clip_colors::{clip_colors, ClipColors};
@@ -47,10 +48,13 @@ fn waveform_peak_for_pixel(
     peaks: &[(f32, f32)],
     pixel: usize,
     rendered_pixels: usize,
-    frames_per_pixel: f64,
-    peak_span_frames: Option<usize>,
+    scale: PeakScale,
 ) -> Option<(f32, f32)> {
-    if let Some(peak_span_frames) = peak_span_frames.filter(|span| *span > 0) {
+    if let PeakScale::Spans {
+        frames_per_pixel,
+        peak_span_frames,
+    } = scale
+    {
         let peak_span_frames = peak_span_frames as f64;
         let first = (pixel as f64 * frames_per_pixel / peak_span_frames).floor() as usize;
         let end = (((pixel + 1) as f64 * frames_per_pixel / peak_span_frames).ceil() as usize)
@@ -66,6 +70,99 @@ fn waveform_peak_for_pixel(
     peaks
         .get(pixel.saturating_mul(peaks.len()) / rendered_pixels.max(1))
         .copied()
+}
+
+/// A recording preview leads its title with the record circle the transport
+/// shows.
+fn title_icon(is_recording_preview: bool, looped: bool) -> Option<char> {
+    if is_recording_preview {
+        Some(icons::CIRCLE)
+    } else {
+        looped.then_some(icons::REPEAT)
+    }
+}
+
+/// How a Clip's peaks map onto the lane's pixels.
+#[derive(Debug, Clone, Copy)]
+pub(super) enum PeakScale {
+    /// The peaks stretch across the Clip's width.
+    Fitted,
+    /// A growing take's peaks, each spanning `peak_span_frames` source
+    /// frames, on a lane where a pixel spans `frames_per_pixel`.
+    Spans {
+        frames_per_pixel: f64,
+        peak_span_frames: usize,
+    },
+}
+
+impl PeakScale {
+    /// The scale of peaks spanning `peak_span_frames` each, or fitted ones.
+    fn of(peak_span_frames: Option<usize>, frames_per_pixel: f64) -> Self {
+        match peak_span_frames.filter(|span| *span > 0) {
+            Some(peak_span_frames) => Self::Spans {
+                frames_per_pixel,
+                peak_span_frames,
+            },
+            None => Self::Fitted,
+        }
+    }
+}
+
+/// `peaks` across a Clip's `body`, `clip_w` wide before its gap, under its
+/// title, on a lane `w` wide.
+pub(super) fn draw_waveform(
+    frame: &mut canvas::Frame,
+    peaks: &[(f32, f32)],
+    scale: PeakScale,
+    body: Rectangle,
+    clip_w: f32,
+    w: f32,
+    ink: iced::Color,
+) {
+    if peaks.is_empty() || clip_w <= 4.0 {
+        return;
+    }
+    let body_top = body.y + CLIP_TITLE_HEIGHT;
+    let body_h = body.height - CLIP_TITLE_HEIGHT;
+    let center_y = body_top + body_h / 2.0;
+    let half_h = body_h / 2.0 - 2.0;
+    let pixels = clip_w as usize;
+    for px in visible_pixel_columns(body.x, body.width, w) {
+        let screen_x = body.x + px as f32;
+        let Some((min_val, max_val)) = waveform_peak_for_pixel(peaks, px, pixels, scale) else {
+            break;
+        };
+        let y_top = center_y - (max_val * half_h);
+        let y_bottom = center_y - (min_val * half_h);
+        let height = (y_bottom - y_top).max(1.0);
+        frame.fill_rectangle(
+            iced::Point::new(screen_x, y_top),
+            iced::Size::new(1.0, height),
+            ink,
+        );
+    }
+}
+
+/// The notes of `summary` under the title of a Clip's `body`, on a lane `w`
+/// wide at `pixels_per_beat`.
+pub(super) fn draw_notes(
+    frame: &mut canvas::Frame,
+    summary: &super::note_summary::NoteSummary,
+    body: Rectangle,
+    w: f32,
+    pixels_per_beat: f32,
+    ink: iced::Color,
+) {
+    let left = body.x.max(0.0);
+    let area = Rectangle {
+        x: left,
+        y: body.y + CLIP_TITLE_HEIGHT,
+        width: ((body.x + body.width).min(w) - left).max(0.0),
+        height: body.height - CLIP_TITLE_HEIGHT,
+    };
+    for mark in note_marks(summary, body.x, area, pixels_per_beat) {
+        frame.fill_rectangle(mark.position(), mark.size(), ink);
+    }
 }
 
 impl TrackClipCanvas {
@@ -93,9 +190,9 @@ impl TrackClipCanvas {
         // Layout can place the lane between pixel rows, which would smear
         // every clip edge and one pixel line across two rows.
         let offset = whole_pixel_offset(bounds.position());
-        let resting = static_layer.draw(self, renderer, bounds, cursor, |frame| {
+        let resting = static_layer.draw(self, renderer, bounds, |frame| {
             frame.translate(offset);
-            self.draw_static_layer(frame, bounds, cursor);
+            self.draw_static_layer(frame, bounds);
         });
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         frame.translate(offset);
@@ -110,23 +207,14 @@ impl TrackClipCanvas {
     }
 
     /// The lane background, grid and every Clip not moving with a drag.
-    fn draw_static_layer(
-        &self,
-        frame: &mut canvas::Frame,
-        bounds: Rectangle,
-        cursor: mouse::Cursor,
-    ) {
+    fn draw_static_layer(&self, frame: &mut canvas::Frame, bounds: Rectangle) {
         let w = bounds.width;
         let h = bounds.height;
         let geometry = self.geometry();
         let ppb = geometry.pixels_per_beat();
-        let drop_hover = self.drop_hover(bounds, cursor);
-        let drop_compatible = !self.is_instrument;
 
         // Background
-        let bg_color = if drop_hover && drop_compatible {
-            theme::accent_dim()
-        } else if self.selected {
+        let bg_color = if self.selected {
             theme::blend(theme::track_bg(), theme::text(), SELECTED_LANE_LIFT)
         } else {
             theme::track_bg()
@@ -201,9 +289,7 @@ impl TrackClipCanvas {
     fn draw_live_layer(&self, frame: &mut canvas::Frame, bounds: Rectangle, cursor: mouse::Cursor) {
         let w = bounds.width;
         let h = bounds.height;
-        let geometry = self.geometry();
         let drop_hover = self.drop_hover(bounds, cursor);
-        let drop_compatible = !self.is_instrument;
 
         self.draw_drag_origin(frame, h);
 
@@ -258,6 +344,10 @@ impl TrackClipCanvas {
             if let Some(preview) = &self.recording_preview {
                 self.draw_note_clip(frame, preview, true, w, h);
             }
+        }
+
+        if let Some(ghost) = &self.drop_ghost {
+            ghost.draw(frame, self.geometry(), self.track_color, w, h);
         }
 
         // Selection region tint. Only drawn on the lane the selection
@@ -350,65 +440,12 @@ impl TrackClipCanvas {
                 .with_width(1.0),
         );
 
-        // Drop-target indicator: bold accent border + vertical bar at the
-        // cursor x + the track name overlaid so the user can verify which
-        // lane will receive the drop.
-        if drop_hover && drop_compatible {
-            let target_color = theme::accent();
-            let outline = canvas::Path::rectangle(
-                iced::Point::new(1.0, 1.0),
-                iced::Size::new(w - 2.0, h - 2.0),
-            );
-            frame.stroke(
-                &outline,
-                canvas::Stroke::default()
-                    .with_color(target_color)
-                    .with_width(2.0),
-            );
-            if let Some(local) = cursor.position_in(bounds) {
-                let beat = self.snapped_beat(self.x_to_beat(local.x).max(0.0));
-                let snapped_x = self.beat_to_x(beat);
-                if snapped_x >= 0.0 && snapped_x <= w {
-                    let drop_line = canvas::Path::line(
-                        iced::Point::new(snapped_x, 0.0),
-                        iced::Point::new(snapped_x, h),
-                    );
-                    frame.stroke(
-                        &drop_line,
-                        canvas::Stroke::default()
-                            .with_color(target_color)
-                            .with_width(2.0),
-                    );
-                }
-                if let Some(duration_beats) = self.sample_drop_duration_beats {
-                    let preview_width = geometry.width_for_beats(duration_beats);
-                    let visible_width = preview_width.min((w - snapped_x).max(0.0));
-                    if visible_width > 0.0 {
-                        frame.fill_rectangle(
-                            iced::Point::new(snapped_x, 2.0),
-                            iced::Size::new(visible_width, h - 4.0),
-                            theme::with_alpha(theme::accent(), 0.18),
-                        );
-                    }
-                }
-                frame.fill_text(canvas::Text {
-                    content: format!("Beat {beat:.2} · {}", self.track_name),
-                    position: iced::Point::new(8.0, 8.0),
-                    color: target_color,
-                    size: 13.0.into(),
-                    ..Default::default()
-                });
-                if let Some(detail) = self.sample_drop_detail.as_ref() {
-                    frame.fill_text(canvas::Text {
-                        content: detail.clone(),
-                        position: iced::Point::new(8.0, 28.0),
-                        color: theme::text(),
-                        size: 11.0.into(),
-                        ..Default::default()
-                    });
-                }
-            }
-        } else if let Some(zone) = self.drop_zone.as_ref().filter(|_| drop_hover) {
+        // The ghost says where the drop lands, so the zone would only repeat it.
+        if let Some(zone) = self
+            .drop_zone
+            .as_ref()
+            .filter(|_| drop_hover && self.drop_ghost.is_none())
+        {
             use crate::widgets::drop_highlight::{draw_zone, CARD_ZONE_INSET, CARD_ZONE_RADIUS};
             let origin = bounds.position() + whole_pixel_offset(bounds.position());
             let area = Rectangle::new(
@@ -469,34 +506,15 @@ impl TrackClipCanvas {
         });
         draw_clip_back(frame, body, &colors, loop_passes, w);
 
-        if !clip.peaks.is_empty() && clip_w > 4.0 {
-            let body_top = clip_y + CLIP_TITLE_HEIGHT;
-            let body_h = clip_h - CLIP_TITLE_HEIGHT;
-            let center_y = body_top + body_h / 2.0;
-            let half_h = body_h / 2.0 - 2.0;
-            let pixels = clip_w as usize;
-            let frames_per_pixel = spb / f64::from(ppb);
-            for px in visible_pixel_columns(clip_x, body.width, w) {
-                let screen_x = clip_x + px as f32;
-                let Some((min_val, max_val)) = waveform_peak_for_pixel(
-                    &clip.peaks,
-                    px,
-                    pixels,
-                    frames_per_pixel,
-                    clip.peak_span_frames,
-                ) else {
-                    break;
-                };
-                let y_top = center_y - (max_val * half_h);
-                let y_bottom = center_y - (min_val * half_h);
-                let height = (y_bottom - y_top).max(1.0);
-                frame.fill_rectangle(
-                    iced::Point::new(screen_x, y_top),
-                    iced::Size::new(1.0, height),
-                    colors.ink,
-                );
-            }
-        }
+        draw_waveform(
+            frame,
+            &clip.peaks,
+            PeakScale::of(clip.peak_span_frames, spb / f64::from(ppb)),
+            body,
+            clip_w,
+            w,
+            colors.ink,
+        );
 
         if !is_recording_preview
             && (is_selected || clip.fade_in_frames > 0 || clip.fade_out_frames > 0)
@@ -551,7 +569,14 @@ impl TrackClipCanvas {
                 }
             }
         }
-        draw_clip_front(frame, body, &colors, &clip.name, looped, w);
+        draw_clip_front(
+            frame,
+            body,
+            &colors,
+            &clip.name,
+            title_icon(is_recording_preview, looped),
+            w,
+        );
 
         // Diagonal stripe overlay when the clip's warp is
         // stale relative to the current project tempo. Low
@@ -633,25 +658,47 @@ impl TrackClipCanvas {
             });
         draw_clip_back(frame, body, &colors, loop_passes, w);
 
-        // Draw note blocks inside the clip (below title bar)
-        let left = clip_x.max(0.0);
-        let area = Rectangle {
-            x: left,
-            y: clip_y + CLIP_TITLE_HEIGHT,
-            width: ((body.x + body.width).min(w) - left).max(0.0),
-            height: clip_h - CLIP_TITLE_HEIGHT,
-        };
-        for mark in note_marks(&note_clip.notes, clip_x, area, geometry.pixels_per_beat()) {
-            frame.fill_rectangle(mark.position(), mark.size(), colors.ink);
-        }
+        draw_notes(
+            frame,
+            &note_clip.notes,
+            body,
+            w,
+            geometry.pixels_per_beat(),
+            colors.ink,
+        );
 
-        draw_clip_front(frame, body, &colors, &note_clip.name, looping, w);
+        draw_clip_front(
+            frame,
+            body,
+            &colors,
+            &note_clip.name,
+            title_icon(is_recording_preview, looping),
+            w,
+        );
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{visible_pixel_columns, waveform_peak_for_pixel, whole_pixel_offset};
+    use super::{
+        title_icon, visible_pixel_columns, waveform_peak_for_pixel, whole_pixel_offset, PeakScale,
+    };
+    use crate::icons;
+
+    #[test]
+    fn a_recording_preview_leads_with_the_record_circle_and_a_looped_clip_with_its_loop() {
+        assert_eq!(title_icon(true, false), Some(icons::CIRCLE));
+        assert_eq!(title_icon(true, true), Some(icons::CIRCLE));
+        assert_eq!(title_icon(false, true), Some(icons::REPEAT));
+        assert_eq!(title_icon(false, false), None);
+    }
+
+    fn spans(peak_span_frames: usize) -> PeakScale {
+        PeakScale::Spans {
+            frames_per_pixel: 600.0,
+            peak_span_frames,
+        }
+    }
 
     #[test]
     fn a_lane_laid_out_between_pixel_rows_paints_on_whole_pixels() {
@@ -668,8 +715,8 @@ mod tests {
         let first: Vec<_> = (0..120).map(|index| (index as f32, index as f32)).collect();
         let grown: Vec<_> = (0..132).map(|index| (index as f32, index as f32)).collect();
 
-        let before = waveform_peak_for_pixel(&first, 10, 12, 600.0, Some(64));
-        let after = waveform_peak_for_pixel(&grown, 10, 14, 600.0, Some(64));
+        let before = waveform_peak_for_pixel(&first, 10, 12, spans(64));
+        let after = waveform_peak_for_pixel(&grown, 10, 14, spans(64));
 
         assert_eq!(before, after);
         assert_eq!(before, Some((93.0, 103.0)));
@@ -687,8 +734,8 @@ mod tests {
             .map(|pair| (pair[0].0.min(pair[1].0), pair[0].1.max(pair[1].1)))
             .collect();
 
-        let before = waveform_peak_for_pixel(&original, 10, 24, 600.0, Some(64));
-        let after = waveform_peak_for_pixel(&compacted, 10, 24, 600.0, Some(128));
+        let before = waveform_peak_for_pixel(&original, 10, 24, spans(64));
+        let after = waveform_peak_for_pixel(&compacted, 10, 24, spans(128));
 
         assert_eq!(before, after);
     }
@@ -698,7 +745,7 @@ mod tests {
         let peaks = [(0.0, 0.0), (1.0, 1.0), (2.0, 2.0), (3.0, 3.0)];
 
         assert_eq!(
-            waveform_peak_for_pixel(&peaks, 2, 8, 600.0, None),
+            waveform_peak_for_pixel(&peaks, 2, 8, PeakScale::Fitted),
             Some((1.0, 1.0))
         );
     }

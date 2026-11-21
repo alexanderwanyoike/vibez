@@ -183,8 +183,10 @@ fn audition_playhead_tracks_the_active_buffer_and_hides_when_stopped() {
         channels: vec![vec![0.0; 1_000]],
         sample_rate: 44_100,
     });
+    let mut audition_audio = crate::state::EngineHeld::default();
+    audition_audio.hand(audio);
     let mut browser = BrowserState {
-        audition_audio: Some(audio),
+        audition_audio,
         audition_playing: true,
         audition_position_frames: 250,
         ..BrowserState::default()
@@ -1423,8 +1425,8 @@ fn the_status_and_the_ghost_read_each_target_from_one_place() {
         let mut b = dragging();
         let action = b.update(hover);
         let target = b.drag_target.clone().unwrap();
-        assert!(!target.status().is_empty());
-        assert_eq!(action.status, Some(target.status()));
+        assert!(!target.status(DragMedia::Audio).is_empty());
+        assert_eq!(action.status, Some(target.status(DragMedia::Audio)));
         assert!(target.accepts_drop());
         // The zone or lane names the outcome; the ghost only carries the
         // sample and says whether the drop is taken.
@@ -1510,4 +1512,47 @@ fn only_the_hovered_lane_marks_a_refusal_zone() {
     assert_eq!(b.lane_drop_zone(hovered), b.drop_zone());
     assert!(b.lane_drop_zone(hovered).is_some());
     assert_eq!(b.lane_drop_zone(TrackId::new()), None);
+}
+
+#[test]
+fn the_audition_status_says_what_the_selection_and_audition_are_doing() {
+    use crate::state::{AuditionMode, AuditionStatus};
+    let midi = MediaSourceRef::LocalFile {
+        path: "/samples/bass.mid".into(),
+    };
+    let mut browser = BrowserState::default();
+    assert_eq!(browser.audition_status(), AuditionStatus::Select);
+    browser.waveform_audio = Some(Arc::new(vibez_core::audio_buffer::DecodedAudio {
+        channels: vec![vec![0.0; 4]],
+        sample_rate: 44_100,
+    }));
+    assert_eq!(
+        browser.audition_status(),
+        AuditionStatus::Ready(AuditionMode::Warp)
+    );
+
+    browser.select_source(midi);
+    assert!(browser.selected_is_midi());
+    browser.waveform_error = Some("unreadable".into());
+    assert_eq!(browser.audition_status(), AuditionStatus::Unavailable);
+    assert!(!browser.audition_status().keeps_its_width());
+
+    browser.audition_playing = true;
+    browser.audition_playback_mode = Some(AuditionMode::Raw);
+    browser.audition_mode = AuditionMode::Raw;
+    assert_eq!(browser.audition_status().label(), "RAW");
+    browser.audition_mode = AuditionMode::Warp;
+    assert_eq!(browser.audition_status(), AuditionStatus::Warping);
+    browser.audition_playback_mode = None;
+    assert_eq!(browser.audition_status().label(), "PLAYING");
+
+    browser.audition_queued = true;
+    assert_eq!(browser.audition_status().label(), "QUEUED");
+    browser.audition_loading = true;
+    assert_eq!(browser.audition_status(), AuditionStatus::Preparing);
+    browser.audition_playback_mode = Some(AuditionMode::Raw);
+    assert_eq!(browser.audition_status(), AuditionStatus::Warping);
+    browser.remote.preview_in_progress = true;
+    assert_eq!(browser.audition_status(), AuditionStatus::Fetching);
+    assert!(browser.audition_status().keeps_its_width());
 }

@@ -110,6 +110,18 @@ impl FrameClipTimeline {
         self.is_looping().then(|| self.loop_end - self.start)
     }
 
+    /// How long a launched Clip plays before it repeats. Started inside its
+    /// loop it repeats on the loop, as a Session clip does, so the window end
+    /// cannot cut a pass short; an intro before the loop, or a loop longer
+    /// than the window, keeps the window.
+    pub fn launch_period(self) -> u64 {
+        if self.is_looping() && self.start >= self.loop_start {
+            (self.loop_end - self.loop_start).min(self.duration)
+        } else {
+            self.duration
+        }
+    }
+
     pub fn wraps(self) -> FrameOccurrences {
         FrameOccurrences {
             initial: None,
@@ -273,6 +285,15 @@ impl BeatClipTimeline {
 
     pub fn first_wrap(self) -> Option<f64> {
         self.is_looping().then_some(self.loop_end - self.start)
+    }
+
+    /// See [`FrameClipTimeline::launch_period`].
+    pub fn launch_period(self) -> f64 {
+        if self.is_looping() && self.start >= self.loop_start {
+            (self.loop_end - self.loop_start).min(self.duration)
+        } else {
+            self.duration
+        }
     }
 
     pub fn wraps(self) -> BeatOccurrences {
@@ -449,5 +470,23 @@ mod tests {
         assert_eq!(frames.clamp_start(100, 0, 100), 99);
         let beats = BeatClipTimeline::new(0.0, 0.0, 4.0, 4.0, true);
         assert_eq!(beats.clamp_start(4.0, 0.0, 4.0), 3.99);
+    }
+
+    #[test]
+    fn a_launch_keeps_the_window_for_an_intro_or_a_loop_past_it() {
+        let intro = FrameClipTimeline::new(0, 16, 32, 44, true);
+        assert_eq!(intro.launch_period(), 44);
+        let past_window = BeatClipTimeline::new(0.0, 0.0, 32.0, 16.0, true);
+        assert_eq!(past_window.launch_period(), 16.0);
+        let one_shot = FrameClipTimeline::new(0, 0, 32, 44, false);
+        assert_eq!(one_shot.launch_period(), 44);
+    }
+
+    #[test]
+    fn a_launch_started_in_its_loop_repeats_on_the_loop() {
+        let frames = FrameClipTimeline::new(4, 0, 32, 44, true);
+        assert_eq!(frames.launch_period(), 32);
+        let beats = BeatClipTimeline::new(12.0, 8.0, 48.0, 44.0, true);
+        assert_eq!(beats.launch_period(), 40.0);
     }
 }

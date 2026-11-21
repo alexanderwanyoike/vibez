@@ -13,15 +13,22 @@ mod clip_launch;
 mod clip_loop_tests;
 mod effect_slot;
 mod groove;
+mod live_hold;
+#[cfg(test)]
+mod live_hold_tests;
 mod note_repeat;
 mod pan;
+mod pitch_mask;
 mod render_context;
+mod routed_notes;
 pub use effect_slot::EffectSlot;
 pub(crate) use effect_slot::MeterSide;
 use groove::collect_timed_note_events;
+pub(crate) use groove::frame_for_beat;
 pub use pan::{any_solo, balance_pan, equal_power_pan};
 use render_context::InstrumentRenderBlock;
 pub(crate) use render_context::InstrumentRenderContext;
+pub(crate) use routed_notes::RoutedNotes;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PlaybackTimeline {
@@ -183,10 +190,25 @@ pub struct EngineTrack {
     /// The Clip whose note started each pitch in `active_notes`, so an edit
     /// of one Clip can release its own voices and leave the others.
     note_owners: [Option<ClipId>; 128],
+    /// Pitches a live key is holding down.
+    live_held: u128,
+    /// Pitches a live key took over, until a Clip note-on reclaims them.
+    live_owned: u128,
     /// Drum Rack pitches triggered by resident clips during this render block.
     /// Cosmetic feedback is deliberately lossy when the UI event ring is full.
     pending_note_activity: u128,
     pub(crate) suppress_source_notes: bool,
+    /// What this track's instrument played this block, for its MIDI From
+    /// receivers, which render after it.
+    played_notes: vibez_core::note_output::NoteOutput,
+    /// Whether `played_notes` came from rendering this block.
+    played_this_block: bool,
+    /// Counts instrument changes, so a receiver can tell that notes the old
+    /// instrument started will never end.
+    note_epoch: u64,
+    pub(crate) routed_notes: routed_notes::RoutedNotes,
+    /// The Browser's MIDI audition, played here and never recorded.
+    pub(crate) audition_notes: RoutedNotes<u64>,
 }
 
 impl EngineTrack {
@@ -286,6 +308,8 @@ impl EngineTrack {
 
         // Send all events with timing, then render the whole buffer at once
         let instrument = self.instrument.as_mut().unwrap();
+        self.routed_notes.schedule(instrument.as_mut());
+        self.audition_notes.schedule(instrument.as_mut());
 
         for &(frame, pitch) in &self.timed_note_offs {
             instrument.note_off_at(pitch, frame);
@@ -355,6 +379,8 @@ impl EngineTrack {
         self.collect_source_note_events(pos, frames, spb, swing);
         let mut note_on_index = 0;
         let mut note_off_index = 0;
+        let mut routed = 0;
+        let mut auditioned = 0;
 
         for frame in 0..frames {
             let (repeat_triggers, repeat_count) =
@@ -389,6 +415,10 @@ impl EngineTrack {
                 on_repeat(trigger);
                 rendered = true;
             }
+            self.routed_notes
+                .play_due(frame as u32, &mut routed, instrument.as_mut());
+            self.audition_notes
+                .play_due(frame as u32, &mut auditioned, instrument.as_mut());
 
             let start = frame * channels;
             let end = start + channels;
@@ -433,6 +463,80 @@ impl EngineTrack {
             &mut self.timed_note_ons,
             &mut self.timed_note_offs,
         );
+        live_hold::yield_to_live_keys(
+            &mut self.timed_note_ons,
+            &mut self.timed_note_offs,
+            self.live_held,
+            &mut self.live_owned,
+        );
+    }
+
+    /// A live key takes over its pitch, so a Clip voice already there is no
+    /// longer the Clip's to release.
+    pub(crate) fn hold_live_key(&mut self, pitch: u8) {
+        if let Some(bit) = live_hold::pitch_bit(pitch) {
+            self.live_held |= bit;
+            self.live_owned |= bit;
+            self.active_notes &= !bit;
+            if let Some(owner) = self.note_owners.get_mut(usize::from(pitch)) {
+                *owner = None;
+            }
+        }
+    }
+
+    pub(crate) fn release_live_key(&mut self, pitch: u8) {
+        if let Some(bit) = live_hold::pitch_bit(pitch) {
+            self.live_held &= !bit;
+        }
+    }
+
+    /// A track that skips rendering this block must not pass on last block's notes.
+    pub(crate) fn forget_played_notes(&mut self) {
+        self.played_notes.clear();
+        self.played_this_block = false;
+    }
+
+    /// What a MIDI From receiver takes from this track this block.
+    pub(crate) fn played_note_source(
+        &self,
+    ) -> (
+        Option<routed_notes::NoteSource>,
+        &[vibez_core::note_output::BlockNote],
+    ) {
+        let source = self.played_this_block.then_some(routed_notes::NoteSource {
+            track: self.id,
+            instrument: self.note_epoch,
+        });
+        (source, self.played_notes.notes())
+    }
+
+    pub(crate) fn replace_instrument(
+        &mut self,
+        instrument: Box<dyn Instrument>,
+    ) -> Option<Box<dyn Instrument>> {
+        self.note_epoch += 1;
+        self.live_held = 0;
+        self.live_owned = 0;
+        self.instrument.replace(instrument)
+    }
+
+    pub(crate) fn take_instrument(&mut self) -> Option<Box<dyn Instrument>> {
+        self.note_epoch += 1;
+        self.instrument.take()
+    }
+
+    pub(crate) fn keep_played_notes(&mut self) {
+        self.played_this_block = true;
+        self.played_notes.clear();
+        if let Some(output) = self
+            .instrument
+            .as_ref()
+            .and_then(|instrument| instrument.note_output())
+        {
+            for &note in output.notes() {
+                self.played_notes.push(note);
+            }
+        }
     }
 
     pub(crate) fn take_note_activity(&mut self) -> u128 {

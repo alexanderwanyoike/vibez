@@ -109,21 +109,17 @@ pub struct TrackClipCanvas {
     /// True while a sample is being drag-dropped from the browser.
     /// Controls whether mouse-up on this lane emits `DropSampleOnArrangement`.
     pub sample_drop_active: bool,
-    /// Musical length shown by the placement preview. RAW derives this at the
-    /// project tempo; WARP retains the source's confirmed musical length.
-    pub sample_drop_duration_beats: Option<f64>,
-    pub sample_drop_detail: Option<String>,
+    /// Why this lane turns the Browser drag away, which a release reports.
+    pub sample_drop_refusal: Option<String>,
     /// Clip edges and markers on every lane that drags and clicks lock onto.
     pub snap_targets: Arc<SnapTargets>,
     /// The Clip drag in flight on this lane's timeline, whichever lane it
     /// began on.
     pub clip_drag: Option<ClipDragPreview>,
-    /// The zone a Browser drag hovering this lane marks, where the lane will
-    /// not take the audio.
+    /// The zone a Browser drag hovering this lane marks.
     pub drop_zone: Option<crate::domains::drop_zone::DropZone>,
-    /// The track name this canvas was constructed with. Drawn on the drop
-    /// indicator so the user can verify which lane will receive the drop.
-    pub track_name: String,
+    /// The Clip a Browser drag would land on this lane.
+    pub drop_ghost: Option<super::LaneGhost>,
 }
 
 impl TrackClipCanvas {
@@ -152,8 +148,6 @@ impl TrackClipCanvas {
         selection_end_beats: f64,
         time_selection_track: Option<TrackId>,
         sample_drop_active: bool,
-        sample_drop_duration_beats: Option<f64>,
-        sample_drop_detail: Option<String>,
     ) -> Self {
         let timing = lane_timing::start();
         let geometry = TimelineGeometry::from_zoom(zoom_level, scroll_offset_beats);
@@ -275,12 +269,11 @@ impl TrackClipCanvas {
             selection_end_beats,
             time_selection_track,
             sample_drop_active,
-            sample_drop_duration_beats,
-            sample_drop_detail,
+            sample_drop_refusal: None,
             snap_targets: Arc::default(),
             clip_drag: None,
             drop_zone: None,
-            track_name: track.name.clone(),
+            drop_ghost: None,
         };
         lane_timing::finish(timing, lane_timing::Phase::Build);
         lane
@@ -304,8 +297,20 @@ impl TrackClipCanvas {
         self
     }
 
+    pub fn with_drop_refusal(mut self, refusal: Option<String>) -> Self {
+        self.sample_drop_refusal = refusal;
+        self
+    }
+
     pub fn with_drop_zone(mut self, zone: Option<crate::domains::drop_zone::DropZone>) -> Self {
         self.drop_zone = zone;
+        self
+    }
+
+    /// Shows the Clip a Browser drag would land here, in place of the
+    /// lane's drop zone.
+    pub fn with_drop_ghost(mut self, ghost: Option<super::LaneGhost>) -> Self {
+        self.drop_ghost = ghost;
         self
     }
 
@@ -782,14 +787,11 @@ impl canvas::Program<Message> for TrackClipCanvas {
                 // inside this lane on release, emit a drop message.
                 if self.sample_drop_active {
                     if let Some(pos) = cursor.position_in(bounds) {
-                        if self.is_instrument {
+                        if let Some(refusal) = &self.sample_drop_refusal {
                             state.drag = None;
                             return (
                                 canvas::event::Status::Captured,
-                                Some(Message::Browser(BrowserMsg::CancelDrag(
-                                    "Invalid target: audio cannot be imported to a MIDI/instrument lane"
-                                        .into(),
-                                ))),
+                                Some(Message::Browser(BrowserMsg::CancelDrag(refusal.clone()))),
                             );
                         }
                         // Snap the drop position to the nearest beat so it

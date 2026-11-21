@@ -41,6 +41,14 @@ tempfile = "3"
 # Runs the Tasks `App::update` returns, so tests exercise real background round trips.
 iced_runtime = { workspace = true }
 proptest = "1"
+# Writes the MIDI files the drop tests import.
+midly = { workspace = true }
+# Lays the real view out without a window, so tests can point at it. The
+# version iced's own renderer already pulls in.
+iced_tiny_skia = { workspace = true }
+# Reads the crate's own sources, so the glyph coverage test sees every UI string literal.
+syn = { version = "2", features = ["full", "visit"] }
+proc-macro2 = "1"
 
 [target.'cfg(not(any(target_os = "macos", windows)))'.dependencies]
 x11rb = "0.13"
@@ -50,7 +58,7 @@ windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Graphic
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSWindow", "NSView", "NSResponder", "NSApplication", "NSGraphics"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSWindow", "NSView", "NSResponder", "NSApplication", "NSGraphics", "NSEvent", "objc2-core-foundation"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSGeometry"] }
 
 [[test]]

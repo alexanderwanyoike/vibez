@@ -1,5 +1,6 @@
 //! Tap-aware Bounce dependency closure and routing topology projection.
 use super::*;
+use vibez_core::midi_from::MidiFrom;
 use vibez_core::routing::{ExternalInputDescriptor, RoutingChannel, RoutingEffect, SourceTap};
 
 pub(super) fn selected_track(mode: BounceMode) -> Option<TrackId> {
@@ -94,6 +95,10 @@ pub(super) fn actual_dependencies(
                     })
                     .collect()
             },
+            midi_from: channel
+                .midi_from
+                .map(MidiFrom::source)
+                .filter(|source| taps.contains_key(source)),
         })
         .collect();
     if !graph_channels.iter().any(|channel| channel.id.is_master()) {
@@ -102,6 +107,7 @@ pub(super) fn actual_dependencies(
             is_bus: true,
             sends: vec![],
             effects: vec![],
+            midi_from: None,
         });
     }
     RenderDependencies {
@@ -194,6 +200,11 @@ fn dependency_taps(
                             );
                         }
                     }
+                }
+            }
+            if let Some(source) = channel.midi_from.map(MidiFrom::source) {
+                if req.tracks.iter().any(|track| track.id == source) {
+                    require(&mut taps, source, SourceTap::BeforeEffects);
                 }
             }
             if req.buses.iter().any(|bus| bus.id == channel.id) {
